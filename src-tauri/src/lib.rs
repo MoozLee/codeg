@@ -54,15 +54,10 @@ mod tauri_app {
     /// libraries like reqwest/rustls that read `HTTP_PROXY` etc.
     #[cfg(target_os = "windows")]
     fn apply_webview2_rendering_override() {
-        // Use `--disable-gpu-compositing` rather than `--disable-gpu`:
-        // - `--disable-gpu` forces SwiftShader software rendering, which fails
-        //   to initialize on a non-trivial subset of Windows + GPU driver
-        //   combinations and leaves the webview entirely blank.
-        // - `--disable-gpu-compositing` only disables the GPU compositor (the
-        //   path that triggers the AMD/Intel black-screen bug) while keeping
-        //   GPU rasterization. This is the same flag Electron's
-        //   `app.disableHardwareAcceleration()` ultimately injects.
-        const DISABLE_GPU_ARGS: [&str; 1] = ["--disable-gpu-compositing"];
+        // Matches the dominant pattern across the Tauri 2 ecosystem (Dorion,
+        // Seelen-UI, and most production Tauri 2 apps that ship a "disable
+        // hardware acceleration" toggle all use `--disable-gpu`).
+        const DISABLE_GPU_ARGS: [&str; 1] = ["--disable-gpu"];
         const ENV_KEY: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
 
         let prefs = crate::preferences::load();

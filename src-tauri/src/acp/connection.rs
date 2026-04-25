@@ -2892,9 +2892,15 @@ fn emit_conversation_update(
             );
         }
         SessionUpdate::AvailableCommandsUpdate(update) => {
+            // Some agents (e.g. Claude Code with overlapping user/project slash
+            // commands) emit duplicate entries sharing the same name. Keep the
+            // first occurrence so downstream consumers don't render duplicates;
+            // the frontend reducer also dedupes as a defensive measure.
+            let mut seen = HashSet::new();
             let commands: Vec<AvailableCommandInfo> = update
                 .available_commands
                 .iter()
+                .filter(|cmd| seen.insert(cmd.name.clone()))
                 .map(|cmd| {
                     let input_hint = cmd.input.as_ref().map(|input| match input {
                         sacp::schema::AvailableCommandInput::Unstructured(u) => u.hint.clone(),
