@@ -13,6 +13,10 @@ dist-ssr
 *.local
 tsconfig.tsbuildinfo
 
+# Python cache
+__pycache__/
+*.py[cod]
+
 # Next.js
 .next/
 out/
@@ -36,3 +40,8 @@ public/vs
 .claude
 .docs
 docs/superpowers
+.agents
+.codex
+.trellis
+AGENTS.md
+AGENTS.md
