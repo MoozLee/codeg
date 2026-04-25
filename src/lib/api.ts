@@ -47,6 +47,7 @@ import type {
   GitLogResult,
   SystemLanguageSettings,
   SystemProxySettings,
+  SystemRenderingSettings,
   GitCredentials,
   GitDetectResult,
   PackageManagerInfo,
@@ -456,6 +457,16 @@ export async function updateSystemLanguageSettings(
   settings: SystemLanguageSettings
 ): Promise<SystemLanguageSettings> {
   return getTransport().call("update_system_language_settings", { settings })
+}
+
+export async function getSystemRenderingSettings(): Promise<SystemRenderingSettings> {
+  return getTransport().call("get_system_rendering_settings")
+}
+
+export async function updateSystemRenderingSettings(
+  settings: SystemRenderingSettings
+): Promise<SystemRenderingSettings> {
+  return getTransport().call("update_system_rendering_settings", { settings })
 }
 
 // --- Version Control ---

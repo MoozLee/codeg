@@ -37,6 +37,13 @@ pub struct SystemLanguageSettings {
     pub language: AppLocale,
 }
 
+#[cfg(feature = "tauri-runtime")]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SystemRenderingSettings {
+    pub disable_hardware_acceleration: bool,
+}
+
 // --- Version Control ---
 
 /// Explicit credentials for a single git remote operation.

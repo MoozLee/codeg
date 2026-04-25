@@ -634,6 +634,10 @@ export interface SystemLanguageSettings {
   language: AppLocale
 }
 
+export interface SystemRenderingSettings {
+  disable_hardware_acceleration: boolean
+}
+
 // --- Version Control ---
 
 export interface GitCredentials {

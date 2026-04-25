@@ -10,10 +10,20 @@ pub mod keyring_store;
 mod models;
 mod network;
 mod parsers;
+#[cfg(feature = "tauri-runtime")]
+pub mod preferences;
 pub mod process;
 mod terminal;
 pub mod web;
 pub mod workspace_state;
+
+/// Sweep stale ACP binary cache trash created by the rename-aside fallback in
+/// `acp::binary_cache::clear_agent_cache`. Safe to call any time; intended to
+/// be invoked once at startup from a detached OS thread. Does not block, does
+/// not panic, errors are silently dropped.
+pub fn sweep_acp_binary_trash() {
+    crate::acp::binary_cache::sweep_trash();
+}
 
 #[cfg(feature = "tauri-runtime")]
 mod tauri_app {
@@ -35,8 +45,53 @@ mod tauri_app {
 
     static APP_QUITTING: AtomicBool = AtomicBool::new(false);
 
+    /// On Windows, opt-out users can disable WebView2 hardware acceleration to
+    /// work around AMD/Intel GPU driver bugs that produce a black-screen
+    /// webview. The flag is stored in a tiny sidecar file at
+    /// `~/.codeg/preferences.json` so it can be read **before** the Tauri
+    /// builder, plugins, or tokio runtime start — once a tokio worker is alive,
+    /// `std::env::set_var` would race with concurrent `getenv` calls from
+    /// libraries like reqwest/rustls that read `HTTP_PROXY` etc.
+    #[cfg(target_os = "windows")]
+    fn apply_webview2_rendering_override() {
+        // Use `--disable-gpu-compositing` rather than `--disable-gpu`:
+        // - `--disable-gpu` forces SwiftShader software rendering, which fails
+        //   to initialize on a non-trivial subset of Windows + GPU driver
+        //   combinations and leaves the webview entirely blank.
+        // - `--disable-gpu-compositing` only disables the GPU compositor (the
+        //   path that triggers the AMD/Intel black-screen bug) while keeping
+        //   GPU rasterization. This is the same flag Electron's
+        //   `app.disableHardwareAcceleration()` ultimately injects.
+        const DISABLE_GPU_ARGS: [&str; 1] = ["--disable-gpu-compositing"];
+        const ENV_KEY: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+
+        let prefs = crate::preferences::load();
+        if !prefs.disable_hardware_acceleration {
+            return;
+        }
+
+        let mut tokens: Vec<String> = match std::env::var(ENV_KEY) {
+            Ok(prev) => prev
+                .split_whitespace()
+                .map(str::to_string)
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        for arg in DISABLE_GPU_ARGS {
+            if !tokens.iter().any(|t| t == arg) {
+                tokens.push(arg.to_string());
+            }
+        }
+        std::env::set_var(ENV_KEY, tokens.join(" "));
+    }
+
     #[cfg_attr(mobile, tauri::mobile_entry_point)]
     pub fn run() {
+        // Apply the WebView2 rendering override before *any* tokio worker
+        // exists or any plugin reads the env. See doc comment above.
+        #[cfg(target_os = "windows")]
+        apply_webview2_rendering_override();
+
         if let Err(err) = fix_path_env::fix() {
             eprintln!("[PATH] fix_path_env failed: {err}");
         }
@@ -84,6 +139,16 @@ mod tauri_app {
                 // Load saved appearance settings before any window is created.
                 tauri::async_runtime::block_on(windows::load_saved_zoom(&db.conn));
                 tauri::async_runtime::block_on(windows::load_saved_appearance_mode(&db.conn));
+
+                // Sweep stale ACP binary cache trash (rename-aside fallback
+                // artifacts). Detached OS thread: cannot block startup, panics
+                // are caught and dropped, errors are silenced, no subprocesses
+                // spawned. Anything still locked is left for next startup.
+                std::thread::spawn(|| {
+                    let _ = std::panic::catch_unwind(|| {
+                        crate::sweep_acp_binary_trash();
+                    });
+                });
 
                 // Install bundled expert skills into the central store
                 // (`~/.codeg/skills/`). Runs in the background and does
@@ -302,6 +367,8 @@ mod tauri_app {
                 system_settings::update_system_proxy_settings,
                 system_settings::get_system_language_settings,
                 system_settings::update_system_language_settings,
+                system_settings::get_system_rendering_settings,
+                system_settings::update_system_rendering_settings,
                 version_control::detect_git,
                 version_control::test_git_path,
                 version_control::get_git_settings,

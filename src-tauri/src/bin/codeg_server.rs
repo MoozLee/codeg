@@ -29,6 +29,15 @@ fn main() {
 }
 
 async fn async_main() {
+    // Sweep stale ACP binary cache trash (rename-aside fallback artifacts).
+    // Detached OS thread: cannot block startup, panics are caught and dropped,
+    // errors are silenced, no subprocesses spawned.
+    std::thread::spawn(|| {
+        let _ = std::panic::catch_unwind(|| {
+            codeg_lib::sweep_acp_binary_trash();
+        });
+    });
+
     let port: u16 = std::env::var("CODEG_PORT")
         .ok()
         .and_then(|v| v.parse().ok())

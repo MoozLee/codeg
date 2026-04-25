@@ -1,10 +1,17 @@
 use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::acp::error::AcpError;
 use crate::acp::registry;
 use crate::models::agent::AgentType;
+
+/// Process-local counter appended to rename-aside trash directory names. Guards
+/// against the rare case where two `clear_agent_cache` calls land in the same
+/// `SystemTime::now()` tick (Windows `GetSystemTimePreciseAsFileTime` has ~100ns
+/// resolution) and would otherwise collide on the rename target.
+static TRASH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn cache_dir() -> Result<PathBuf, AcpError> {
     let base = dirs::cache_dir()
@@ -44,12 +51,54 @@ pub(crate) fn binary_dir(agent_id: &str, version: &str) -> Result<PathBuf, AcpEr
 
 pub fn clear_agent_cache(agent_type: AgentType) -> Result<(), AcpError> {
     let agent_id = agent_cache_key(agent_type);
-    let dir = cache_dir()?.join(agent_id);
-    if dir.exists() {
-        std::fs::remove_dir_all(&dir)
-            .map_err(|e| AcpError::DownloadFailed(format!("failed to clear cache: {e}")))?;
+    let dir = cache_dir()?.join(&agent_id);
+    if !dir.exists() {
+        return Ok(());
     }
+
+    if std::fs::remove_dir_all(&dir).is_ok() {
+        return Ok(());
+    }
+
+    // Windows: a running `<cmd>.exe` (ours or anti-virus scanning it) keeps the
+    // file locked, so `remove_dir_all` returns ERROR_ACCESS_DENIED. NTFS allows
+    // renaming a directory whose children are locked because rename only
+    // updates the parent directory entry; the locked file's FILE_OBJECT keeps
+    // working under the new path. The aside is swept on next startup.
+    let trash_root = cache_dir()?.join(".trash");
+    let _ = std::fs::create_dir_all(&trash_root);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let counter = TRASH_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let aside = trash_root.join(format!("{agent_id}-{stamp}-{counter}"));
+    std::fs::rename(&dir, &aside)
+        .map_err(|e| AcpError::DownloadFailed(format!("failed to clear cache: {e}")))?;
+
+    let _ = std::fs::remove_dir_all(&aside);
     Ok(())
+}
+
+/// Best-effort cleanup of trash directories left behind by
+/// `clear_agent_cache`'s rename-aside fallback. Designed to be run from a
+/// detached OS thread at startup: every error path is silently swallowed,
+/// no logs, no panics escape, no subprocesses spawned. Whatever cannot be
+/// removed (e.g. a binary still locked by an external process) is left for
+/// the next startup.
+///
+/// Iterates children rather than nuking the parent so that a concurrent
+/// `clear_agent_cache` racing to rename a fresh entry into `.trash/` cannot
+/// have its target directory yanked out from under it.
+pub fn sweep_trash() {
+    let Ok(base) = cache_dir() else { return };
+    let trash = base.join(".trash");
+    let Ok(entries) = std::fs::read_dir(&trash) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let _ = std::fs::remove_dir_all(entry.path());
+    }
 }
 
 fn installed_binary_path(agent_id: &str, version: &str, cmd_name: &str) -> Option<PathBuf> {

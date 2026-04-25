@@ -8,6 +8,10 @@ use crate::db::service::app_metadata_service;
 use crate::db::AppDatabase;
 use crate::models::{SystemLanguageSettings, SystemProxySettings};
 #[cfg(feature = "tauri-runtime")]
+use crate::models::SystemRenderingSettings;
+#[cfg(feature = "tauri-runtime")]
+use crate::preferences;
+#[cfg(feature = "tauri-runtime")]
 use crate::network::proxy;
 
 const SYSTEM_PROXY_SETTINGS_KEY: &str = "system_proxy_settings";
@@ -145,5 +149,28 @@ pub async fn update_system_language_settings(
         settings.clone(),
     );
 
+    Ok(settings)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn get_system_rendering_settings() -> Result<SystemRenderingSettings, AppCommandError> {
+    let prefs = preferences::load();
+    Ok(SystemRenderingSettings {
+        disable_hardware_acceleration: prefs.disable_hardware_acceleration,
+    })
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_system_rendering_settings(
+    settings: SystemRenderingSettings,
+) -> Result<SystemRenderingSettings, AppCommandError> {
+    let mut prefs = preferences::load();
+    prefs.disable_hardware_acceleration = settings.disable_hardware_acceleration;
+    preferences::save(&prefs).map_err(|err| {
+        AppCommandError::io_error("Failed to persist rendering settings")
+            .with_detail(err.to_string())
+    })?;
     Ok(settings)
 }
