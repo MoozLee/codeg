@@ -38,17 +38,18 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check tag commit belongs to default branch
+      - name: Check tag commit belongs to release branch
         shell: bash
         run: |
-          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
-          git fetch origin "${DEFAULT_BRANCH}"
+          RELEASE_BRANCH="release"
+          RELEASE_REF="origin/${RELEASE_BRANCH}"
+          git fetch origin "+refs/heads/${RELEASE_BRANCH}:refs/remotes/${RELEASE_REF}"
 
           TAG_COMMIT=$(git rev-list -n 1 "${GITHUB_REF_NAME}")
-          if git merge-base --is-ancestor "${TAG_COMMIT}" "origin/${DEFAULT_BRANCH}"; then
-            echo "Tag ${GITHUB_REF_NAME} is based on ${DEFAULT_BRANCH}"
+          if git merge-base --is-ancestor "${TAG_COMMIT}" "${RELEASE_REF}"; then
+            echo "Tag ${GITHUB_REF_NAME} is contained in ${RELEASE_REF}"
           else
-            echo "Tag ${GITHUB_REF_NAME} is not based on ${DEFAULT_BRANCH}"
+            echo "Tag ${GITHUB_REF_NAME} is not contained in ${RELEASE_REF}"
             exit 1
           fi
 
