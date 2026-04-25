@@ -551,6 +551,26 @@ function sameCommands(
   return true
 }
 
+function dedupeCommandsByName(
+  commands: AvailableCommandInfo[]
+): AvailableCommandInfo[] {
+  const seen = new Set<string>()
+  let deduped: AvailableCommandInfo[] | null = null
+
+  for (let i = 0; i < commands.length; i += 1) {
+    const command = commands[i]
+    if (seen.has(command.name)) {
+      deduped ??= commands.slice(0, i)
+      continue
+    }
+
+    seen.add(command.name)
+    deduped?.push(command)
+  }
+
+  return deduped ?? commands
+}
+
 function applyStreamingAction(
   conn: ConnectionState,
   action: StreamingAction
@@ -1194,11 +1214,12 @@ function connectionsReducer(
     case "AVAILABLE_COMMANDS": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
-      if (sameCommands(conn.availableCommands, action.commands)) return state
+      const commands = dedupeCommandsByName(action.commands)
+      if (sameCommands(conn.availableCommands, commands)) return state
       const next = new Map(state)
       next.set(action.contextKey, {
         ...conn,
-        availableCommands: action.commands,
+        availableCommands: commands,
       })
       return next
     }
