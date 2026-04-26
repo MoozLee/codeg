@@ -73,7 +73,11 @@ mod tauri_app {
                 tokens.push(arg.to_string());
             }
         }
-        std::env::set_var(ENV_KEY, tokens.join(" "));
+        // SAFETY: called before any tokio worker or plugin thread spawns, so
+        // no concurrent `getenv` can race. `set_var` is `unsafe` since Rust 1.82.
+        unsafe {
+            std::env::set_var(ENV_KEY, tokens.join(" "));
+        }
     }
 
     #[cfg_attr(mobile, tauri::mobile_entry_point)]
