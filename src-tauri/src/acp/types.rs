@@ -39,23 +39,33 @@ pub struct PromptCapabilitiesInfo {
     pub embedded_context: bool,
 }
 
+/// 所有 ACP 事件统一通过此 envelope 发出。
+/// `seq` 用于前端去重锚点（Phase 0 占位 0，Phase 1 起严格递增）。
+/// `connection_id` 上提到顶层，配合 `#[serde(flatten)]` 让 JSON 保持平铺：
+/// `{ seq, connection_id, type, ...变体字段 }`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventEnvelope {
+    pub seq: u64,
+    pub connection_id: String,
+    #[serde(flatten)]
+    pub payload: AcpEvent,
+}
+
 /// Events pushed from Rust backend to frontend via Tauri event system.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AcpEvent {
     /// Agent returned text content (streaming delta)
-    ContentDelta { connection_id: String, text: String },
+    ContentDelta { text: String },
     /// Agent thinking/reasoning
-    Thinking { connection_id: String, text: String },
+    Thinking { text: String },
     /// Raw SDK message forwarded from Claude ACP extension notification
     ClaudeSdkMessage {
-        connection_id: String,
         session_id: String,
         message: serde_json::Value,
     },
     /// Agent initiated a tool call
     ToolCall {
-        connection_id: String,
         tool_call_id: String,
         title: String,
         kind: String,
@@ -70,7 +80,6 @@ pub enum AcpEvent {
     },
     /// Tool call status/content updated
     ToolCallUpdate {
-        connection_id: String,
         tool_call_id: String,
         title: Option<String>,
         status: Option<String>,
@@ -86,63 +95,48 @@ pub enum AcpEvent {
     },
     /// Agent requests permission
     PermissionRequest {
-        connection_id: String,
         request_id: String,
         tool_call: serde_json::Value,
         options: Vec<PermissionOptionInfo>,
     },
     /// Turn completed
     TurnComplete {
-        connection_id: String,
         session_id: String,
         stop_reason: String,
         agent_type: String,
     },
     /// Session established with agent-assigned session ID
-    SessionStarted {
-        connection_id: String,
-        session_id: String,
+    SessionStarted { session_id: String },
+    /// Backend has bound this connection to a conversation row. Emitted exactly
+    /// once per connection lifetime, on first prompt that creates the row.
+    /// Frontend uses this to associate the connection_id with conversation_id
+    /// without polling the DB.
+    ConversationLinked {
+        conversation_id: i32,
+        folder_id: i32,
     },
     /// Session modes are available for this connection
-    SessionModes {
-        connection_id: String,
-        modes: SessionModeStateInfo,
-    },
+    SessionModes { modes: SessionModeStateInfo },
     /// Session configuration options are available/updated for this connection
     SessionConfigOptions {
-        connection_id: String,
         config_options: Vec<SessionConfigOptionInfo>,
     },
     /// Initial selector payloads (modes/config options) have been emitted
-    SelectorsReady { connection_id: String },
+    SelectorsReady,
     /// Prompt capabilities for this connection
     PromptCapabilities {
-        connection_id: String,
         prompt_capabilities: PromptCapabilitiesInfo,
     },
     /// Whether the agent supports session/fork
-    ForkSupported {
-        connection_id: String,
-        supported: bool,
-    },
+    ForkSupported { supported: bool },
     /// Current session mode changed
-    ModeChanged {
-        connection_id: String,
-        mode_id: String,
-    },
+    ModeChanged { mode_id: String },
     /// Agent reported plan update for current turn
-    PlanUpdate {
-        connection_id: String,
-        entries: Vec<PlanEntryInfo>,
-    },
+    PlanUpdate { entries: Vec<PlanEntryInfo> },
     /// Connection status changed
-    StatusChanged {
-        connection_id: String,
-        status: ConnectionStatus,
-    },
+    StatusChanged { status: ConnectionStatus },
     /// Error occurred
     Error {
-        connection_id: String,
         message: String,
         agent_type: String,
         /// Stable machine-readable identifier (e.g. "initialize_timeout").
@@ -152,15 +146,10 @@ pub enum AcpEvent {
     },
     /// Available slash commands updated
     AvailableCommands {
-        connection_id: String,
         commands: Vec<AvailableCommandInfo>,
     },
     /// Session usage/context window updated during conversation
-    UsageUpdate {
-        connection_id: String,
-        used: u64,
-        size: u64,
-    },
+    UsageUpdate { used: u64, size: u64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -334,4 +323,29 @@ pub struct AvailableCommandInfo {
 pub struct ForkResultInfo {
     pub forked_session_id: String,
     pub original_session_id: String,
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
+
+    #[test]
+    fn event_envelope_serializes_with_flat_payload() {
+        let env = EventEnvelope {
+            seq: 5,
+            connection_id: "conn-1".to_string(),
+            payload: AcpEvent::ContentDelta {
+                text: "hello".to_string(),
+            },
+        };
+        let json = serde_json::to_value(&env).unwrap();
+        assert_eq!(json["seq"], 5);
+        assert_eq!(json["connection_id"], "conn-1");
+        assert_eq!(json["type"], "content_delta");
+        assert_eq!(json["text"], "hello");
+        assert!(
+            json.get("payload").is_none(),
+            "flatten means no nested 'payload' key in JSON"
+        );
+    }
 }

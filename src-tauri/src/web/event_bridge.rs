@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use serde::{ser::SerializeStruct, Serialize, Serializer};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
+
+use crate::acp::{AcpEvent, EventEnvelope, SessionState};
 
 /// Broadcast-delivered event.
 ///
@@ -103,4 +105,36 @@ pub fn emit_event(emitter: &EventEmitter, event: &str, payload: impl Serialize) 
         }
         EventEmitter::Noop => {}
     }
+}
+
+/// 统一 ACP 事件发射入口（Phase 1 起接入 SessionState）。
+///
+/// 流程：
+/// 1. 写锁拿到 `SessionState`
+/// 2. `apply_event` 把事件应用到 state（也更新 `last_activity_at`）
+/// 3. `event_seq += 1`
+/// 4. 用新 seq 构造 `EventEnvelope` 并 emit
+///
+/// 写状态与发事件在同一个 critical section 完成，保证后续 snapshot
+/// 端点拉到的状态严格对应已发出的事件 seq。
+pub async fn emit_with_state(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    payload: AcpEvent,
+) {
+    let (seq, connection_id) = {
+        let mut s = state.write().await;
+        s.apply_event(&payload);
+        s.event_seq += 1;
+        (s.event_seq, s.connection_id.clone())
+    };
+    emit_event(
+        emitter,
+        "acp://event",
+        EventEnvelope {
+            seq,
+            connection_id,
+            payload,
+        },
+    );
 }

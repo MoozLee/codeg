@@ -109,6 +109,13 @@ async fn async_main() {
         )
         .await;
 
+    // Spawn the LifecycleSubscriber for cross-connection DB writes.
+    tokio::spawn(codeg_lib::lifecycle_subscriber_task(
+        state.db.conn.clone(),
+        state.connection_manager.clone_ref(),
+        state.event_broadcaster.clone(),
+    ));
+
     // Build router
     let router = codeg_lib::web::router::build_router(state, token.clone(), static_dir);
 

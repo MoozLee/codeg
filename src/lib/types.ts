@@ -394,17 +394,15 @@ export interface SessionUsageUpdateInfo {
 
 // ACP events pushed from Rust backend (discriminated by "type" field)
 export type AcpEvent =
-  | { type: "content_delta"; connection_id: string; text: string }
-  | { type: "thinking"; connection_id: string; text: string }
+  | { type: "content_delta"; text: string }
+  | { type: "thinking"; text: string }
   | {
       type: "claude_sdk_message"
-      connection_id: string
       session_id: string
       message: unknown
     }
   | {
       type: "tool_call"
-      connection_id: string
       tool_call_id: string
       title: string
       kind: string
@@ -417,7 +415,6 @@ export type AcpEvent =
     }
   | {
       type: "tool_call_update"
-      connection_id: string
       tool_call_id: string
       title: string | null
       status: string | null
@@ -430,64 +427,57 @@ export type AcpEvent =
     }
   | {
       type: "permission_request"
-      connection_id: string
       request_id: string
       tool_call: unknown
       options: PermissionOptionInfo[]
     }
   | {
       type: "turn_complete"
-      connection_id: string
       session_id: string
       stop_reason: string
     }
   | {
       type: "session_started"
-      connection_id: string
       session_id: string
     }
   | {
+      type: "conversation_linked"
+      conversation_id: number
+      folder_id: number
+    }
+  | {
       type: "session_modes"
-      connection_id: string
       modes: SessionModeStateInfo
     }
   | {
       type: "session_config_options"
-      connection_id: string
       config_options: SessionConfigOptionInfo[]
     }
   | {
       type: "selectors_ready"
-      connection_id: string
     }
   | {
       type: "prompt_capabilities"
-      connection_id: string
       prompt_capabilities: PromptCapabilitiesInfo
     }
   | {
       type: "fork_supported"
-      connection_id: string
       supported: boolean
     }
   | {
       type: "mode_changed"
-      connection_id: string
       mode_id: string
     }
   | {
       type: "plan_update"
-      connection_id: string
       entries: PlanEntryInfo[]
     }
   | {
       type: "status_changed"
-      connection_id: string
       status: ConnectionStatus
     }
   | {
       type: "error"
-      connection_id: string
       message: string
       agent_type: string
       /** Stable backend error identifier for localization (e.g. "initialize_timeout"). */
@@ -495,15 +485,101 @@ export type AcpEvent =
     }
   | {
       type: "available_commands"
-      connection_id: string
       commands: AvailableCommandInfo[]
     }
   | {
       type: "usage_update"
-      connection_id: string
       used: number
       size: number
     }
+
+/**
+ * Wire envelope for all ACP events. JSON shape is flat via Rust's serde
+ * flatten: { seq, connection_id, type, ...variant fields }. Expressed in TS
+ * as an intersection that distributes over the AcpEvent discriminated union,
+ * so `envelope.type` narrows the variant fields just like on AcpEvent.
+ *
+ * `seq` is a monotonically-increasing per-connection sequence number. Phase 0
+ * always emits 0 (placeholder); Phase 1 wires it to the real counter, after
+ * which clients use it as a dedup anchor between snapshot fetches and the
+ * live event stream (drop events with seq <= last_event_seq from snapshot).
+ *
+ * 所有 ACP 事件统一通过此 envelope 发出，详见 spec phase 0/1。
+ */
+export type EventEnvelope = {
+  seq: number
+  connection_id: string
+} & AcpEvent
+
+// --- LiveSessionSnapshot wire types (mirror src-tauri/src/acp/session_state.rs) ---
+
+export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed"
+
+export type ToolKind =
+  | "read"
+  | "edit"
+  | "delete"
+  | "move"
+  | "search"
+  | "execute"
+  | "think"
+  | "fetch"
+  | "other"
+
+export type ToolCallOutput =
+  | { kind: "text"; content: string }
+  | { kind: "error"; message: string }
+  | { kind: "json"; value: unknown }
+
+export interface ToolCallState {
+  id: string
+  kind: ToolKind
+  label: string
+  status: ToolCallStatus
+  input: unknown | null
+  output: ToolCallOutput | null
+  content: string | null
+}
+
+export type LiveContentBlock =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "tool_call_ref"; tool_call_id: string }
+  | { kind: "plan"; entries: unknown }
+
+export interface LiveMessage {
+  id: string
+  role: MessageRole
+  content: LiveContentBlock[]
+  started_at: string
+}
+
+export interface PendingPermissionState {
+  request_id: string
+  tool_call_id: string
+  tool_description: string
+  options: PermissionOptionInfo[]
+  created_at: string
+}
+
+export interface LiveSessionSnapshot {
+  connection_id: string
+  conversation_id: number | null
+  folder_id: number | null
+  status: ConnectionStatus
+  external_id: string | null
+  live_message: LiveMessage | null
+  active_tool_calls: ToolCallState[]
+  pending_permission: PendingPermissionState | null
+  modes: SessionModeStateInfo | null
+  current_mode: string | null
+  config_options: SessionConfigOptionInfo[] | null
+  prompt_capabilities: PromptCapabilitiesInfo | null
+  usage: SessionUsageUpdateInfo | null
+  fork_supported: boolean
+  available_commands: AvailableCommandInfo[]
+  event_seq: number
+}
 
 // Connection info returned by acp_list_connections
 export interface ConnectionInfo {

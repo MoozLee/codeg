@@ -8,7 +8,6 @@ use tauri::State;
 
 use crate::acp::binary_cache;
 use crate::acp::error::AcpError;
-#[cfg(feature = "tauri-runtime")]
 use crate::acp::manager::ConnectionManager;
 use crate::acp::opencode_plugins::{self, PluginCheckSummary};
 use crate::acp::preflight::{self, PreflightResult};
@@ -2061,9 +2060,14 @@ pub async fn acp_connect(
 pub async fn acp_prompt(
     connection_id: String,
     blocks: Vec<PromptInputBlock>,
+    folder_id: Option<i32>,
+    conversation_id: Option<i32>,
+    db: State<'_, crate::db::AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
-    manager.send_prompt(&connection_id, blocks).await
+    manager
+        .send_prompt_linked(&db, &connection_id, blocks, folder_id, conversation_id)
+        .await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -2135,6 +2139,48 @@ pub async fn acp_list_connections(
     manager: State<'_, ConnectionManager>,
 ) -> Result<Vec<ConnectionInfo>, AcpError> {
     Ok(manager.list_connections().await)
+}
+
+pub(crate) async fn acp_get_session_snapshot_core(
+    manager: &ConnectionManager,
+    connection_id: &str,
+) -> Result<Option<crate::acp::LiveSessionSnapshot>, AcpError> {
+    let Some(state) = manager.get_state(connection_id).await else {
+        return Ok(None);
+    };
+    let snap = state.read().await.to_snapshot();
+    Ok(Some(snap))
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_get_session_snapshot(
+    connection_id: String,
+    manager: State<'_, ConnectionManager>,
+) -> Result<Option<crate::acp::LiveSessionSnapshot>, AcpError> {
+    acp_get_session_snapshot_core(&manager, &connection_id).await
+}
+
+pub(crate) async fn acp_get_session_snapshot_by_conversation_core(
+    manager: &ConnectionManager,
+    conversation_id: i32,
+) -> Result<Option<crate::acp::LiveSessionSnapshot>, AcpError> {
+    let Some(conn_id) = manager
+        .find_connection_by_conversation_id(conversation_id)
+        .await
+    else {
+        return Ok(None);
+    };
+    acp_get_session_snapshot_core(manager, &conn_id).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_get_session_snapshot_by_conversation(
+    conversation_id: i32,
+    manager: State<'_, ConnectionManager>,
+) -> Result<Option<crate::acp::LiveSessionSnapshot>, AcpError> {
+    acp_get_session_snapshot_by_conversation_core(&manager, conversation_id).await
 }
 
 pub(crate) async fn acp_get_agent_status_core(
