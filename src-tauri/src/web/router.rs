@@ -426,6 +426,14 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
             post(handlers::acp::acp_list_connections),
         )
         .route(
+            "/acp_get_session_snapshot",
+            post(handlers::acp::acp_get_session_snapshot),
+        )
+        .route(
+            "/acp_get_session_snapshot_by_conversation",
+            post(handlers::acp::acp_get_session_snapshot_by_conversation),
+        )
+        .route(
             "/acp_clear_binary_cache",
             post(handlers::acp::acp_clear_binary_cache),
         )

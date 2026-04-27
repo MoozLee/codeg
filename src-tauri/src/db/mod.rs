@@ -3,6 +3,9 @@ pub mod error;
 pub mod migration;
 pub mod service;
 
+#[cfg(test)]
+pub mod test_helpers;
+
 use std::path::Path;
 use std::time::Duration;
 

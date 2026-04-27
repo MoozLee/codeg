@@ -137,15 +137,23 @@ pub async fn acp_disconnect(
 pub struct AcpPromptParams {
     pub connection_id: String,
     pub blocks: Vec<crate::acp::types::PromptInputBlock>,
+    pub folder_id: Option<i32>,
+    pub conversation_id: Option<i32>,
 }
 
 pub async fn acp_prompt(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpPromptParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    let manager = &state.connection_manager;
-    manager
-        .send_prompt(&params.connection_id, params.blocks)
+    state
+        .connection_manager
+        .send_prompt_linked(
+            &state.db,
+            &params.connection_id,
+            params.blocks,
+            params.folder_id,
+            params.conversation_id,
+        )
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
@@ -364,6 +372,44 @@ pub async fn acp_list_connections(
     let manager = &state.connection_manager;
     let result = manager.list_connections().await;
     Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpGetSessionSnapshotParams {
+    pub connection_id: String,
+}
+
+pub async fn acp_get_session_snapshot(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpGetSessionSnapshotParams>,
+) -> Result<Json<Option<crate::acp::LiveSessionSnapshot>>, AppCommandError> {
+    let snap = acp_commands::acp_get_session_snapshot_core(
+        &state.connection_manager,
+        &params.connection_id,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(snap))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpGetSessionSnapshotByConversationParams {
+    pub conversation_id: i32,
+}
+
+pub async fn acp_get_session_snapshot_by_conversation(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpGetSessionSnapshotByConversationParams>,
+) -> Result<Json<Option<crate::acp::LiveSessionSnapshot>>, AppCommandError> {
+    let snap = acp_commands::acp_get_session_snapshot_by_conversation_core(
+        &state.connection_manager,
+        params.conversation_id,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(snap))
 }
 
 // --- Pattern B+: Core function handlers ---

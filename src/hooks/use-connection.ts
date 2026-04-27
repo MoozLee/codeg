@@ -49,7 +49,10 @@ export interface UseConnectionReturn {
     sessionId?: string
   ) => Promise<void>
   disconnect: () => Promise<void>
-  sendPrompt: (blocks: PromptInputBlock[]) => Promise<void>
+  sendPrompt: (
+    blocks: PromptInputBlock[],
+    opts?: { folderId?: number | null; conversationId?: number | null }
+  ) => Promise<void>
   setMode: (modeId: string) => Promise<void>
   setConfigOption: (configId: string, valueId: string) => Promise<void>
   cancel: () => Promise<void>
@@ -108,7 +111,10 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   )
 
   const sendPrompt = useCallback(
-    (blocks: PromptInputBlock[]) => actions.sendPrompt(contextKey, blocks),
+    (
+      blocks: PromptInputBlock[],
+      opts?: { folderId?: number | null; conversationId?: number | null }
+    ) => actions.sendPrompt(contextKey, blocks, opts),
     [actions, contextKey]
   )
 

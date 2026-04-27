@@ -22,7 +22,11 @@ export interface UseConnectionLifecycleReturn {
   selectorsLoading: boolean
   autoConnectError: string | null
   handleFocus: () => void
-  handleSend: (draft: PromptDraft, modeId?: string | null) => void
+  handleSend: (
+    draft: PromptDraft,
+    modeId?: string | null,
+    opts?: { folderId?: number | null; conversationId?: number | null }
+  ) => void
   handleSetConfigOption: (configId: string, valueId: string) => void
   handleCancel: () => void
   handleRespondPermission: (requestId: string, optionId: string) => void
@@ -299,7 +303,11 @@ export function useConnectionLifecycle({
   // sendPrompt, connCancel, connRespondPermission are stable (depend
   // only on actions + contextKey), so these callbacks are effectively stable.
   const handleSend = useCallback(
-    (draft: PromptDraft, modeId?: string | null) => {
+    (
+      draft: PromptDraft,
+      modeId?: string | null,
+      opts?: { folderId?: number | null; conversationId?: number | null }
+    ) => {
       touchActivity(contextKey)
       void (async () => {
         const currentModeId = modeIdRef.current
@@ -309,7 +317,7 @@ export function useConnectionLifecycle({
           // calls before CurrentModeUpdate arrives from the agent.
           modeIdRef.current = modeId
         }
-        await sendPrompt(draft.blocks)
+        await sendPrompt(draft.blocks, opts)
       })().catch((e: unknown) =>
         console.error("[ConnLifecycle] sendPrompt:", e)
       )
