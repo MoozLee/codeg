@@ -22,8 +22,9 @@ pub use message::{
 };
 pub use quick_message::QuickMessageInfo;
 #[cfg(feature = "tauri-runtime")]
-pub use system::{SystemOpenTarget, SystemRenderingSettings};
+pub use system::{SystemFontSettings, SystemOpenTarget, SystemRenderingSettings};
 pub use system::{
     GitCredentials, GitDetectResult, GitHubAccountsSettings, GitHubTokenValidation, GitSettings,
-    SystemLanguageSettings, SystemOpenTargetSettings, SystemProxySettings,
+    SystemFontFamily, SystemFontFamilyList, SystemFontFamilySource, SystemLanguageSettings,
+    SystemOpenTargetSettings, SystemProxySettings,
 };
