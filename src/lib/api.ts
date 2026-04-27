@@ -45,6 +45,8 @@ import type {
   FileSaveResult,
   WorkspaceSnapshotResponse,
   GitLogResult,
+  SystemFontFamilyList,
+  SystemFontSettings,
   SystemLanguageSettings,
   SystemOpenTarget,
   SystemOpenTargetSettings,
@@ -439,6 +441,20 @@ export async function expertsReadContent(expertId: string): Promise<string> {
 
 export async function expertsOpenCentralDir(): Promise<string> {
   return getTransport().call("experts_open_central_dir")
+}
+
+export async function listSystemFontFamilies(): Promise<SystemFontFamilyList> {
+  return getTransport().call("list_system_font_families")
+}
+
+export async function getSystemFontSettings(): Promise<SystemFontSettings> {
+  return getTransport().call("get_system_font_settings")
+}
+
+export async function updateSystemFontSettings(
+  settings: SystemFontSettings
+): Promise<SystemFontSettings> {
+  return getTransport().call("update_system_font_settings", { settings })
 }
 
 export async function getSystemProxySettings(): Promise<SystemProxySettings> {
