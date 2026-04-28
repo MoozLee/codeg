@@ -181,6 +181,12 @@ export async function acpDisconnect(connectionId: string): Promise<void> {
   return getTransport().call("acp_disconnect", { connectionId })
 }
 
+export async function acpTouchConnection(
+  connectionId: string
+): Promise<boolean> {
+  return getTransport().call("acp_touch_connection", { connectionId })
+}
+
 export async function acpListConnections(): Promise<ConnectionInfo[]> {
   return getTransport().call("acp_list_connections")
 }
@@ -1601,6 +1607,21 @@ export interface WebServiceConfig {
 
 export async function getWebServiceConfig(): Promise<WebServiceConfig> {
   return getTransport().call("get_web_service_config")
+}
+
+export type WebServicePortState = "free" | "occupied" | "unknown"
+
+export interface WebServicePortProbe {
+  port: number
+  state: WebServicePortState
+}
+
+export async function probeWebServicePort(
+  port?: number
+): Promise<WebServicePortProbe> {
+  return getTransport().call("probe_web_service_port", {
+    port: port ?? null,
+  })
 }
 
 // ─── Chat Channels ───

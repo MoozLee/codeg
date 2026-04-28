@@ -22,6 +22,7 @@ import {
   acpCancel,
   acpRespondPermission,
   acpDisconnect,
+  acpTouchConnection,
   acpGetSessionSnapshot,
 } from "@/lib/api"
 import { denormalizeSnapshot } from "@/lib/snapshot-denormalize"
@@ -43,6 +44,7 @@ import type {
 import { AGENT_LABELS } from "@/lib/types"
 import {
   CONNECTION_IDLE_TIMEOUT_MS,
+  CONNECTION_KEEPALIVE_INTERVAL_MS,
   IDLE_SWEEP_INTERVAL_MS,
 } from "@/lib/constants"
 import { sendSystemNotification } from "@/lib/notification"
@@ -155,6 +157,7 @@ type Action =
     }
   | { type: "CONNECTION_REMOVED"; contextKey: string }
   | { type: "REMOVE_ALL" }
+  | { type: "REKEY_CONNECTION"; fromKey: string; toKey: string }
   | {
       type: "STATUS_CHANGED"
       contextKey: string
@@ -592,12 +595,33 @@ function dedupeCommandsByName(
   return deduped ?? commands
 }
 
+/**
+ * Lazy-create a `LiveMessage` shell mirroring the backend's
+ * `ensure_live_message` semantic. Required because the backend only
+ * initializes `session_state.live_message` when the first `ContentDelta` /
+ * `Thinking` / `ToolCall` / `PlanUpdate` arrives — there's a window between
+ * `StatusChanged(Prompting)` and the first content event in which the
+ * snapshot reports `live_message: null`. After a browser refresh inside
+ * that window, the live `STATUS_CHANGED(prompting)` event won't re-fire
+ * (status is already prompting in the snapshot), so without this fallback
+ * the reducer would drop every subsequent delta / tool call / plan update.
+ */
+function ensureLiveMessage(prev: LiveMessage | null): LiveMessage {
+  if (prev) return prev
+  return {
+    id: randomUUID(),
+    role: "assistant",
+    content: [],
+    startedAt: Date.now(),
+  }
+}
+
 function applyStreamingAction(
   conn: ConnectionState,
   action: StreamingAction
 ): ConnectionState | null {
-  const prev = conn.liveMessage
-  if (!prev || action.text.length === 0) return null
+  if (action.text.length === 0) return null
+  const prev = ensureLiveMessage(conn.liveMessage)
 
   const lastBlock = prev.content[prev.content.length - 1]
   let newContent: LiveContentBlock[] | null = null
@@ -688,6 +712,16 @@ function connectionsReducer(
         pendingPermission: action.patch.pendingPermission,
         promptCapabilities:
           action.patch.promptCapabilities ?? current.promptCapabilities,
+        // Latches once on true. The `selectors_ready` event fires only once
+        // per connection lifetime; a fresh frontend (post-refresh) needs the
+        // snapshot to recover the bit, otherwise the init-session task is
+        // stuck forever.
+        selectorsReady: action.patch.selectorsReady || current.selectorsReady,
+        // Same monotonic-merge as `selectorsReady`. The agent emits
+        // `fork_supported` once during the initial handshake; a post-refresh
+        // frontend that missed the live event needs the snapshot to recover
+        // the capability — without this the Fork button stays hidden forever.
+        supportsFork: action.patch.supportsFork || current.supportsFork,
         lastAppliedSeq: action.patch.eventSeq,
       })
       return next
@@ -714,6 +748,17 @@ function connectionsReducer(
 
     case "REMOVE_ALL":
       return new Map()
+
+    case "REKEY_CONNECTION": {
+      const conn = state.get(action.fromKey)
+      if (!conn) return state
+      // Defensive: if toKey already has an entry, do not clobber it.
+      if (state.has(action.toKey)) return state
+      const next = new Map(state)
+      next.delete(action.fromKey)
+      next.set(action.toKey, { ...conn, contextKey: action.toKey })
+      return next
+    }
 
     case "STATUS_CHANGED": {
       const conn = state.get(action.contextKey)
@@ -789,8 +834,8 @@ function connectionsReducer(
 
     case "TOOL_CALL": {
       const conn = state.get(action.contextKey)
-      if (!conn?.liveMessage) return state
-      const prev = conn.liveMessage
+      if (!conn) return state
+      const prev = ensureLiveMessage(conn.liveMessage)
       const existingIndex = prev.content.findIndex(
         (b) =>
           b.type === "tool_call" && b.info.tool_call_id === action.tool_call_id
@@ -857,8 +902,8 @@ function connectionsReducer(
 
     case "TOOL_CALL_UPDATE": {
       const conn = state.get(action.contextKey)
-      if (!conn?.liveMessage) return state
-      const prev = conn.liveMessage
+      if (!conn) return state
+      const prev = ensureLiveMessage(conn.liveMessage)
       const existingIndex = prev.content.findIndex(
         (b) =>
           b.type === "tool_call" && b.info.tool_call_id === action.tool_call_id
@@ -1204,8 +1249,8 @@ function connectionsReducer(
 
     case "PLAN_UPDATE": {
       const conn = state.get(action.contextKey)
-      if (!conn?.liveMessage) return state
-      const prev = conn.liveMessage
+      if (!conn) return state
+      const prev = ensureLiveMessage(conn.liveMessage)
       const nonPlanContent = prev.content.filter(
         (block) => block.type !== "plan"
       )
@@ -1614,6 +1659,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         for (const key of keys) {
           notifyKeyListeners(key)
         }
+      } else if (action.type === "REKEY_CONNECTION") {
+        notifyKeyListeners(action.fromKey)
+        notifyKeyListeners(action.toKey)
       } else {
         const key = getAffectedKey(action)
         if (key) notifyKeyListeners(key)
@@ -2261,7 +2309,50 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     resolveListenerReadyWaiters,
   ])
 
+  // ── Backend keepalive timer ──
+  // Frontend is the only side that knows which conversation tabs the
+  // user has open. Without this, the backend's idle sweep
+  // (CODEG_ACP_IDLE_TIMEOUT_SECS, default 60s) would reap connections
+  // backing visible tabs whenever the user was just reading without
+  // sending — forcing them to re-spawn the agent on next message.
+  // Touching only bumps last_activity_at; it does not emit any event.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const currentActiveKey = storeRef.current.activeKey
+      const currentOpenTabKeys = openTabKeysRef.current
+      const seen = new Set<string>()
+      const toTouch: string[] = []
+      const consider = (contextKey: string) => {
+        if (seen.has(contextKey)) return
+        seen.add(contextKey)
+        const conn = storeRef.current.connections.get(contextKey)
+        if (!conn) return
+        // Prompting is already sweep-protected on the backend; touching
+        // is harmless but redundant. Connecting hasn't reached the
+        // sweep-eligible state yet. Only Connected matters.
+        if (conn.status !== "connected") return
+        toTouch.push(conn.connectionId)
+      }
+      if (currentActiveKey) consider(currentActiveKey)
+      for (const contextKey of currentOpenTabKeys) consider(contextKey)
+      for (const connectionId of toTouch) {
+        acpTouchConnection(connectionId).catch(() => {})
+      }
+    }, CONNECTION_KEEPALIVE_INTERVAL_MS)
+
+    return () => clearInterval(timer)
+  }, [])
+
   // ── Idle sweep timer ──
+  // Complements the backend keepalive: this sweep targets connections
+  // that are NOT in `openTabKeys ∪ {activeKey}` — i.e. connections the
+  // frontend opened but is no longer surfacing to the user (panel
+  // dismissed, navigated away). The backend's own idle sweep would
+  // reap them on its 60s cadence regardless; doing it here too keeps
+  // the React store free of stale entries and triggers an explicit
+  // disconnect rather than waiting for the backend's own timeout.
+  // Connections backing currently-open tabs are never reaped here —
+  // those are kept alive by the keepalive loop above.
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now()
@@ -2384,6 +2475,49 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        // Orphan rescue: when no entry exists at this contextKey but an
+        // alive connection with the same sessionId exists at another
+        // contextKey, rekey instead of creating a fresh backend connection.
+        // This handles tab close+reopen for newly-created conversations:
+        // the original tab's contextKey (e.g. "new-XXXX") differs from
+        // the canonical sidebar-reopen contextKey (e.g. "conv-{folderId}-
+        // {agent}-{convId}"), and the orphaned connection holds the
+        // in-flight live state (live_message, pending_permission, etc.)
+        // that we want to preserve across the remount.
+        if (!existing && sessionId) {
+          let orphanKey: string | null = null
+          let orphanConn: ConnectionState | null = null
+          for (const [key, conn] of storeRef.current.connections) {
+            if (key === contextKey) continue
+            if (
+              conn.sessionId === sessionId &&
+              conn.agentType === agentType &&
+              conn.workingDir === nextWorkingDir &&
+              conn.status !== "disconnected" &&
+              conn.status !== "error"
+            ) {
+              orphanKey = key
+              orphanConn = conn
+              break
+            }
+          }
+          if (orphanKey && orphanConn) {
+            reverseMapRef.current.set(orphanConn.connectionId, contextKey)
+            const lastActivity = lastActivityRef.current.get(orphanKey)
+            lastActivityRef.current.delete(orphanKey)
+            lastActivityRef.current.set(contextKey, lastActivity ?? Date.now())
+            if (storeRef.current.activeKey === orphanKey) {
+              setActiveKey(contextKey)
+            }
+            dispatch({
+              type: "REKEY_CONNECTION",
+              fromKey: orphanKey,
+              toKey: contextKey,
+            })
+            return
+          }
+        }
+
         await waitForListenerReady()
         const connectionId = await acpConnect(agentType, workingDir, sessionId)
 
@@ -2502,6 +2636,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       dispatch,
       handleMappedEvent,
       resolveConnectBlockState,
+      setActiveKey,
       t,
       waitForListenerReady,
     ]

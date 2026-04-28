@@ -23,7 +23,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { cn } from "@/lib/utils"
+import { cn, copyTextToClipboard } from "@/lib/utils"
 
 export type CommitProps = ComponentProps<typeof Collapsible>
 
@@ -216,24 +216,15 @@ export const CommitCopyButton = ({
   const timeoutRef = useRef<number>(0)
 
   const copyToClipboard = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
+    if (isCopied) return
+    const ok = await copyTextToClipboard(hash)
+    if (!ok) {
       onError?.(new Error("Clipboard API not available"))
       return
     }
-
-    try {
-      if (!isCopied) {
-        await navigator.clipboard.writeText(hash)
-        setIsCopied(true)
-        onCopy?.()
-        timeoutRef.current = window.setTimeout(
-          () => setIsCopied(false),
-          timeout
-        )
-      }
-    } catch (error) {
-      onError?.(error as Error)
-    }
+    setIsCopied(true)
+    onCopy?.()
+    timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout)
   }, [hash, onCopy, onError, timeout, isCopied])
 
   useEffect(

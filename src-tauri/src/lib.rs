@@ -1,5 +1,5 @@
 mod acp;
-pub use acp::lifecycle_subscriber_task;
+pub use acp::{idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS};
 mod app_error;
 pub mod app_state;
 pub mod chat_channel;
@@ -199,6 +199,20 @@ mod tauri_app {
                         db_conn,
                         cm,
                         broadcaster,
+                    ));
+                }
+
+                // Spawn the idle sweep so connections abandoned without an
+                // explicit disconnect (e.g. window/tab closed without
+                // teardown, panic survivors) are reaped. Override the
+                // 60-second default via `CODEG_ACP_IDLE_TIMEOUT_SECS`
+                // (set to `0` to disable).
+                if let Some(idle_timeout) = crate::acp::idle_timeout_from_env() {
+                    let cm = app.state::<ConnectionManager>().clone_ref();
+                    tauri::async_runtime::spawn(crate::acp::idle_sweep_task(
+                        cm,
+                        idle_timeout,
+                        std::time::Duration::from_secs(crate::acp::SWEEP_INTERVAL_SECS),
                     ));
                 }
 
@@ -410,6 +424,7 @@ mod tauri_app {
                 acp_commands::acp_fork,
                 acp_commands::acp_respond_permission,
                 acp_commands::acp_disconnect,
+                acp_commands::acp_touch_connection,
                 acp_commands::acp_list_connections,
                 acp_commands::acp_get_session_snapshot,
                 acp_commands::acp_get_session_snapshot_by_conversation,
@@ -493,6 +508,7 @@ mod tauri_app {
                 web::stop_web_server,
                 web::get_web_server_status,
                 web::get_web_service_config,
+                web::probe_web_service_port,
             ])
             .build(tauri::generate_context!())
             .expect("error while building tauri application")

@@ -14,7 +14,7 @@ import {
   useState,
 } from "react"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { cn, copyTextToClipboard } from "@/lib/utils"
 import { Shimmer } from "./shimmer"
 
 interface TerminalContextType {
@@ -203,19 +203,14 @@ export function TerminalCopyButton({
   const { output } = useContext(TerminalContext)
 
   const copyToClipboard = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
+    const ok = await copyTextToClipboard(output)
+    if (!ok) {
       onError?.(new Error("Clipboard API not available"))
       return
     }
-
-    try {
-      await navigator.clipboard.writeText(output)
-      setIsCopied(true)
-      onCopy?.()
-      timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout)
-    } catch (error) {
-      onError?.(error as Error)
-    }
+    setIsCopied(true)
+    onCopy?.()
+    timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout)
   }, [output, onCopy, onError, timeout])
 
   useEffect(

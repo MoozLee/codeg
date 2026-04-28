@@ -446,6 +446,11 @@ export type AcpEvent =
       folder_id: number
     }
   | {
+      type: "conversation_status_changed"
+      conversation_id: number
+      status: ConversationStatus
+    }
+  | {
       type: "session_modes"
       modes: SessionModeStateInfo
     }
@@ -539,6 +544,10 @@ export interface ToolCallState {
   input: unknown | null
   output: ToolCallOutput | null
   content: string | null
+  /** File locations affected by this tool call. Opaque pass-through. */
+  locations: unknown | null
+  /** ACP extensibility metadata. Opaque pass-through. */
+  meta: Record<string, unknown> | null
 }
 
 export type LiveContentBlock =
@@ -557,7 +566,14 @@ export interface LiveMessage {
 export interface PendingPermissionState {
   request_id: string
   tool_call_id: string
-  tool_description: string
+  /**
+   * Raw ACP tool_call JSON forwarded from the agent (rawInput / content /
+   * locations / patch / plan all preserved). Frontend's
+   * `parsePermissionToolCall` consumes this directly to render the approval
+   * dialog after a refresh; flattening to a description loses everything
+   * except the title.
+   */
+  tool_call: unknown
   options: PermissionOptionInfo[]
   created_at: string
 }
@@ -578,6 +594,7 @@ export interface LiveSessionSnapshot {
   usage: SessionUsageUpdateInfo | null
   fork_supported: boolean
   available_commands: AvailableCommandInfo[]
+  selectors_ready: boolean
   event_seq: number
 }
 

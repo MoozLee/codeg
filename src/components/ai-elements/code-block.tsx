@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { cn } from "@/lib/utils"
+import { cn, copyTextToClipboard } from "@/lib/utils"
 import { CheckIcon, CopyIcon } from "lucide-react"
 import {
   createContext,
@@ -470,24 +470,15 @@ export const CodeBlockCopyButton = ({
   const { code } = useContext(CodeBlockContext)
 
   const copyToClipboard = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
+    if (isCopied) return
+    const ok = await copyTextToClipboard(code)
+    if (!ok) {
       onError?.(new Error("Clipboard API not available"))
       return
     }
-
-    try {
-      if (!isCopied) {
-        await navigator.clipboard.writeText(code)
-        setIsCopied(true)
-        onCopy?.()
-        timeoutRef.current = window.setTimeout(
-          () => setIsCopied(false),
-          timeout
-        )
-      }
-    } catch (error) {
-      onError?.(error as Error)
-    }
+    setIsCopied(true)
+    onCopy?.()
+    timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout)
   }, [code, onCopy, onError, timeout, isCopied])
 
   useEffect(

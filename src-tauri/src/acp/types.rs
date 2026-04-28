@@ -115,6 +115,16 @@ pub enum AcpEvent {
         conversation_id: i32,
         folder_id: i32,
     },
+    /// Backend has transitioned the conversation row's `status` column.
+    /// Emitted by `send_prompt_linked` (`InProgress`) and the lifecycle
+    /// subscriber on `TurnComplete` (`PendingReview`). The frontend mirrors
+    /// the new status onto its sidebar/list state without re-querying the DB.
+    /// `completed` / `cancelled` transitions remain frontend-driven and are
+    /// NOT emitted via this event.
+    ConversationStatusChanged {
+        conversation_id: i32,
+        status: crate::db::entities::conversation::ConversationStatus,
+    },
     /// Session modes are available for this connection
     SessionModes { modes: SessionModeStateInfo },
     /// Session configuration options are available/updated for this connection
@@ -347,5 +357,41 @@ mod envelope_tests {
             json.get("payload").is_none(),
             "flatten means no nested 'payload' key in JSON"
         );
+    }
+
+    #[test]
+    fn conversation_status_changed_round_trips_with_flat_payload() {
+        use crate::db::entities::conversation::ConversationStatus;
+        let env = EventEnvelope {
+            seq: 12,
+            connection_id: "conn-x".to_string(),
+            payload: AcpEvent::ConversationStatusChanged {
+                conversation_id: 99,
+                status: ConversationStatus::PendingReview,
+            },
+        };
+        let json = serde_json::to_value(&env).unwrap();
+        assert_eq!(json["seq"], 12);
+        assert_eq!(json["connection_id"], "conn-x");
+        assert_eq!(json["type"], "conversation_status_changed");
+        assert_eq!(json["conversation_id"], 99);
+        assert_eq!(json["status"], "pending_review");
+        assert!(
+            json.get("payload").is_none(),
+            "flatten means no nested 'payload' key in JSON"
+        );
+
+        // Round-trip back to verify Deserialize matches Serialize.
+        let back: EventEnvelope = serde_json::from_value(json).unwrap();
+        match back.payload {
+            AcpEvent::ConversationStatusChanged {
+                conversation_id,
+                status,
+            } => {
+                assert_eq!(conversation_id, 99);
+                assert_eq!(status, ConversationStatus::PendingReview);
+            }
+            other => panic!("expected ConversationStatusChanged, got {other:?}"),
+        }
     }
 }

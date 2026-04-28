@@ -1973,6 +1973,9 @@
     "tokenHint": "Enter this token when accessing the Web client for the first time",
     "tokenPlaceholder": "Leave empty to auto-generate",
     "regenerate": "Regenerate",
+    "stalePortOccupiedTitle": "Port {port} is held by another process",
+    "stalePortUnknownTitle": "Port {port} status is unclear",
+    "stalePortHint": "Codeg can't bind here until the port is released. Change the port above, or close the process holding it.",
     "errors": {
       "alreadyRunning": "Web service is already running",
       "invalidAddress": "Invalid host or port format",

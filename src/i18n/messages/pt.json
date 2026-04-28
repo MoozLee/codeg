@@ -1973,6 +1973,9 @@
     "tokenHint": "Insira este token ao acessar o cliente Web pela primeira vez",
     "tokenPlaceholder": "Deixe em branco para gerar automaticamente",
     "regenerate": "Regenerar",
+    "stalePortOccupiedTitle": "A porta {port} está em uso por outro processo",
+    "stalePortUnknownTitle": "Estado da porta {port} é incerto",
+    "stalePortHint": "O Codeg não consegue vincular até a porta ser liberada. Altere a porta acima ou feche o processo que a retém.",
     "errors": {
       "alreadyRunning": "O serviço Web já está em execução",
       "invalidAddress": "Formato de host ou porta inválido",

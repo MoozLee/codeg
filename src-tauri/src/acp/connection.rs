@@ -142,6 +142,13 @@ pub struct AgentConnection {
     /// 出口侧的事件发射器；管理器层（如 `send_prompt_linked`）需要直接发射
     /// `ConversationLinked` 等带 SessionState 写入的事件。
     pub emitter: EventEmitter,
+    /// Serializes prompt sends per connection. Held across the
+    /// link-check + DB write + emit + cmd_tx.send sequence so two
+    /// concurrent prompts (multiple browser tabs of the same conversation,
+    /// chat-channel + UI overlap) can't interleave and produce duplicate
+    /// conversation rows or a confused agent that received two prompts
+    /// in the same turn.
+    pub prompt_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AgentConnection {
@@ -366,17 +373,25 @@ pub async fn spawn_agent_connection(
     owner_window_label: String,
     emitter: EventEmitter,
     connections: Arc<tokio::sync::Mutex<HashMap<String, AgentConnection>>>,
-) -> Result<(), AcpError> {
+) -> Result<tokio::sync::oneshot::Receiver<()>, AcpError> {
     // Create the authoritative session state up front. Subsequent emit_with_state
     // calls write through this state and increment its seq counter so the first
     // event the frontend sees has seq=1, not the placeholder 0 from Phase 0.
-    let session_state = Arc::new(RwLock::new(SessionState::new(
+    let mut initial_state = SessionState::new(
         connection_id.clone(),
         agent_type,
         working_dir.clone().map(PathBuf::from),
         owner_window_label.clone(),
         None, // folder_id 由后续 prompt handler 在首次 send 时绑定 (Phase 2)
-    )));
+    );
+
+    // Install the SessionStarted dedup signal BEFORE wrapping into Arc so the
+    // first event (StatusChanged{Connecting} below) doesn't race with the
+    // installer. The receiver is returned to `spawn_agent`, which holds the
+    // per-session dedup lock until this rx fires (or times out / aborts).
+    let session_started_rx = initial_state.install_session_started_signal();
+
+    let session_state = Arc::new(RwLock::new(initial_state));
 
     emit_with_state(
         &session_state,
@@ -409,6 +424,7 @@ pub async fn spawn_agent_connection(
             cmd_tx,
             state: Arc::clone(&session_state),
             emitter: emitter.clone(),
+            prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
         },
     );
 
@@ -444,6 +460,18 @@ pub async fn spawn_agent_connection(
                 },
             )
             .await;
+            // Drive the state machine through `Error` before `Disconnected`
+            // so the frontend's error-handling effect (cancelled-on-error)
+            // engages — without this hop the connection would jump straight
+            // to Disconnected and look like a clean shutdown.
+            emit_with_state(
+                &state_clone,
+                &emitter_clone,
+                AcpEvent::StatusChanged {
+                    status: ConnectionStatus::Error,
+                },
+            )
+            .await;
         }
 
         emit_with_state(
@@ -458,7 +486,7 @@ pub async fn spawn_agent_connection(
         // the manager map. Same drop semantics apply on panic unwinding.
     });
 
-    Ok(())
+    Ok(session_started_rx)
 }
 
 /// Shared state for pending permission responders.

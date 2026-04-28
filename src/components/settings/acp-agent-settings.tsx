@@ -64,7 +64,7 @@ import {
   ComboboxLabel,
   ComboboxList,
 } from "@/components/ui/combobox"
-import { cn, randomUUID } from "@/lib/utils"
+import { cn, copyTextToClipboard, randomUUID } from "@/lib/utils"
 import {
   acpClearBinaryCache,
   acpDetectAgentLocalVersion,
@@ -5534,11 +5534,13 @@ export function AcpAgentSettings() {
                                 size="sm"
                                 variant="ghost"
                                 className="h-7 w-7 p-0"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(
+                                onClick={async () => {
+                                  const ok = await copyTextToClipboard(
                                     codexDeviceCode.userCode
                                   )
-                                  toast.success(t("codex.loginCodeCopied"))
+                                  if (ok) {
+                                    toast.success(t("codex.loginCodeCopied"))
+                                  }
                                 }}
                               >
                                 <Copy className="h-3 w-3" />

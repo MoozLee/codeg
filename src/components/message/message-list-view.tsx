@@ -38,6 +38,7 @@ import {
   extractLatestPlanEntriesFromMessages,
 } from "@/lib/agent-plan"
 import type { AgentType, ConnectionStatus, SessionStats } from "@/lib/types"
+import { copyTextToClipboard } from "@/lib/utils"
 import { VirtualizedMessageThread } from "@/components/message/virtualized-message-thread"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 
@@ -134,13 +135,10 @@ const UserMessageCopyButton = memo(function UserMessageCopyButton({
     if (isCopied) return
     const text = extractTextFromParts(parts)
     if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
-      setIsCopied(true)
-      timeoutRef.current = window.setTimeout(() => setIsCopied(false), 2000)
-    } catch {
-      // ignore
-    }
+    const ok = await copyTextToClipboard(text)
+    if (!ok) return
+    setIsCopied(true)
+    timeoutRef.current = window.setTimeout(() => setIsCopied(false), 2000)
   }, [parts, isCopied])
 
   useEffect(

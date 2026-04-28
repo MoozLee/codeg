@@ -22,10 +22,12 @@ import {
   getFolder as apiGetFolder,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
+import { useAcpEvent } from "@/contexts/acp-connections-context"
 import type {
   AgentStats,
   AgentType,
   DbConversationSummary,
+  EventEnvelope,
   FolderDetail,
 } from "@/lib/types"
 
@@ -39,7 +41,7 @@ interface AppWorkspaceContextValue {
   conversations: DbConversationSummary[]
   conversationsLoading: boolean
   conversationsError: string | null
-  refreshConversations: () => void
+  refreshConversations: () => Promise<void>
   updateConversationLocal: (
     id: number,
     patch: Partial<Pick<DbConversationSummary, "status" | "title">>
@@ -154,7 +156,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     }
   }, [])
 
-  const refreshConversations = useCallback(async () => {
+  const refreshConversations = useCallback(async (): Promise<void> => {
     setConversationsLoading(true)
     try {
       const list = await listAllConversations()
@@ -423,4 +425,23 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       {children}
     </AppWorkspaceContext.Provider>
   )
+}
+
+/**
+ * Bridges backend `conversation_status_changed` events into the workspace's
+ * local conversations list. The DB row is already updated by the backend
+ * before this event fires, so this only patches the in-memory summary.
+ *
+ * Must be rendered inside both `AppWorkspaceProvider` (for
+ * `useAppWorkspace`) and `AcpConnectionsProvider` (for `useAcpEvent`).
+ */
+export function ConversationStatusEventBridge() {
+  const { updateConversationLocal } = useAppWorkspace()
+  useAcpEvent((envelope: EventEnvelope) => {
+    if (envelope.type !== "conversation_status_changed") return
+    updateConversationLocal(envelope.conversation_id, {
+      status: envelope.status,
+    })
+  })
+  return null
 }

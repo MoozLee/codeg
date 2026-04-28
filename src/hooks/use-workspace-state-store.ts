@@ -187,6 +187,7 @@ class WorkspaceStateStore {
   }
 
   acquire = () => {
+    const wasShutdownPending = this.shutdownTimer !== null
     this.cancelPendingShutdown()
     this.cancelEviction()
     this.refCount += 1
@@ -199,6 +200,23 @@ class WorkspaceStateStore {
       }
       const lifecycleId = this.lifecycleId
       void this.ensureStarted(lifecycleId)
+
+      // Re-acquired within the shutdown grace window: ensureStarted is a
+      // no-op because `started` is still true, but events fired while
+      // refCount was 0 may have been silently dropped (broadcaster has no
+      // receivers during a brief SSE reconnect, or the event landed during
+      // the grace and got coalesced). Pull a delta-replay snapshot so we
+      // don't keep showing pre-event state — typical symptom is git status
+      // / file tree not updating after the user switched away while an
+      // agent commit was in flight.
+      //
+      // Gated on `started` so we don't race a resync against a still-in-
+      // flight initial start: in that window the backend stream may not
+      // be registered yet and getWorkspaceSnapshot would return not_found,
+      // bouncing us into a needless degraded state.
+      if (wasShutdownPending && this.started) {
+        void this.requestResync("reacquired_within_grace")
+      }
     }
   }
 
@@ -311,7 +329,18 @@ class WorkspaceStateStore {
           await stopWorkspaceStateStream(this.rootPath).catch(() => {})
           return
         }
-        this.patchState((prev) => applySnapshot(prev, initialSnapshot))
+        // Reset our seq baseline before applying. The backend stream is
+        // brand new (or re-created after stop), so its WorkspaceStateCore
+        // starts at seq=0. If the user previously visited this folder, the
+        // store still holds the prior lifecycle's `state.seq` (e.g. 10),
+        // and applySnapshot's `snapshot.seq < state.seq` guard would drop
+        // the cold-scan payload entirely — leaving git/file tree frozen on
+        // pre-restart cached data even though the disk view is fresh.
+        // Symptom: after switching away while the agent commits and
+        // switching back, changes still render as uncommitted forever.
+        this.patchState((prev) =>
+          applySnapshot({ ...prev, seq: 0 }, initialSnapshot)
+        )
         this.hasBaselineSnapshot = true
 
         const unlisten = await subscribe<WorkspaceStateEvent>(

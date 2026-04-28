@@ -1,6 +1,6 @@
 [package]
 name = "codeg"
-version = "0.10.4-2"
+version = "0.11.0"
 description = "Agent Code Generation App"
 authors = ["feitao"]
 edition = "2021"
@@ -99,8 +99,11 @@ tauri-plugin-notification = { version = "2", optional = true }
 mac-notification-sys = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
 junction = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [patch.crates-io]
 sacp-tokio = { path = "vendor/sacp-tokio" }

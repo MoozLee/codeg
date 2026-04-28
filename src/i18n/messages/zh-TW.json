@@ -1973,6 +1973,9 @@
     "tokenHint": "Web 用戶端首次存取時需輸入此 Token",
     "tokenPlaceholder": "留空則自動產生",
     "regenerate": "重新產生",
+    "stalePortOccupiedTitle": "連接埠 {port} 已被其他行程佔用",
+    "stalePortUnknownTitle": "連接埠 {port} 狀態不明",
+    "stalePortHint": "在連接埠釋放前 Codeg 無法繫結。可以更換上方的連接埠，或結束佔用該連接埠的行程。",
     "errors": {
       "alreadyRunning": "Web 服務已在執行",
       "invalidAddress": "主機或連接埠格式無效",

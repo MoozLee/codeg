@@ -27,7 +27,7 @@ import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { useTaskContext } from "@/contexts/task-context"
-import { cn, randomUUID } from "@/lib/utils"
+import { cn, copyTextToClipboard, randomUUID } from "@/lib/utils"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
 import { MessageListView } from "@/components/message/message-list-view"
@@ -230,10 +230,6 @@ const ConversationTabView = memo(function ConversationTabView({
   const statusUpdatedRef = useRef(false)
   const selectedAgentRef = useRef(selectedAgent)
   const createConversationPendingRef = useRef(false)
-  // When the turn finishes (cancel / complete) before createConversation
-  // resolves, we can't update the DB status yet.  This ref records the
-  // desired status so the createConversation callback can apply it.
-  const deferredStatusRef = useRef<string | null>(null)
   // For existing conversations (opened from sidebar), the external_id is
   // already persisted — don't let a session/new fallback overwrite it.
   const externalIdSavedRef = useRef(conversationId != null)
@@ -373,43 +369,14 @@ const ConversationTabView = memo(function ConversationTabView({
     syncCancelRef.current?.()
     syncCancelRef.current = null
 
-    const targetStatus =
-      connStatus === "disconnected" || connStatus === "error"
-        ? null
-        : "pending_review"
-
     const persistedId = dbConvIdRef.current
-    if (!persistedId) {
-      // Conversation hasn't been persisted yet (createConversation still
-      // in flight).  Record the desired status so the create callback
-      // can apply it once the DB row exists.
-      if (targetStatus) {
-        deferredStatusRef.current = targetStatus
-      }
-      return
-    }
-
-    // Async patch metadata (usage, duration_ms, model, session_stats)
-    if (persistedId > 0) {
+    if (persistedId && persistedId > 0) {
       syncCancelRef.current = syncTurnMetadata(
         persistedId,
         effectiveConversationId
       )
     }
-
-    if (targetStatus) {
-      updateConversationLocal(persistedId, { status: targetStatus })
-      updateConversationStatus(persistedId, targetStatus).catch((e: unknown) =>
-        console.error("[ConversationTabView] update status:", e)
-      )
-    }
-  }, [
-    completeTurn,
-    connStatus,
-    effectiveConversationId,
-    syncTurnMetadata,
-    updateConversationLocal,
-  ])
+  }, [completeTurn, connStatus, effectiveConversationId, syncTurnMetadata])
 
   // Auto-send queued messages when agent finishes responding.
   // Refs are synced via useEffect; the auto-send effect is declared
@@ -444,7 +411,17 @@ const ConversationTabView = memo(function ConversationTabView({
     // Clearing is handled by COMPLETE_TURN (sets liveMessage = null) and
     // by this effect's cleanup (when not prompting).
     if (conn.liveMessage != null) {
-      setLiveMessage(effectiveConversationId, conn.liveMessage)
+      // isLive=true when actively prompting tells the runtime reducer to
+      // bypass its stale-reconnect-replay guard. This matters for the
+      // rekey path (close+reopen mid-turn): the runtime session for the
+      // persisted conversation id is fresh and may have user turns in
+      // detail.turns post-load, which would otherwise drop the live
+      // assistant stream on the floor.
+      setLiveMessage(
+        effectiveConversationId,
+        conn.liveMessage,
+        connStatus === "prompting"
+      )
     }
     return () => {
       // Don't clear liveMessage if agent is still responding — the session
@@ -454,7 +431,7 @@ const ConversationTabView = memo(function ConversationTabView({
         setLiveMessage(effectiveConversationId, null)
       }
     }
-  }, [conn.liveMessage, effectiveConversationId, setLiveMessage])
+  }, [conn.liveMessage, connStatus, effectiveConversationId, setLiveMessage])
 
   useEffect(() => {
     if (effectiveConversationId <= 0) return
@@ -600,11 +577,6 @@ const ConversationTabView = memo(function ConversationTabView({
           folderId,
           conversationId: persistedId,
         })
-        updateConversationLocal(persistedId, { status: "in_progress" })
-        updateConversationStatus(persistedId, "in_progress").catch(
-          (e: unknown) =>
-            console.error("[ConversationTabView] update status:", e)
-        )
         statusUpdatedRef.current = false
         return
       }
@@ -650,19 +622,7 @@ const ConversationTabView = memo(function ConversationTabView({
           )
           clearMessageInputDraft(buildNewConversationDraftStorageKey())
           statusUpdatedRef.current = false
-          // If the turn already finished while we were creating the
-          // conversation, apply the deferred status directly instead
-          // of setting "in_progress" (which would never be updated).
-          const initialStatus = deferredStatusRef.current ?? "in_progress"
-          deferredStatusRef.current = null
           refreshConversations()
-          updateConversationLocal(newConversationId, {
-            status: initialStatus,
-          })
-          updateConversationStatus(newConversationId, initialStatus).catch(
-            (e: unknown) =>
-              console.error("[ConversationTabView] update status:", e)
-          )
 
           // Now that the row exists, kick off the actual prompt with the
           // conversation_id pinned so the backend adopts our row instead of
@@ -698,7 +658,6 @@ const ConversationTabView = memo(function ConversationTabView({
       tWelcome,
       tabId,
       trySaveExternalId,
-      updateConversationLocal,
     ]
   )
 
@@ -1064,8 +1023,7 @@ export function ConversationDetailPanel() {
     removeConversation: runtimeRemoveConversation,
   } = useConversationRuntime()
   const { activeFolder: folder } = useActiveFolder()
-  const { conversations, updateConversationLocal, getFolder } =
-    useAppWorkspace()
+  const { conversations, getFolder } = useAppWorkspace()
   const {
     tabs,
     activeTabId,
@@ -1161,23 +1119,6 @@ export function ConversationDetailPanel() {
         if (session?.pendingCleanup) {
           runtimeRemoveConversation(matchedConversationId)
         }
-
-        // Update conversation status — use the DB summary (found by
-        // external_id above) since matchedConversationId may be a virtual
-        // (negative) ID that won't match any DB record.
-        const dbId =
-          summary?.id ??
-          (matchedConversationId > 0 ? matchedConversationId : null)
-        if (dbId && (!summary || summary.status === "in_progress")) {
-          updateConversationLocal(dbId, { status: "pending_review" })
-          updateConversationStatus(dbId, "pending_review").catch(
-            (error: unknown) =>
-              console.error(
-                "[ConversationDetailPanel] background update status:",
-                error
-              )
-          )
-        }
       },
       [
         conversations,
@@ -1186,7 +1127,6 @@ export function ConversationDetailPanel() {
         getSession,
         runtimeCompleteTurn,
         runtimeRemoveConversation,
-        updateConversationLocal,
       ]
     )
   )
@@ -1262,14 +1202,10 @@ export function ConversationDetailPanel() {
 
   const handleCopySelectedText = useCallback(async () => {
     if (!contextMenuSelectedText) return
-    if (!navigator.clipboard?.writeText) {
-      toast.error(t("copyTextFailed"))
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(contextMenuSelectedText)
+    const ok = await copyTextToClipboard(contextMenuSelectedText)
+    if (ok) {
       toast.success(t("copyTextSuccess"))
-    } catch {
+    } else {
       toast.error(t("copyTextFailed"))
     }
   }, [contextMenuSelectedText, t])

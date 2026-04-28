@@ -1973,6 +1973,9 @@
     "tokenHint": "Webクライアントの初回アクセス時にこのトークンを入力してください",
     "tokenPlaceholder": "空欄の場合は自動生成",
     "regenerate": "再生成",
+    "stalePortOccupiedTitle": "ポート {port} は他のプロセスに使用されています",
+    "stalePortUnknownTitle": "ポート {port} の状態を確認できません",
+    "stalePortHint": "ポートが解放されるまで Codeg はバインドできません。上のポートを変更するか、占有しているプロセスを終了してください。",
     "errors": {
       "alreadyRunning": "Web サービスはすでに起動しています",
       "invalidAddress": "ホストまたはポートの形式が無効です",

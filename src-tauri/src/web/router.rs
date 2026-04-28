@@ -11,10 +11,16 @@ use axum::{
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
+use super::shutdown::ShutdownSignal;
 use super::{auth, handlers, ws};
 use crate::app_state::AppState;
 
-pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::PathBuf) -> Router {
+pub fn build_router(
+    state: Arc<AppState>,
+    token: String,
+    static_dir: std::path::PathBuf,
+    shutdown_signal: Arc<ShutdownSignal>,
+) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -408,6 +414,10 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .route("/acp_list_agents", post(handlers::acp::acp_list_agents))
         .route("/acp_connect", post(handlers::acp::acp_connect))
         .route("/acp_disconnect", post(handlers::acp::acp_disconnect))
+        .route(
+            "/acp_touch_connection",
+            post(handlers::acp::acp_touch_connection),
+        )
         .route("/acp_prompt", post(handlers::acp::acp_prompt))
         .route("/acp_preflight", post(handlers::acp::acp_preflight))
         .route("/acp_set_mode", post(handlers::acp::acp_set_mode))
@@ -552,6 +562,10 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .route(
             "/stop_web_server",
             post(handlers::web_server::stop_web_server),
+        )
+        .route(
+            "/probe_web_service_port",
+            post(handlers::web_server::probe_web_service_port),
         )
         .route(
             "/check_app_update",
@@ -743,6 +757,7 @@ pub fn build_router(state: Arc<AppState>, token: String, static_dir: std::path::
         .layer(html_rewrite)
         .layer(cors)
         .layer(Extension(state))
+        .layer(Extension(shutdown_signal))
 }
 
 async fn health_check() -> impl IntoResponse {

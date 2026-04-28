@@ -1,7 +1,15 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Check, Copy, ExternalLink, Eye, EyeOff, RefreshCw } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  RefreshCw,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -9,11 +17,14 @@ import {
   stopWebServer,
   getWebServerStatus,
   getWebServiceConfig,
+  probeWebServicePort,
   type WebServerInfo,
+  type WebServicePortProbe,
 } from "@/lib/api"
 
 const DEFAULT_PORT = 3080
 import { openUrl } from "@/lib/platform"
+import { copyTextToClipboard } from "@/lib/utils"
 
 function AddressCard({ label, value }: { label: string; value: string }) {
   const t = useTranslations("WebServiceSettings")
@@ -65,9 +76,10 @@ function TokenEditor({
   const [copied, setCopied] = useState(false)
   const [revealed, setRevealed] = useState(false)
 
-  function handleCopy() {
+  async function handleCopy() {
     if (!value) return
-    navigator.clipboard.writeText(value)
+    const ok = await copyTextToClipboard(value)
+    if (!ok) return
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -135,6 +147,16 @@ export function WebServiceSettings() {
   const [token, setToken] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [portProbe, setPortProbe] = useState<WebServicePortProbe | null>(null)
+
+  const probePort = useCallback(async (portNum: number) => {
+    try {
+      const result = await probeWebServicePort(portNum)
+      setPortProbe(result)
+    } catch {
+      setPortProbe(null)
+    }
+  }, [])
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -146,16 +168,21 @@ export function WebServiceSettings() {
       if (info) {
         setPort(String(info.port))
         setToken(info.token)
+        setPortProbe(null)
       } else {
-        setPort(String(savedConfig.port ?? DEFAULT_PORT))
+        const resolvedPort = savedConfig.port ?? DEFAULT_PORT
+        setPort(String(resolvedPort))
         if (savedConfig.token) {
           setToken(savedConfig.token)
         }
+        // Detect leftover/foreign listener on the configured port so the
+        // user understands why a fresh start may fail with port-in-use.
+        probePort(resolvedPort)
       }
     } catch {
       // Server status unavailable
     }
-  }, [])
+  }, [probePort])
 
   useEffect(() => {
     fetchStatus()
@@ -182,6 +209,7 @@ export function WebServiceSettings() {
       setStatus(info)
       setToken(info.token)
       setPort(String(info.port))
+      setPortProbe(null)
     } catch (e: unknown) {
       const rawMsg =
         e && typeof e === "object" && "message" in e
@@ -197,6 +225,12 @@ export function WebServiceSettings() {
       } else {
         setError(rawMsg || t("startFailed"))
       }
+      // Refresh probe after a port_in_use failure so the banner reflects
+      // current reality (e.g. confirms port really is held by another
+      // process, not just a stale flag).
+      if (rawMsg === "web_server.port_in_use") {
+        probePort(parseInt(port, 10) || DEFAULT_PORT)
+      }
     } finally {
       setLoading(false)
     }
@@ -207,6 +241,9 @@ export function WebServiceSettings() {
     try {
       await stopWebServer()
       setStatus(null)
+      // After stop, re-probe so the user can see whether the port was
+      // released cleanly or is being held by an orphan child process.
+      probePort(parseInt(port, 10) || DEFAULT_PORT)
     } catch {
       setError(t("stopFailed"))
     } finally {
@@ -215,6 +252,10 @@ export function WebServiceSettings() {
   }
 
   const isRunning = status !== null
+  const showStaleBanner =
+    !isRunning &&
+    portProbe !== null &&
+    (portProbe.state === "occupied" || portProbe.state === "unknown")
 
   return (
     <ScrollArea className="h-full">
@@ -227,13 +268,34 @@ export function WebServiceSettings() {
         </div>
 
         <div className="space-y-4">
+          {showStaleBanner && (
+            <div className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="space-y-1 text-sm">
+                <div className="font-medium text-amber-700 dark:text-amber-300">
+                  {portProbe?.state === "occupied"
+                    ? t("stalePortOccupiedTitle", { port: portProbe.port })
+                    : t("stalePortUnknownTitle", {
+                        port: portProbe?.port ?? 0,
+                      })}
+                </div>
+                <div className="text-muted-foreground">
+                  {t("stalePortHint")}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Port config */}
           <div className="flex items-center gap-4">
             <label className="w-20 text-sm font-medium">{t("port")}</label>
             <input
               type="number"
               value={port}
-              onChange={(e) => setPort(e.target.value)}
+              onChange={(e) => {
+                setPort(e.target.value)
+                setPortProbe(null)
+              }}
               disabled={isRunning}
               min={1024}
               max={65535}

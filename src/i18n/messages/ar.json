@@ -1973,6 +1973,9 @@
     "tokenHint": "أدخل هذا الرمز عند الوصول إلى عميل الويب لأول مرة",
     "tokenPlaceholder": "اتركه فارغاً للتوليد التلقائي",
     "regenerate": "إعادة التوليد",
+    "stalePortOccupiedTitle": "المنفذ {port} مستخدم من قبل عملية أخرى",
+    "stalePortUnknownTitle": "حالة المنفذ {port} غير واضحة",
+    "stalePortHint": "لا يستطيع Codeg الربط قبل تحرير المنفذ. غيّر المنفذ أعلاه، أو أغلق العملية التي تحتفظ به.",
     "errors": {
       "alreadyRunning": "خدمة الويب قيد التشغيل بالفعل",
       "invalidAddress": "تنسيق المضيف أو المنفذ غير صالح",

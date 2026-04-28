@@ -1973,6 +1973,9 @@
     "tokenHint": "Geben Sie dieses Token beim ersten Zugriff auf den Web-Client ein",
     "tokenPlaceholder": "Leer lassen für automatische Generierung",
     "regenerate": "Neu generieren",
+    "stalePortOccupiedTitle": "Port {port} wird von einem anderen Prozess belegt",
+    "stalePortUnknownTitle": "Status von Port {port} unklar",
+    "stalePortHint": "Codeg kann sich nicht binden, bis der Port freigegeben ist. Ändere den Port oben oder beende den Prozess, der ihn hält.",
     "errors": {
       "alreadyRunning": "Der Web-Dienst läuft bereits",
       "invalidAddress": "Host- oder Portformat ungültig",

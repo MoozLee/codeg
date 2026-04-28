@@ -102,6 +102,18 @@ type Action =
       type: "SET_LIVE_MESSAGE"
       conversationId: number
       liveMessage: LiveMessage | null
+      /**
+       * When true, bypass the stale-reconnect-replay guard. The caller has
+       * verified that the source connection is currently producing this
+       * liveMessage (e.g. status === "prompting"), so the content is fresh
+       * rather than a post-completion replay. Required for the rekey path
+       * (close+reopen mid-turn): the runtime session for the persisted
+       * conversation id is brand-new, has no liveMessage, and may already
+       * see the user turn in `detail.turns` once cold-load resolves —
+       * which would otherwise trigger the guard and drop the live
+       * assistant content.
+       */
+      isLive?: boolean
     }
   | {
       type: "SET_EXTERNAL_ID"
@@ -624,6 +636,7 @@ function reducer(
       const hasExistingTurns =
         (session.detail?.turns.length ?? 0) > 0 || session.localTurns.length > 0
       if (
+        !action.isLive &&
         action.liveMessage !== null &&
         session.liveMessage === null &&
         session.syncState !== "awaiting_persist" &&
@@ -792,7 +805,8 @@ interface ConversationRuntimeContextValue {
   ) => void
   setLiveMessage: (
     conversationId: number,
-    liveMessage: LiveMessage | null
+    liveMessage: LiveMessage | null,
+    isLive?: boolean
   ) => void
   setExternalId: (conversationId: number, externalId: string | null) => void
   setSyncState: (
@@ -1041,8 +1055,17 @@ export function ConversationRuntimeProvider({
   )
 
   const setLiveMessage = useCallback(
-    (conversationId: number, liveMessage: LiveMessage | null) => {
-      dispatch({ type: "SET_LIVE_MESSAGE", conversationId, liveMessage })
+    (
+      conversationId: number,
+      liveMessage: LiveMessage | null,
+      isLive?: boolean
+    ) => {
+      dispatch({
+        type: "SET_LIVE_MESSAGE",
+        conversationId,
+        liveMessage,
+        isLive,
+      })
     },
     []
   )

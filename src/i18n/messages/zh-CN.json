@@ -1973,6 +1973,9 @@
     "tokenHint": "Web 客户端首次访问时需输入此 Token",
     "tokenPlaceholder": "留空则自动生成",
     "regenerate": "重新生成",
+    "stalePortOccupiedTitle": "端口 {port} 已被其他进程占用",
+    "stalePortUnknownTitle": "端口 {port} 状态未知",
+    "stalePortHint": "在端口释放前 Codeg 无法绑定。可以更换上方的端口，或结束占用该端口的进程。",
     "errors": {
       "alreadyRunning": "Web 服务已在运行",
       "invalidAddress": "主机或端口格式无效",

@@ -267,13 +267,13 @@ const FolderHeader = memo(function FolderHeader({
               title={t("newConversation")}
               aria-label={t("newConversation")}
               className={cn(
-                "mr-[0.25rem] flex h-[1.25rem] w-[1.25rem] shrink-0 items-center justify-center",
-                "rounded-[0.25rem] cursor-pointer outline-none text-muted-foreground/80",
-                "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
-                "transition-opacity duration-150 hover:text-sidebar-foreground"
+                "mr-[0.125rem] flex h-7 w-7 shrink-0 items-center justify-center",
+                "rounded-[0.375rem] cursor-pointer outline-none text-muted-foreground/80",
+                "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+                "transition-[opacity,color,background-color] duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground"
               )}
             >
-              <Plus className="h-[0.75rem] w-[0.75rem]" />
+              <Plus className="h-[0.875rem] w-[0.875rem]" />
             </button>
           </div>
         </div>

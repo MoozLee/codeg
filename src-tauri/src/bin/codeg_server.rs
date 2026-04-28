@@ -116,8 +116,26 @@ async fn async_main() {
         state.event_broadcaster.clone(),
     ));
 
+    // Spawn the idle sweep so connections abandoned without an explicit
+    // disconnect (e.g. browser tab closed, panic survivors) are reaped.
+    // Override the 60-second default via `CODEG_ACP_IDLE_TIMEOUT_SECS`
+    // (set to `0` to disable).
+    if let Some(idle_timeout) = codeg_lib::idle_timeout_from_env() {
+        tokio::spawn(codeg_lib::idle_sweep_task(
+            state.connection_manager.clone_ref(),
+            idle_timeout,
+            std::time::Duration::from_secs(codeg_lib::SWEEP_INTERVAL_SECS),
+        ));
+    }
+
     // Build router
-    let router = codeg_lib::web::router::build_router(state, token.clone(), static_dir);
+    let shutdown_signal = state.web_server_state.shutdown_signal();
+    let router = codeg_lib::web::router::build_router(
+        state.clone(),
+        token.clone(),
+        static_dir,
+        shutdown_signal,
+    );
 
     // Bind
     let addr = format!("{}:{}", host, port);
@@ -128,7 +146,21 @@ async fn async_main() {
             std::process::exit(1);
         });
 
+    if let Err(e) = codeg_lib::web::socket_inherit::mark_listener_non_inheritable(&listener) {
+        eprintln!(
+            "[SERVER][WARN] failed to mark listener non-inheritable: {}",
+            e
+        );
+    }
+
     let actual_port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
+
+    // Publish runtime state so the settings page (served by us) shows
+    // the truth — running on `actual_port` with this token — instead of
+    // the placeholder "stopped" that triggers the stale-port banner.
+    state
+        .web_server_state
+        .mark_externally_running(actual_port, token.clone());
     let addresses = get_local_addresses(actual_port);
 
     eprintln!("[SERVER] Token: {}", token);

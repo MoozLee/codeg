@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
-use crate::web::{do_get_web_server_status, do_stop_web_server, WebServerInfo};
+use crate::web::{
+    do_get_web_server_status, do_probe_web_service_port, do_stop_web_server, WebServerInfo,
+    WebServicePortProbe,
+};
 
 pub async fn get_web_server_status(
     Extension(state): Extension<Arc<AppState>>,
@@ -42,8 +45,33 @@ pub async fn start_web_server(
 pub async fn stop_web_server(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<()>, AppCommandError> {
+    // In web mode the serve task is owned by `codeg-server`'s main loop,
+    // not WebServerState. Calling do_stop_web_server here would not stop
+    // the process but WOULD trigger shutdown_signal — killing every live
+    // WebSocket including the caller's own session. Reject instead.
+    if state.web_server_state.is_externally_managed() {
+        return Err(AppCommandError::new(
+            crate::app_error::AppErrorCode::InvalidInput,
+            "Cannot stop web server from within web mode",
+        ));
+    }
     do_stop_web_server(&state.web_server_state).await;
     Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeWebServicePortParams {
+    pub port: Option<u16>,
+}
+
+pub async fn probe_web_service_port(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<ProbeWebServicePortParams>,
+) -> Result<Json<WebServicePortProbe>, AppCommandError> {
+    do_probe_web_service_port(&state.db.conn, params.port)
+        .await
+        .map(Json)
 }
 
 #[derive(Serialize)]

@@ -134,6 +134,23 @@ pub async fn acp_disconnect(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AcpTouchConnectionParams {
+    pub connection_id: String,
+}
+
+pub async fn acp_touch_connection(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpTouchConnectionParams>,
+) -> Result<Json<bool>, AppCommandError> {
+    let touched = state
+        .connection_manager
+        .touch(&params.connection_id)
+        .await;
+    Ok(Json(touched))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcpPromptParams {
     pub connection_id: String,
     pub blocks: Vec<crate::acp::types::PromptInputBlock>,

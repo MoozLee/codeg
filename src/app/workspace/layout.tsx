@@ -12,7 +12,10 @@ import type { ImperativePanelGroupHandle } from "react-resizable-panels"
 import { FolderTitleBar } from "@/components/layout/folder-title-bar"
 import { Sidebar } from "@/components/layout/sidebar"
 import { StatusBar } from "@/components/layout/status-bar"
-import { AppWorkspaceProvider } from "@/contexts/app-workspace-context"
+import {
+  AppWorkspaceProvider,
+  ConversationStatusEventBridge,
+} from "@/contexts/app-workspace-context"
 import {
   ActiveFolderProvider,
   useActiveFolder,
@@ -749,7 +752,7 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile()
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-background text-foreground pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       <FolderTitleBar />
       {isMobile ? (
         <MobileFolderWorkspaceShell>{children}</MobileFolderWorkspaceShell>
@@ -774,6 +777,7 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
           <GitCredentialProvider>
             <TaskProvider>
               <AcpConnectionsProvider>
+                <ConversationStatusEventBridge />
                 <ConversationRuntimeProvider>
                   <WorkspaceProvider>
                     <TabProvider>

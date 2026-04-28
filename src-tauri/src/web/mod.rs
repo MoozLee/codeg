@@ -1,13 +1,20 @@
 pub mod auth;
 pub mod event_bridge;
 pub mod handlers;
+pub mod port_probe;
 pub mod router;
+pub mod shutdown;
+pub mod socket_inherit;
 pub mod ws;
+
+pub use port_probe::{PortState, WebServicePortProbe};
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
+
+use shutdown::ShutdownSignal;
 
 use sea_orm::{DatabaseConnection, TransactionError, TransactionTrait};
 use serde::Serialize;
@@ -23,6 +30,12 @@ pub const DEFAULT_WEB_SERVICE_PORT: u16 = 3080;
 pub struct WebServerState {
     handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     shutdown_tx: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// Coordinates shutdown of live WebSocket handlers. Sticky flag +
+    /// `Notify` together: existing handlers wake immediately, and any
+    /// handshake completing during the stop window also exits without
+    /// leaking an orphan task. Reused across stop→start cycles via
+    /// `reset()` at the start of every successful bind.
+    pub(crate) shutdown_signal: Arc<ShutdownSignal>,
     port: AtomicU16,
     token: Mutex<String>,
     running: std::sync::atomic::AtomicBool,
@@ -39,10 +52,37 @@ impl WebServerState {
         Self {
             handle: Mutex::new(None),
             shutdown_tx: Mutex::new(None),
+            shutdown_signal: Arc::new(ShutdownSignal::new()),
             port: AtomicU16::new(0),
             token: Mutex::new(String::new()),
             running: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Handle to the shutdown coordinator. Exposed so binaries / external
+    /// callers (e.g. `codeg-server`) can pass it to `build_router`.
+    pub fn shutdown_signal(&self) -> Arc<ShutdownSignal> {
+        self.shutdown_signal.clone()
+    }
+
+    /// Mark the server as running from outside the Tauri command path.
+    /// `codeg-server` calls `axum::serve` directly without going through
+    /// `start_web_server`, so without this the `running` flag stays
+    /// `false` and `get_web_server_status` lies to web-mode browsers.
+    /// Note: handle/shutdown_tx are intentionally left `None` — the bin
+    /// owns the serve task itself, not this state. `stop_web_server`
+    /// uses that absence to detect web mode and reject the call.
+    pub fn mark_externally_running(&self, port: u16, token: String) {
+        self.port.store(port, Ordering::Relaxed);
+        *self.token.lock().unwrap() = token;
+        self.running.store(true, Ordering::Release);
+    }
+
+    /// True when the serve task is owned externally (e.g. by `codeg-server`
+    /// `axum::serve` in standalone mode), in which case stop/start through
+    /// this state must be a no-op.
+    pub fn is_externally_managed(&self) -> bool {
+        self.handle.lock().unwrap().is_none() && self.running.load(Ordering::Acquire)
     }
 }
 
@@ -317,10 +357,30 @@ pub(crate) async fn do_start_web_server_with_state(
         .await
         .map_err(classify_bind_error)?;
 
+    // Defend against socket-handle inheritance by later-spawned children
+    // (terminals, ACP CLIs, git, etc.). Failure is logged but non-fatal:
+    // the serve task still works; we just lose this defense-in-depth on
+    // this start. See issue #126.
+    if let Err(e) = socket_inherit::mark_listener_non_inheritable(&listener) {
+        eprintln!(
+            "[WEB][WARN] failed to mark listener non-inheritable: {}",
+            e
+        );
+    }
+
     // Persist only after a successful bind so a failed attempt doesn't overwrite saved state.
     persist_web_service_config(&app_state.db.conn, &token, port).await?;
 
-    let router = router::build_router(app_state.clone(), token.clone(), static_dir);
+    // Reset before any handler subscribes, so a leftover signal from the
+    // previous cycle cannot make a new handler exit immediately.
+    ws.shutdown_signal.reset();
+    let shutdown_signal = ws.shutdown_signal.clone();
+    let router = router::build_router(
+        app_state.clone(),
+        token.clone(),
+        static_dir,
+        shutdown_signal.clone(),
+    );
 
     let actual_port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
     eprintln!("[WEB] Starting web server on {}", addr);
@@ -353,6 +413,12 @@ pub(crate) async fn do_start_web_server_with_state(
 pub(crate) async fn do_stop_web_server(state: &WebServerState) {
     let handle_opt = state.handle.lock().unwrap().take();
     let shutdown_tx = state.shutdown_tx.lock().unwrap().take();
+
+    // Trigger first: sticky flag means any handshake completing during
+    // the stop window also exits, not just currently-waiting handlers.
+    // Without this, hyper's graceful drain would wait for live WS
+    // connections and we'd always fall through to the abort branch.
+    state.shutdown_signal.trigger();
 
     // Signal graceful shutdown so axum stops accepting new connections
     // and drops the listening socket once the serve future resolves.
@@ -393,6 +459,19 @@ pub(crate) fn do_get_web_server_status(state: &WebServerState) -> Option<WebServ
         token,
         addresses,
     })
+}
+
+/// Probe whether the configured port (or `override_port`) is currently
+/// being LISTENed on by some process. Used by the settings page to
+/// surface "stopped here, but the port is held by an orphan / another
+/// process" — the scenario in issue #126.
+pub(crate) async fn do_probe_web_service_port(
+    conn: &DatabaseConnection,
+    override_port: Option<u16>,
+) -> Result<WebServicePortProbe, AppCommandError> {
+    let port = resolve_web_service_port(conn, override_port).await?;
+    let state = port_probe::probe_port(port).await;
+    Ok(WebServicePortProbe { port, state })
 }
 
 // ── Tauri commands (thin wrappers) ──
@@ -439,6 +518,14 @@ pub async fn start_web_server(
         .await
         .map_err(classify_bind_error)?;
 
+    // See do_start_web_server_with_state for rationale.
+    if let Err(e) = socket_inherit::mark_listener_non_inheritable(&listener) {
+        eprintln!(
+            "[WEB][WARN] failed to mark listener non-inheritable: {}",
+            e
+        );
+    }
+
     // Persist only after a successful bind so a failed attempt doesn't overwrite saved state.
     persist_web_service_config(&db.conn, &token, port_val).await?;
 
@@ -461,7 +548,15 @@ pub async fn start_web_server(
         chat_channel_manager: crate::app_state::default_chat_channel_manager(),
     });
 
-    let router = router::build_router(app_state, token.clone(), static_dir);
+    // See do_start_web_server_with_state for rationale on the reset.
+    ws.shutdown_signal.reset();
+    let shutdown_signal = ws.shutdown_signal.clone();
+    let router = router::build_router(
+        app_state,
+        token.clone(),
+        static_dir,
+        shutdown_signal.clone(),
+    );
 
     let actual_port = listener.local_addr().map(|a| a.port()).unwrap_or(port_val);
     eprintln!("[WEB] Starting web server on {}", addr);
@@ -514,4 +609,13 @@ pub async fn get_web_service_config(
     db: tauri::State<'_, crate::db::AppDatabase>,
 ) -> Result<WebServiceConfig, AppCommandError> {
     load_web_service_config(&db.conn).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[tauri::command]
+pub async fn probe_web_service_port(
+    db: tauri::State<'_, crate::db::AppDatabase>,
+    port: Option<u16>,
+) -> Result<WebServicePortProbe, AppCommandError> {
+    do_probe_web_service_port(&db.conn, port).await
 }

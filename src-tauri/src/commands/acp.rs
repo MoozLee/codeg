@@ -2135,6 +2135,15 @@ pub async fn acp_disconnect(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_touch_connection(
+    connection_id: String,
+    manager: State<'_, ConnectionManager>,
+) -> Result<bool, AcpError> {
+    Ok(manager.touch(&connection_id).await)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_list_connections(
     manager: State<'_, ConnectionManager>,
 ) -> Result<Vec<ConnectionInfo>, AcpError> {

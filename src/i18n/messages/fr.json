@@ -1973,6 +1973,9 @@
     "tokenHint": "Entrez ce token lors du premier accès au client Web",
     "tokenPlaceholder": "Laisser vide pour générer automatiquement",
     "regenerate": "Régénérer",
+    "stalePortOccupiedTitle": "Le port {port} est utilisé par un autre processus",
+    "stalePortUnknownTitle": "L'état du port {port} est indéterminé",
+    "stalePortHint": "Codeg ne peut pas s'attacher tant que le port n'est pas libéré. Changez de port ci-dessus, ou fermez le processus qui le retient.",
     "errors": {
       "alreadyRunning": "Le service Web est déjà en cours d'exécution",
       "invalidAddress": "Format d'hôte ou de port non valide",
