@@ -629,6 +629,110 @@ fn codex_auth_json_path() -> PathBuf {
     codex_home_dir().join("auth.json")
 }
 
+fn is_codex_computer_use_command(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    normalized.contains("skycomputeruseclient") || normalized.contains("codex computer use.app")
+}
+
+fn sanitize_codex_runtime_config(raw_toml: &str) -> String {
+    let Ok(mut root) = raw_toml.parse::<toml::Value>() else {
+        return raw_toml.to_string();
+    };
+    let Some(table) = root.as_table_mut() else {
+        return raw_toml.to_string();
+    };
+
+    let should_remove_notify = table
+        .get("notify")
+        .and_then(|value| value.as_array())
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str().is_some_and(is_codex_computer_use_command))
+        });
+    if should_remove_notify {
+        table.remove("notify");
+    }
+
+    let remove_plugins_table = if let Some(plugins) = table
+        .get_mut("plugins")
+        .and_then(|value| value.as_table_mut())
+    {
+        plugins.remove("computer-use@openai-bundled");
+        plugins.is_empty()
+    } else {
+        false
+    };
+    if remove_plugins_table {
+        table.remove("plugins");
+    }
+
+    toml::to_string_pretty(&root).unwrap_or_else(|_| raw_toml.to_string())
+}
+
+#[cfg(unix)]
+fn mirror_codex_runtime_entry(src: &Path, dst: &Path) -> Result<(), AcpError> {
+    std::os::unix::fs::symlink(src, dst)
+        .map_err(|e| AcpError::protocol(format!("create codex runtime symlink failed: {e}")))
+}
+
+#[cfg(windows)]
+fn mirror_codex_runtime_entry(src: &Path, dst: &Path) -> Result<(), AcpError> {
+    if src.is_dir() {
+        junction::create(src, dst)
+            .map_err(|e| AcpError::protocol(format!("create codex runtime junction failed: {e}")))
+    } else {
+        std::os::windows::fs::symlink_file(src, dst)
+            .map_err(|e| AcpError::protocol(format!("create codex runtime symlink failed: {e}")))
+    }
+}
+
+fn prepare_codex_runtime_home() -> Result<PathBuf, AcpError> {
+    let source_home = codex_home_dir();
+    let cache_root = dirs::cache_dir()
+        .ok_or_else(|| AcpError::protocol("cannot determine cache directory".to_string()))?;
+    let runtime_home = cache_root
+        .join("app.codeg")
+        .join("codex-runtime")
+        .join(uuid::Uuid::new_v4().to_string());
+
+    fs::create_dir_all(&runtime_home)
+        .map_err(|e| AcpError::protocol(format!("create codex runtime home failed: {e}")))?;
+
+    if source_home.exists() {
+        let entries = fs::read_dir(&source_home)
+            .map_err(|e| AcpError::protocol(format!("read codex home failed: {e}")))?;
+
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| AcpError::protocol(format!("read codex home entry failed: {e}")))?;
+            let src = entry.path();
+            let name = entry.file_name();
+            if name == "config.toml" {
+                continue;
+            }
+            let dst = runtime_home.join(name);
+            mirror_codex_runtime_entry(&src, &dst)?;
+        }
+    }
+
+    let config_path = codex_config_toml_path();
+    if config_path.exists() {
+        let raw_toml = fs::read_to_string(&config_path)
+            .map_err(|e| AcpError::protocol(format!("read codex config failed: {e}")))?;
+        let sanitized = sanitize_codex_runtime_config(&raw_toml);
+        let serialized = if sanitized.ends_with('\n') {
+            sanitized
+        } else {
+            format!("{sanitized}\n")
+        };
+        fs::write(runtime_home.join("config.toml"), serialized)
+            .map_err(|e| AcpError::protocol(format!("write codex runtime config failed: {e}")))?;
+    }
+
+    Ok(runtime_home)
+}
+
 fn opencode_primary_config_path() -> PathBuf {
     home_dir_or_default()
         .join(".config")
@@ -1838,6 +1942,31 @@ pub(crate) async fn apply_model_provider_env(
     }
 }
 
+pub(crate) fn apply_agent_connect_runtime_overrides(
+    agent_type: AgentType,
+    session_id: Option<&str>,
+    runtime_env: &mut BTreeMap<String, String>,
+) -> Result<(), AcpError> {
+    if agent_type == AgentType::OpenClaw && session_id.is_none() {
+        runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
+    }
+
+    if agent_type == AgentType::Codex {
+        // macOS 15 can SIGKILL the bundled SkyComputerUseClient when it is
+        // launched from ACP mode via the user's global Codex config. Build a
+        // per-session CODEX_HOME mirror and strip the problematic plugin/hook
+        // only for codeg-managed ACP sessions, leaving the user's real
+        // ~/.codex untouched.
+        let runtime_home = prepare_codex_runtime_home()?;
+        runtime_env.insert(
+            "CODEX_HOME".into(),
+            runtime_home.to_string_lossy().to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 /// Update on-disk config files for a single agent when model provider credentials change.
 /// Uses `agent_env_keys` to determine the correct env var names per agent type.
 fn cascade_update_agent_config(
@@ -2031,16 +2160,12 @@ pub async fn acp_connect(
     // Resolve model provider credentials if configured.
     apply_model_provider_env(agent_type, setting.as_ref(), &mut runtime_env, &db.conn).await;
 
-    // For OpenClaw: when creating a new conversation (no session_id to resume),
-    // signal that we want a fresh transcript via --reset-session.
-    if agent_type == AgentType::OpenClaw && session_id.is_none() {
-        runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
-    }
-
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
     // can prompt the user to install it from Agent Settings.
     verify_agent_installed(agent_type)?;
+
+    apply_agent_connect_runtime_overrides(agent_type, session_id.as_deref(), &mut runtime_env)?;
 
     let emitter = EventEmitter::Tauri(app_handle);
     manager
@@ -3491,4 +3616,56 @@ pub(crate) async fn codex_poll_device_code_core(
         refresh_token: Some(tokens.refresh_token),
         account_id: Some(account_id),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_codex_runtime_config;
+
+    #[test]
+    fn sanitizes_codex_runtime_config_for_computer_use() {
+        let raw = r#"
+notify = ["/Users/test/.codex/plugins/cache/openai-bundled/computer-use/1.0.758/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient", "turn-ended"]
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."computer-use@openai-bundled"]
+enabled = true
+
+[plugins."browser-use@openai-bundled"]
+enabled = true
+"#;
+
+        let sanitized = sanitize_codex_runtime_config(raw);
+        let parsed = sanitized.parse::<toml::Value>().expect("valid toml");
+        let root = parsed.as_table().expect("root table");
+
+        assert!(root.get("notify").is_none());
+
+        let plugins = root
+            .get("plugins")
+            .and_then(|value| value.as_table())
+            .expect("plugins table");
+        assert!(plugins.get("computer-use@openai-bundled").is_none());
+        assert!(plugins.get("browser-use@openai-bundled").is_some());
+        assert!(plugins.get("documents@openai-primary-runtime").is_some());
+    }
+
+    #[test]
+    fn keeps_unrelated_notify_commands() {
+        let raw = r#"
+notify = ["/usr/bin/osascript", "turn-ended"]
+
+[plugins."computer-use@openai-bundled"]
+enabled = false
+"#;
+
+        let sanitized = sanitize_codex_runtime_config(raw);
+        let parsed = sanitized.parse::<toml::Value>().expect("valid toml");
+        let root = parsed.as_table().expect("root table");
+
+        assert!(root.get("notify").is_some());
+        assert!(root.get("plugins").is_none());
+    }
 }

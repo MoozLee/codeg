@@ -88,15 +88,17 @@ pub async fn acp_connect(
     )
     .await;
 
-    if params.agent_type == AgentType::OpenClaw && params.session_id.is_none() {
-        runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
-    }
-
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
     // can prompt the user to install it from Agent Settings.
     acp_commands::verify_agent_installed(params.agent_type)
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    acp_commands::apply_agent_connect_runtime_overrides(
+        params.agent_type,
+        params.session_id.as_deref(),
+        &mut runtime_env,
+    )
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
 
     let emitter = state.emitter.clone();
     let connection_id = manager
@@ -142,10 +144,7 @@ pub async fn acp_touch_connection(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpTouchConnectionParams>,
 ) -> Result<Json<bool>, AppCommandError> {
-    let touched = state
-        .connection_manager
-        .touch(&params.connection_id)
-        .await;
+    let touched = state.connection_manager.touch(&params.connection_id).await;
     Ok(Json(touched))
 }
 
