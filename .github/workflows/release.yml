@@ -100,14 +100,210 @@ jobs:
               commitSha = annotatedTag.object.sha;
             }
 
-            const { data: commit } = await github.rest.repos.getCommit({
-              owner,
-              repo,
-              ref: commitSha,
-            });
+            const { execFileSync } = require("node:child_process");
 
-            const releaseBody =
-              commit.commit.message?.trim() || "_No commit message._";
+            const semverTagPattern =
+              /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+            const runGit = (args, { allowFailure = false } = {}) => {
+              try {
+                return execFileSync("git", args, {
+                  encoding: "utf8",
+                  stdio: ["ignore", "pipe", "pipe"],
+                }).trim();
+              } catch (error) {
+                if (allowFailure) {
+                  return "";
+                }
+                throw error;
+              }
+            };
+
+            const resolveTagCommit = async (tagName) => {
+              const localSha = runGit(
+                ["rev-list", "-n", "1", `refs/tags/${tagName}`],
+                { allowFailure: true },
+              );
+              if (localSha) {
+                return localSha;
+              }
+
+              try {
+                const { data: ref } = await github.rest.git.getRef({
+                  owner,
+                  repo,
+                  ref: `tags/${tagName}`,
+                });
+
+                if (ref.object.type === "tag") {
+                  const { data: annotated } = await github.rest.git.getTag({
+                    owner,
+                    repo,
+                    tag_sha: ref.object.sha,
+                  });
+                  return annotated.object.type === "commit"
+                    ? annotated.object.sha
+                    : "";
+                }
+
+                return ref.object.type === "commit" ? ref.object.sha : "";
+              } catch (error) {
+                core.debug(
+                  `Unable to resolve tag ${tagName}: ${error.message}`,
+                );
+                return "";
+              }
+            };
+
+            const isReachableBeforeCurrent = (candidateSha) => {
+              if (!candidateSha || candidateSha === commitSha) {
+                return false;
+              }
+
+              try {
+                execFileSync(
+                  "git",
+                  ["merge-base", "--is-ancestor", candidateSha, commitSha],
+                  { stdio: "ignore" },
+                );
+                return true;
+              } catch {
+                return false;
+              }
+            };
+
+            const findPreviousReleaseBase = async () => {
+              const releases = await github.paginate(
+                github.rest.repos.listReleases,
+                {
+                  owner,
+                  repo,
+                  per_page: 100,
+                },
+              );
+
+              for (const candidate of releases) {
+                if (
+                  candidate.draft ||
+                  candidate.tag_name === tag ||
+                  !semverTagPattern.test(candidate.tag_name)
+                ) {
+                  continue;
+                }
+
+                const sha = await resolveTagCommit(candidate.tag_name);
+                if (isReachableBeforeCurrent(sha)) {
+                  return {
+                    source: "GitHub release",
+                    tag: candidate.tag_name,
+                    sha,
+                  };
+                }
+              }
+
+              return null;
+            };
+
+            const findPreviousSemverTagBase = async () => {
+              const tags = runGit(
+                ["tag", "--list", "v*.*.*", "--sort=-version:refname"],
+                { allowFailure: true },
+              )
+                .split("\n")
+                .map((candidate) => candidate.trim())
+                .filter(
+                  (candidate) =>
+                    candidate &&
+                    candidate !== tag &&
+                    semverTagPattern.test(candidate),
+                );
+
+              for (const candidate of tags) {
+                const sha = await resolveTagCommit(candidate);
+                if (isReachableBeforeCurrent(sha)) {
+                  return {
+                    source: "git tag",
+                    tag: candidate,
+                    sha,
+                  };
+                }
+              }
+
+              return null;
+            };
+
+            const releaseBase =
+              (await findPreviousReleaseBase()) ||
+              (await findPreviousSemverTagBase());
+
+            if (releaseBase) {
+              core.info(
+                `Generating release notes from ${releaseBase.source} ${releaseBase.tag} to ${tag}`,
+              );
+            } else {
+              core.info(
+                `No previous release or semver tag found; using commits reachable from ${tag}`,
+              );
+            }
+
+            const range = releaseBase?.sha
+              ? `${releaseBase.sha}..${commitSha}`
+              : commitSha;
+            const commitLog = runGit(
+              ["log", "--reverse", "--format=%H%x00%s", range],
+              { allowFailure: true },
+            );
+            const commits = commitLog
+              ? commitLog.split("\n").flatMap((line) => {
+                  const separatorIndex = line.indexOf("\0");
+                  if (separatorIndex < 0) {
+                    return [];
+                  }
+
+                  return [
+                    {
+                      sha: line.slice(0, separatorIndex),
+                      subject: line.slice(separatorIndex + 1).trim(),
+                    },
+                  ];
+                })
+              : [];
+
+            const featurePattern = /^feat(?:\([^)]+\))?!?:\s+/i;
+            const fixPattern = /^fix(?:\([^)]+\))?!?:\s+/i;
+            const escapeMarkdown = (value) =>
+              value.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
+            const formatCommitLine = (commit) =>
+              `- ${escapeMarkdown(commit.subject)} (${commit.sha.slice(0, 7)})`;
+
+            const features = [];
+            const bugFixes = [];
+            for (const commit of commits) {
+              if (featurePattern.test(commit.subject)) {
+                features.push(formatCommitLine(commit));
+              } else if (fixPattern.test(commit.subject)) {
+                bugFixes.push(formatCommitLine(commit));
+              }
+            }
+
+            const sections = [];
+            if (features.length > 0) {
+              sections.push(["## Features", ...features].join("\n"));
+            }
+            if (bugFixes.length > 0) {
+              sections.push(["## Bug Fixes", ...bugFixes].join("\n"));
+            }
+
+            const releaseBody = sections.length
+              ? [
+                  releaseBase
+                    ? `_Changes since ${releaseBase.tag}._`
+                    : `_Changes included in ${tag}._`,
+                  ...sections,
+                ].join("\n\n")
+              : releaseBase
+                ? `No categorized feature or bug fix commits were found since ${releaseBase.tag}.`
+                : `No categorized feature or bug fix commits were found for ${tag}.`;
             let release;
 
             try {
