@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { FilePathLink } from "@/components/ai-elements/link-safety"
 
 type RowMarker = "none" | "added" | "deleted" | "modified"
 type DiffFileMode = "modified" | "added" | "deleted" | "renamed"
@@ -499,12 +500,12 @@ function HunkLines({ rows }: { rows: ParsedDiffRow[] }) {
   )
 }
 
-/** Clean file content view for new files (no diff signs or green highlight) */
+/** Clean file content view for new files (no diff signs, green highlight as added) */
 function NewFileLines({ rows }: { rows: ParsedDiffRow[] }) {
   return (
     <div className="font-mono text-[12px] leading-[20px]">
       {rows.map((row, i) => (
-        <div key={i} className="flex">
+        <div key={i} className={cn("flex", ROW_CLASS.added)}>
           <span className="w-[3.5rem] shrink-0 select-none pr-1 text-right text-muted-foreground/40">
             {row.newLine ?? i + 1}
           </span>
@@ -522,11 +523,14 @@ function isNewFileOnly(file: ParsedDiffFile): boolean {
 export function UnifiedDiffPreview({
   diffText,
   className,
+  clickableFilePath = false,
 }: {
   diffText: string
   /** @deprecated No longer used — kept for API compat */
   modelId?: string
   className?: string
+  /** When true, file-name header is clickable and opens the workspace open-file dialog. */
+  clickableFilePath?: boolean
 }) {
   const t = useTranslations("Folder.diffPreview")
   const { activeFolder: folder } = useActiveFolder()
@@ -569,12 +573,22 @@ export function UnifiedDiffPreview({
                 <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
                   {newFile ? "WRITE" : t(modeKey(file.mode))}
                 </span>
-                <span
-                  className="min-w-0 flex-1 truncate font-mono text-foreground"
-                  title={file.path}
-                >
-                  {toDisplayPath(file.path, folder?.path ?? null)}
-                </span>
+                {clickableFilePath ? (
+                  <FilePathLink
+                    filePath={file.path}
+                    className="min-w-0 flex-1 font-mono text-foreground"
+                    title={file.path}
+                  >
+                    {toDisplayPath(file.path, folder?.path ?? null)}
+                  </FilePathLink>
+                ) : (
+                  <span
+                    className="min-w-0 flex-1 truncate font-mono text-foreground"
+                    title={file.path}
+                  >
+                    {toDisplayPath(file.path, folder?.path ?? null)}
+                  </span>
+                )}
                 {!newFile && (
                   <span className="ml-auto inline-flex shrink-0 items-center gap-2 font-mono">
                     <span className="text-green-700 dark:text-green-400">

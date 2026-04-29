@@ -391,6 +391,18 @@ pub fn build_router(
             post(handlers::system_settings::get_system_open_target_settings),
         )
         .route(
+            "/get_system_terminal_settings",
+            post(handlers::system_settings::get_system_terminal_settings),
+        )
+        .route(
+            "/get_available_terminal_shells",
+            post(handlers::system_settings::get_available_terminal_shells),
+        )
+        .route(
+            "/probe_terminal_shell_path",
+            post(handlers::system_settings::probe_terminal_shell_path),
+        )
+        .route(
             "/update_system_proxy_settings",
             post(handlers::system_settings::update_system_proxy_settings),
         )
@@ -405,6 +417,10 @@ pub fn build_router(
         .route(
             "/open_path_with_target",
             post(handlers::system_settings::open_path_with_target),
+        )
+        .route(
+            "/update_system_terminal_settings",
+            post(handlers::system_settings::update_system_terminal_settings),
         )
         // ─── ACP ───
         .route(

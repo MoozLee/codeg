@@ -1519,7 +1519,7 @@ export function GitLogTab() {
               <span className="text-muted-foreground">
                 {t("dialogs.reset.messageLabel")}
               </span>
-              <p className="min-w-0 whitespace-pre-wrap break-words">
+              <p className="max-h-32 min-w-0 overflow-y-auto whitespace-pre-wrap break-words">
                 {resetTarget?.message || "-"}
               </p>
             </div>

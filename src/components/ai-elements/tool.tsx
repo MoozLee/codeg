@@ -382,7 +382,7 @@ export const ToolOutput = ({
         </div>
       )
     } else if (lang === "diff") {
-      Output = <UnifiedDiffPreview diffText={output} />
+      Output = <UnifiedDiffPreview diffText={output} clickableFilePath />
     } else {
       Output = <CodeBlock code={output} language={lang} />
     }

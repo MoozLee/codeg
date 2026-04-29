@@ -66,6 +66,7 @@ pub(crate) fn prepare_credential_env(
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn terminal_spawn(
     working_dir: String,
+    shell: Option<String>,
     initial_command: Option<String>,
     terminal_id: Option<String>,
     manager: State<'_, TerminalManager>,
@@ -88,6 +89,7 @@ pub async fn terminal_spawn(
             terminal_id,
             working_dir,
             owner_window_label: window.label().to_string(),
+            shell,
             initial_command,
             extra_env,
             temp_files: vec![],

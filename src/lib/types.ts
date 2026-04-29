@@ -737,6 +737,7 @@ export type AppLocale =
   | "fr"
   | "pt"
   | "ar"
+
 export type LanguageMode = "system" | "manual"
 
 export interface SystemLanguageSettings {
@@ -751,6 +752,23 @@ export type SystemWebFileOpenMethod = "browser" | "editor"
 export interface SystemOpenTargetSettings {
   target: SystemOpenTarget
   web_file_open_method: SystemWebFileOpenMethod
+}
+
+export interface SystemTerminalSettings {
+  default_shell: string | null
+}
+
+export interface TerminalShellOption {
+  id: string
+  label_key: string
+  value: string | null
+  exists: boolean
+  accepts_custom_path: boolean
+}
+
+export interface AvailableTerminalShells {
+  options: TerminalShellOption[]
+  resolved_shell: string
 }
 
 export interface SystemRenderingSettings {
