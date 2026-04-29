@@ -17,6 +17,7 @@ use crate::terminal::types::TerminalInfo;
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSpawnParams {
     pub working_dir: String,
+    pub shell: Option<String>,
     pub initial_command: Option<String>,
     pub terminal_id: Option<String>,
 }
@@ -64,6 +65,7 @@ pub async fn terminal_spawn(
                 terminal_id,
                 working_dir: params.working_dir,
                 owner_window_label: "web".to_string(),
+                shell: params.shell,
                 initial_command: params.initial_command,
                 extra_env,
                 temp_files: vec![],

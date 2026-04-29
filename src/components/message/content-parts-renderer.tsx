@@ -18,6 +18,7 @@ import { Terminal } from "@/components/ai-elements/terminal"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { UnifiedDiffPreview } from "@/components/diff/unified-diff-preview"
 import { generateUnifiedDiff } from "@/lib/unified-diff-generator"
+import { FilePathLink } from "@/components/ai-elements/link-safety"
 import {
   Reasoning,
   ReasoningTrigger,
@@ -1192,7 +1193,9 @@ function EditToolInput({ input }: { input: Record<string, unknown> }) {
     )
   }, [oldString, newString, filePath, startLine])
 
-  return diffCode ? <UnifiedDiffPreview diffText={diffCode} /> : null
+  return diffCode ? (
+    <UnifiedDiffPreview diffText={diffCode} clickableFilePath />
+  ) : null
 }
 
 /** Edit tool (changes payload): combined diff view */
@@ -1221,7 +1224,9 @@ function EditChangesToolInput({ changes }: { changes: EditChangePreview[] }) {
     return diffParts.join("\n").trim()
   }, [changes])
 
-  return diffCode ? <UnifiedDiffPreview diffText={diffCode} /> : null
+  return diffCode ? (
+    <UnifiedDiffPreview diffText={diffCode} clickableFilePath />
+  ) : null
 }
 
 /** Bash / exec_command: terminal-style command display */
@@ -1281,16 +1286,23 @@ function parseReadOutput(raw: string): { startLine: number; content: string } {
 function FileContentLines({
   content,
   startLine = 1,
+  highlight,
 }: {
   content: string
   startLine?: number
+  /** "added" tints every line green to indicate new content (e.g. Write tool). */
+  highlight?: "added"
 }) {
   const lines = useMemo(() => content.split("\n"), [content])
+  const rowClass =
+    highlight === "added"
+      ? "flex bg-green-500/10 text-green-900 dark:text-green-300"
+      : "flex"
 
   return (
     <div className="inline-block min-w-full font-mono text-[12px] leading-[20px]">
       {lines.map((line, i) => (
-        <div key={i} className="flex">
+        <div key={i} className={rowClass}>
           <span className="w-[3.5rem] shrink-0 select-none pr-1 text-right text-muted-foreground/40">
             {startLine + i}
           </span>
@@ -1348,12 +1360,18 @@ function FileToolInput({
         <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
           {isRead ? "READ" : "WRITE"}
         </span>
-        <span
-          className="min-w-0 flex-1 truncate font-mono text-foreground"
-          title={filePath ?? undefined}
-        >
-          {filePath ?? t("unknown")}
-        </span>
+        {filePath ? (
+          <FilePathLink
+            filePath={filePath}
+            className="min-w-0 flex-1 font-mono text-foreground"
+          >
+            {filePath}
+          </FilePathLink>
+        ) : (
+          <span className="min-w-0 flex-1 truncate font-mono text-foreground">
+            {t("unknown")}
+          </span>
+        )}
         {badges.length > 0 && (
           <span className="ml-auto inline-flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
             {badges.map((b) => (
@@ -1364,7 +1382,11 @@ function FileToolInput({
       </header>
       {displayContent && (
         <div className="overflow-auto">
-          <FileContentLines content={displayContent} startLine={startLine} />
+          <FileContentLines
+            content={displayContent}
+            startLine={startLine}
+            highlight={isRead ? undefined : "added"}
+          />
         </div>
       )}
     </section>
@@ -1578,7 +1600,7 @@ function TodoWriteToolInput({ input }: { input: Record<string, unknown> }) {
 }
 
 function ApplyPatchToolInput({ input }: { input: string }) {
-  return <UnifiedDiffPreview diffText={input} />
+  return <UnifiedDiffPreview diffText={input} clickableFilePath />
 }
 
 // ── Switch mode (plan) input ──────────────────────────────────────────
@@ -1783,7 +1805,7 @@ function StructuredToolInput({
       return (
         <>
           {truncationBanner}
-          <UnifiedDiffPreview diffText={output} />
+          <UnifiedDiffPreview diffText={output} clickableFilePath />
         </>
       )
     }
@@ -2059,7 +2081,7 @@ const TextPart = memo(function TextPart({
   }
 
   return (
-    <div className="break-words text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
+    <div className='break-words text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside [&_[data-streamdown="code-block-body"]]:max-h-96 [&_[data-streamdown="code-block-body"]]:overflow-auto'>
       <MessageResponse>{text}</MessageResponse>
     </div>
   )

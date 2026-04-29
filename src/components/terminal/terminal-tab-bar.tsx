@@ -135,7 +135,7 @@ export function TerminalTabBar() {
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6 shrink-0"
-                onClick={() => createTerminal()}
+                onClick={() => void createTerminal()}
                 disabled={!canCreateTerminal}
               >
                 <Plus className="h-3 w-3" />

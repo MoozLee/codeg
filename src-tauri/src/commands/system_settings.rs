@@ -14,21 +14,26 @@ use crate::db::AppDatabase;
 #[cfg(feature = "tauri-runtime")]
 use crate::models::{SystemFontSettings, SystemOpenTarget, SystemRenderingSettings};
 use crate::models::{
-    SystemFontFamily, SystemFontFamilyList, SystemFontFamilySource, SystemLanguageSettings,
-    SystemOpenTargetSettings, SystemProxySettings,
+    AvailableTerminalShells, SystemFontFamily, SystemFontFamilyList, SystemFontFamilySource,
+    SystemLanguageSettings, SystemOpenTargetSettings, SystemProxySettings,
+    SystemTerminalSettings, TerminalShellOption,
 };
 #[cfg(feature = "tauri-runtime")]
 use crate::network::proxy;
 #[cfg(feature = "tauri-runtime")]
 use crate::preferences;
+use crate::terminal::manager::resolve_shell;
 
-const SYSTEM_PROXY_SETTINGS_KEY: &str = "system_proxy_settings";
-const SYSTEM_LANGUAGE_SETTINGS_KEY: &str = "system_language_settings";
-const SYSTEM_OPEN_TARGET_SETTINGS_KEY: &str = "system_open_target_settings";
+pub(crate) const SYSTEM_PROXY_SETTINGS_KEY: &str = "system_proxy_settings";
+pub(crate) const SYSTEM_LANGUAGE_SETTINGS_KEY: &str = "system_language_settings";
+pub(crate) const SYSTEM_OPEN_TARGET_SETTINGS_KEY: &str = "system_open_target_settings";
+pub(crate) const SYSTEM_TERMINAL_SETTINGS_KEY: &str = "system_terminal_settings";
 #[cfg(feature = "tauri-runtime")]
 const APPEARANCE_FONT_SETTINGS_KEY: &str = "appearance_font_settings";
-#[cfg(feature = "tauri-runtime")]
-const LANGUAGE_SETTINGS_UPDATED_EVENT: &str = "app://language-settings-updated";
+pub(crate) const LANGUAGE_SETTINGS_UPDATED_EVENT: &str = "app://language-settings-updated";
+pub(crate) const TERMINAL_SETTINGS_UPDATED_EVENT: &str = "app://terminal-settings-updated";
+pub(crate) const TERMINAL_SHELL_OPTION_SYSTEM: &str = "system";
+pub(crate) const TERMINAL_SHELL_OPTION_CUSTOM: &str = "custom";
 #[cfg(feature = "tauri-runtime")]
 const MAX_FONT_FAMILY_LENGTH: usize = 128;
 #[cfg(feature = "tauri-runtime")]
@@ -487,6 +492,118 @@ pub(crate) async fn open_path_with_target_core(
     }
 }
 
+/// Whether `value` resolves to an executable on the current host. Used to
+/// drive the "not installed" badge in the picker; never used to *block* a
+/// selection — users may legitimately preconfigure a shell before installing it.
+fn shell_exists(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let path = std::path::Path::new(trimmed);
+    let looks_like_path = path.is_absolute()
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || path.components().count() > 1;
+
+    if looks_like_path {
+        return path.is_file();
+    }
+
+    which::which(trimmed).is_ok()
+}
+
+/// Trim and drop empty-only. We deliberately do **not** filter by host
+/// platform: the Settings UI's custom-path field lets users type any shell
+/// they want, and silently rewriting their input is more confusing than
+/// letting `terminal_spawn` surface the failure if the path is wrong.
+pub(crate) fn normalize_terminal_settings(
+    settings: SystemTerminalSettings,
+) -> SystemTerminalSettings {
+    SystemTerminalSettings {
+        default_shell: settings
+            .default_shell
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    }
+}
+
+/// Build the per-platform option list shown in the "default shell" picker.
+/// The frontend renders these verbatim, looking each `label_key` up under its
+/// `SystemSettings` namespace — so adding a new shell here requires zero
+/// frontend code changes (only a new translation key).
+pub(crate) fn build_available_terminal_shells() -> AvailableTerminalShells {
+    let mut options: Vec<TerminalShellOption> = Vec::new();
+
+    options.push(TerminalShellOption {
+        id: TERMINAL_SHELL_OPTION_SYSTEM.to_string(),
+        label_key: "terminalSystemDefault".to_string(),
+        value: None,
+        // System default always "exists" — resolve_shell() has its own fallback chain.
+        exists: true,
+        accepts_custom_path: false,
+    });
+
+    if cfg!(target_os = "windows") {
+        for (id, label_key) in [
+            ("pwsh.exe", "terminalPowerShell7"),
+            ("powershell.exe", "terminalWindowsPowerShell"),
+            ("cmd.exe", "terminalCmd"),
+        ] {
+            options.push(TerminalShellOption {
+                id: id.to_string(),
+                label_key: label_key.to_string(),
+                value: Some(id.to_string()),
+                exists: shell_exists(id),
+                accepts_custom_path: false,
+            });
+        }
+    }
+
+    options.push(TerminalShellOption {
+        id: TERMINAL_SHELL_OPTION_CUSTOM.to_string(),
+        label_key: "terminalShellCustom".to_string(),
+        value: None,
+        // The "custom" row itself is always available; the path the user
+        // types is validated via probe_terminal_shell_path.
+        exists: true,
+        accepts_custom_path: true,
+    });
+
+    AvailableTerminalShells {
+        options,
+        resolved_shell: resolve_shell(),
+    }
+}
+
+/// Probe whether a user-supplied shell path or command exists on the host.
+/// Returns `false` for empty / whitespace-only input.
+pub(crate) fn probe_terminal_shell_path_core(path: &str) -> bool {
+    shell_exists(path)
+}
+
+pub(crate) async fn load_system_terminal_settings(
+    conn: &DatabaseConnection,
+) -> Result<SystemTerminalSettings, AppCommandError> {
+    let raw = app_metadata_service::get_value(conn, SYSTEM_TERMINAL_SETTINGS_KEY)
+        .await
+        .map_err(AppCommandError::from)?;
+
+    let Some(raw) = raw else {
+        return Ok(SystemTerminalSettings::default());
+    };
+
+    let parsed = serde_json::from_str::<SystemTerminalSettings>(&raw).map_err(|e| {
+        AppCommandError::configuration_invalid("Failed to parse stored terminal settings")
+            .with_detail(e.to_string())
+    })?;
+
+    Ok(normalize_terminal_settings(parsed))
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn list_system_font_families() -> Result<SystemFontFamilyList, AppCommandError> {
@@ -539,10 +656,30 @@ pub async fn get_system_open_target_settings(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn get_system_terminal_settings(
+    db: State<'_, AppDatabase>,
+) -> Result<SystemTerminalSettings, AppCommandError> {
+    load_system_terminal_settings(&db.conn).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn get_available_terminal_shells() -> Result<AvailableTerminalShells, AppCommandError> {
+    Ok(build_available_terminal_shells())
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn get_system_font_settings(
     db: State<'_, AppDatabase>,
 ) -> Result<SystemFontSettings, AppCommandError> {
     load_system_font_settings(&db.conn).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn probe_terminal_shell_path(path: String) -> Result<bool, AppCommandError> {
+    Ok(probe_terminal_shell_path_core(&path))
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -598,6 +735,33 @@ pub async fn update_system_language_settings(
     );
 
     Ok(settings)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_system_terminal_settings(
+    settings: SystemTerminalSettings,
+    db: State<'_, AppDatabase>,
+    app: tauri::AppHandle,
+) -> Result<SystemTerminalSettings, AppCommandError> {
+    let normalized = normalize_terminal_settings(settings);
+    let serialized = serde_json::to_string(&normalized).map_err(|e| {
+        AppCommandError::invalid_input("Failed to serialize terminal settings")
+            .with_detail(e.to_string())
+    })?;
+
+    app_metadata_service::upsert_value(&db.conn, SYSTEM_TERMINAL_SETTINGS_KEY, &serialized)
+        .await
+        .map_err(AppCommandError::from)?;
+
+    let emitter = crate::web::event_bridge::EventEmitter::Tauri(app);
+    crate::web::event_bridge::emit_event(
+        &emitter,
+        TERMINAL_SETTINGS_UPDATED_EVENT,
+        normalized.clone(),
+    );
+
+    Ok(normalized)
 }
 
 #[cfg(feature = "tauri-runtime")]

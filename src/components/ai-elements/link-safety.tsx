@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { openUrl } from "@/lib/platform"
@@ -7,6 +8,7 @@ import type { LinkSafetyConfig, LinkSafetyModalProps } from "streamdown"
 import { toast } from "sonner"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { cn } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -221,13 +223,13 @@ function LinkSafetyModal({
   )
 }
 
-export function useStreamdownLinkSafety(): LinkSafetyConfig {
+function useOpenLinkOrFile() {
   const t = useTranslations("Folder.chat.linkSafety")
   const { activeFolder: folder } = useActiveFolder()
   const folderPath = folder?.path
   const { openFilePreview } = useWorkspaceContext()
 
-  const handleOpenTarget = useCallback(
+  return useCallback(
     async (url: string) => {
       const localTarget = parseLocalFileTarget(url)
       if (localTarget) {
@@ -271,6 +273,10 @@ export function useStreamdownLinkSafety(): LinkSafetyConfig {
     },
     [folderPath, openFilePreview, t]
   )
+}
+
+export function useStreamdownLinkSafety(): LinkSafetyConfig {
+  const handleOpenTarget = useOpenLinkOrFile()
 
   const renderModal = useCallback(
     (props: LinkSafetyModalProps) => (
@@ -285,5 +291,132 @@ export function useStreamdownLinkSafety(): LinkSafetyConfig {
       renderModal,
     }),
     [renderModal]
+  )
+}
+
+/**
+ * Resolve a tool-call file path (which may be absolute, workspace-relative, or
+ * a bare relative path) into something `openFilePreview` can consume. Falls
+ * back to the raw input when no other heuristic matches so the dialog can
+ * still surface a useful error toast.
+ */
+function resolveToolFilePath(
+  rawPath: string,
+  workspacePath: string | null
+): string | null {
+  const normalized = normalizeSlashPath(rawPath.trim())
+  if (!normalized) return null
+
+  const isAbsolute =
+    normalized.startsWith("/") || WINDOWS_ABSOLUTE_PATH.test(normalized)
+  if (isAbsolute) {
+    if (!workspacePath) return null
+    return toWorkspaceRelativePath(normalized, workspacePath)
+  }
+
+  return normalized.replace(/^\.\/+/, "")
+}
+
+/**
+ * Clickable file-path label that opens the same "open local file" confirmation
+ * dialog used for markdown links inside agent messages, then routes the file
+ * into the workspace file panel.
+ */
+export function FilePathLink({
+  filePath,
+  line,
+  className,
+  title,
+  children,
+}: {
+  filePath: string
+  line?: number | null
+  className?: string
+  title?: string
+  children: ReactNode
+}) {
+  const t = useTranslations("Folder.chat.linkSafety")
+  const { activeFolder: folder } = useActiveFolder()
+  const folderPath = folder?.path ?? null
+  const { openFilePreview } = useWorkspaceContext()
+
+  const [isOpen, setIsOpen] = useState(false)
+  const [opening, setOpening] = useState(false)
+
+  const handleConfirm = useCallback(() => {
+    if (opening) return
+    if (!folderPath) {
+      toast.error(t("errorCannotOpen"), {
+        description: t("errorNoWorkspace"),
+      })
+      setIsOpen(false)
+      return
+    }
+    const relativePath = resolveToolFilePath(filePath, folderPath)
+    if (!relativePath) {
+      toast.error(t("errorCannotOpen"), {
+        description: t("errorOutsideWorkspace"),
+      })
+      setIsOpen(false)
+      return
+    }
+
+    setOpening(true)
+    void openFilePreview(relativePath, {
+      line: line ?? undefined,
+    })
+      .catch((error) => {
+        toast.error(t("errorFailedOpen"), {
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
+      .finally(() => {
+        setOpening(false)
+        setIsOpen(false)
+      })
+  }, [filePath, folderPath, line, opening, openFilePreview, t])
+
+  return (
+    <>
+      <span className={cn("block min-w-0", className)}>
+        <button
+          type="button"
+          title={title ?? filePath}
+          className="max-w-full cursor-pointer truncate text-left align-bottom hover:underline focus-visible:underline focus-visible:outline-none"
+          onClick={(e) => {
+            e.stopPropagation()
+            setIsOpen(true)
+          }}
+        >
+          {children}
+        </button>
+      </span>
+      <AlertDialog
+        open={isOpen}
+        onOpenChange={(next) => {
+          if (!next && !opening) setIsOpen(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("localFileTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("localFileDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-28 overflow-auto rounded-md bg-muted px-3 py-2 font-mono text-xs break-all">
+            {filePath}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={opening}>
+              {t("cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction disabled={opening} onClick={handleConfirm}>
+              {opening ? t("opening") : t("openFile")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }

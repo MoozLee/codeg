@@ -25,7 +25,7 @@ pub struct TerminalManager {
     terminals: Arc<Mutex<HashMap<String, TerminalInstance>>>,
 }
 
-fn resolve_shell() -> String {
+pub(crate) fn resolve_shell() -> String {
     #[cfg(target_os = "windows")]
     {
         if let Ok(shell) = std::env::var("SHELL") {
@@ -89,6 +89,40 @@ fn detect_windows_shell_flavor(shell: &str) -> WindowsShellFlavor {
     }
 }
 
+/// POSIX-side shell flavor. We only inject the `-l -i` login/interactive
+/// flags and the `eval "$CODEG_CMD"` wrapping for shells we know speak that
+/// dialect — passing those to nu / xonsh / elvish / pwsh would cause spawn
+/// failures or weird behavior. Unknown shells get raw spawn (no flags) and,
+/// when an `initial_command` is requested, a plain `-c <command>` (the
+/// closest thing to a universal "run this and exit" convention).
+#[cfg(not(target_os = "windows"))]
+#[derive(Debug, Clone, Copy)]
+enum PosixShellFlavor {
+    /// bash / zsh / sh / dash / ksh / ash / mksh / busybox / fish — accept
+    /// `-l -i` and the `eval "$VAR"` pattern.
+    BashLike,
+    /// Anything else. Don't assume POSIX flag conventions.
+    Unknown,
+}
+
+#[cfg(not(target_os = "windows"))]
+fn detect_posix_shell_flavor(shell: &str) -> PosixShellFlavor {
+    let name = std::path::Path::new(shell)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+
+    if matches!(
+        name.as_str(),
+        "bash" | "zsh" | "sh" | "dash" | "ksh" | "ash" | "mksh" | "busybox" | "fish"
+    ) {
+        PosixShellFlavor::BashLike
+    } else {
+        PosixShellFlavor::Unknown
+    }
+}
+
 fn configure_shell_command(cmd: &mut CommandBuilder, shell: &str, initial_command: Option<&str>) {
     #[cfg(target_os = "windows")]
     {
@@ -144,18 +178,34 @@ fn configure_shell_command(cmd: &mut CommandBuilder, shell: &str, initial_comman
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = shell;
         // GUI app environments often miss TERM; force a sane terminal type so
         // readline/zle can redraw lines correctly (history navigation, etc.).
+        // Locale env (LANG/LC_ALL) is intentionally NOT injected — interactive
+        // PTYs should respect whatever the user's shell rc files set up.
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "codeg");
-        if let Some(command) = initial_command {
-            // Run command and let this PTY session exit when it completes.
-            cmd.env("CODEG_CMD", command);
-            cmd.args(["-l", "-i", "-c", "eval \"$CODEG_CMD\""]);
-        } else {
-            cmd.args(["-l", "-i"]);
+
+        match detect_posix_shell_flavor(shell) {
+            PosixShellFlavor::BashLike => {
+                if let Some(command) = initial_command {
+                    // Indirection via env var avoids quoting/escaping bugs
+                    // for arbitrary commands (and keeps long commands off
+                    // argv for readability in `ps`).
+                    cmd.env("CODEG_CMD", command);
+                    cmd.args(["-l", "-i", "-c", "eval \"$CODEG_CMD\""]);
+                } else {
+                    cmd.args(["-l", "-i"]);
+                }
+            }
+            PosixShellFlavor::Unknown => {
+                // No-flag spawn for nu/xonsh/elvish/pwsh on Linux/etc. Most
+                // modern shells default to interactive when stdin is a TTY,
+                // so we get a usable session without guessing flag syntax.
+                if let Some(command) = initial_command {
+                    cmd.args(["-c", command]);
+                }
+            }
         }
     }
 }
@@ -165,6 +215,7 @@ pub struct SpawnOptions {
     pub terminal_id: String,
     pub working_dir: String,
     pub owner_window_label: String,
+    pub shell: Option<String>,
     pub initial_command: Option<String>,
     pub extra_env: Option<HashMap<String, String>>,
     pub temp_files: Vec<std::path::PathBuf>,
@@ -212,7 +263,13 @@ impl TerminalManager {
             })
             .map_err(|e| TerminalError::SpawnFailed(e.to_string()))?;
 
-        let shell = resolve_shell();
+        let shell = opts
+            .shell
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(resolve_shell);
         let mut cmd = CommandBuilder::new(&shell);
         configure_shell_command(&mut cmd, &shell, opts.initial_command.as_deref());
         cmd.cwd(&opts.working_dir);

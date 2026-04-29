@@ -123,6 +123,7 @@ function refitTerminalAfterMetricsChange({
 interface TerminalViewProps {
   terminalId: string
   workingDir: string
+  shell?: string
   initialCommand?: string
   isActive: boolean
   isVisible: boolean
@@ -132,6 +133,7 @@ interface TerminalViewProps {
 export function TerminalView({
   terminalId,
   workingDir,
+  shell,
   initialCommand,
   isActive,
   isVisible,
@@ -284,7 +286,7 @@ export function TerminalView({
 
       // Spawn the terminal AFTER subscribing to events
       try {
-        await terminalSpawn(workingDir, initialCommand, terminalId)
+        await terminalSpawn(workingDir, shell, initialCommand, terminalId)
       } catch (err) {
         onProcessExitedRef.current?.(terminalId)
         term.write(`\r\n\x1b[31m[Failed to start terminal: ${err}]\x1b[0m\r\n`)
@@ -349,7 +351,7 @@ export function TerminalView({
       cancelled = true
       cleanup?.()
     }
-  }, [terminalId, workingDir, initialCommand])
+  }, [terminalId, workingDir, shell, initialCommand])
 
   // Refit and focus when becoming active or panel becomes visible
   useEffect(() => {

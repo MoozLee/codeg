@@ -6,13 +6,13 @@ use serde::Deserialize;
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
 use crate::commands::system_settings as settings_commands;
+use crate::commands::system_settings::{
+    LANGUAGE_SETTINGS_UPDATED_EVENT, SYSTEM_LANGUAGE_SETTINGS_KEY, SYSTEM_PROXY_SETTINGS_KEY,
+    SYSTEM_TERMINAL_SETTINGS_KEY, TERMINAL_SETTINGS_UPDATED_EVENT,
+};
 use crate::db::service::app_metadata_service;
 use crate::models::*;
 use crate::network::proxy;
-
-const SYSTEM_PROXY_SETTINGS_KEY: &str = "system_proxy_settings";
-const SYSTEM_LANGUAGE_SETTINGS_KEY: &str = "system_language_settings";
-const LANGUAGE_SETTINGS_UPDATED_EVENT: &str = "app://language-settings-updated";
 
 // Wrapper structs to match Tauri's named parameter convention.
 // Frontend sends `{ settings: <T> }` which Tauri `invoke()` unwraps automatically,
@@ -31,6 +31,16 @@ pub struct UpdateLanguageSettingsParams {
 #[derive(Deserialize)]
 pub struct UpdateOpenTargetSettingsParams {
     pub settings: SystemOpenTargetSettings,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTerminalSettingsParams {
+    pub settings: SystemTerminalSettings,
+}
+
+#[derive(Deserialize)]
+pub struct ProbeTerminalShellPathParams {
+    pub path: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +73,27 @@ pub async fn get_system_open_target_settings(
     let db = &state.db;
     let settings = settings_commands::load_system_open_target_settings(&db.conn).await?;
     Ok(Json(settings))
+}
+
+pub async fn get_system_terminal_settings(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<SystemTerminalSettings>, AppCommandError> {
+    let db = &state.db;
+    let settings = settings_commands::load_system_terminal_settings(&db.conn).await?;
+    Ok(Json(settings))
+}
+
+pub async fn get_available_terminal_shells(
+) -> Result<Json<AvailableTerminalShells>, AppCommandError> {
+    Ok(Json(settings_commands::build_available_terminal_shells()))
+}
+
+pub async fn probe_terminal_shell_path(
+    Json(params): Json<ProbeTerminalShellPathParams>,
+) -> Result<Json<bool>, AppCommandError> {
+    Ok(Json(settings_commands::probe_terminal_shell_path_core(
+        &params.path,
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -131,4 +162,29 @@ pub async fn open_path_with_target() -> Result<Json<()>, AppCommandError> {
     Err(AppCommandError::configuration_invalid(
         "Opening files in a native editor is only available in the desktop app",
     ))
+}
+
+pub async fn update_system_terminal_settings(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdateTerminalSettingsParams>,
+) -> Result<Json<SystemTerminalSettings>, AppCommandError> {
+    let settings = settings_commands::normalize_terminal_settings(params.settings);
+    let db = &state.db;
+
+    let serialized = serde_json::to_string(&settings).map_err(|e| {
+        AppCommandError::invalid_input("Failed to serialize terminal settings")
+            .with_detail(e.to_string())
+    })?;
+
+    app_metadata_service::upsert_value(&db.conn, SYSTEM_TERMINAL_SETTINGS_KEY, &serialized)
+        .await
+        .map_err(AppCommandError::from)?;
+
+    crate::web::event_bridge::emit_event(
+        &state.emitter,
+        TERMINAL_SETTINGS_UPDATED_EVENT,
+        settings.clone(),
+    );
+
+    Ok(Json(settings))
 }
