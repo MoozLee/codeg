@@ -1652,6 +1652,8 @@
         "dropFilesToAttach": "أسقط الملفات لإرفاقها",
         "loadingSettings": "جارٍ تحميل الإعدادات...",
         "loadingMode": "جارٍ تحميل الوضع...",
+        "modeLabel": "الوضع",
+        "agentSettings": "إعدادات الوكيل",
         "cancel": "إلغاء",
         "send": "إرسال",
         "forkAndSend": "تفريع وإرسال",

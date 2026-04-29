@@ -1,13 +1,11 @@
 "use client"
 
-import { ChevronUp } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu"
 import { DropdownRadioItemContent } from "@/components/chat/dropdown-radio-item-content"
 import type { SessionModeInfo } from "@/lib/types"
@@ -16,29 +14,28 @@ interface ModeSelectorProps {
   modes: SessionModeInfo[]
   selectedModeId: string | null
   onSelect: (modeId: string) => void
+  label: string
 }
 
 export function ModeSelector({
   modes,
   selectedModeId,
   onSelect,
+  label,
 }: ModeSelectorProps) {
-  const selectedMode = modes.find((m) => m.id === selectedModeId)
-  const label = selectedMode?.name ?? "Mode"
+  const selected = modes.find((mode) => mode.id === selectedModeId)
+  const currentLabel = selected?.name ?? selectedModeId ?? ""
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="xs"
-          className="gap-1 min-w-0"
-          title={selectedMode?.description ?? selectedMode?.name}
-        >
-          <span className="truncate">{label}</span>
-          <ChevronUp className="size-3 shrink-0" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="min-w-72">
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger
+        title={selected?.description ?? selected?.name ?? label}
+      >
+        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+        <span className="max-w-[10rem] shrink-0 truncate text-xs text-muted-foreground">
+          {currentLabel}
+        </span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-[60vh] min-w-72 max-w-xs overflow-y-auto">
         <DropdownMenuRadioGroup
           value={selectedModeId ?? ""}
           onValueChange={onSelect}
@@ -52,7 +49,7 @@ export function ModeSelector({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   )
 }
