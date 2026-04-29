@@ -161,7 +161,7 @@ const ConversationTabView = memo(function ConversationTabView({
   const tWelcome = useTranslations("Folder.chat.welcomeInputPanel")
   const sharedT = useTranslations("Folder.chat.shared")
   const { activeFolder: folder, activeFolderId } = useActiveFolder()
-  const { refreshConversations, updateConversationLocal } = useAppWorkspace()
+  const { refreshConversations } = useAppWorkspace()
   const folderId = activeFolderId ?? 0
   const { tabs, bindConversationTab, setTabRuntimeConversationId, pinTab } =
     useTabContext()
@@ -227,7 +227,6 @@ const ConversationTabView = memo(function ConversationTabView({
   } | null>(null)
   const dbConvIdRef = useRef<number | null>(conversationId)
   const mountedRef = useRef(true)
-  const statusUpdatedRef = useRef(false)
   const selectedAgentRef = useRef(selectedAgent)
   const createConversationPendingRef = useRef(false)
   // For existing conversations (opened from sidebar), the external_id is
@@ -467,34 +466,6 @@ const ConversationTabView = memo(function ConversationTabView({
   }, [connSessionId, trySaveExternalId])
 
   useEffect(() => {
-    if (connStatus === "connected" || connStatus === "prompting") {
-      statusUpdatedRef.current = false
-      return
-    }
-    if (statusUpdatedRef.current) return
-    const persistedId = dbConvIdRef.current
-    if (!persistedId) return
-    // Only update status if the user actually interacted in this session.
-    // A pure history view (opened from sidebar, no messages sent) should
-    // not flip the conversation to "completed" just because the ACP
-    // connection disconnected (e.g. agent auth expired).
-    if (!hasSentMessage) return
-    if (connStatus === "disconnected") {
-      statusUpdatedRef.current = true
-      updateConversationLocal(persistedId, { status: "completed" })
-      updateConversationStatus(persistedId, "completed").catch((e) =>
-        console.error("[ConversationTabView] update status:", e)
-      )
-    } else if (connStatus === "error") {
-      statusUpdatedRef.current = true
-      updateConversationLocal(persistedId, { status: "cancelled" })
-      updateConversationStatus(persistedId, "cancelled").catch((e) =>
-        console.error("[ConversationTabView] update status:", e)
-      )
-    }
-  }, [connStatus, hasSentMessage, updateConversationLocal])
-
-  useEffect(() => {
     if (dbConversationId == null) return
     if (reloadSignal === latestReloadSignal.current) return
     latestReloadSignal.current = reloadSignal
@@ -577,7 +548,6 @@ const ConversationTabView = memo(function ConversationTabView({
           folderId,
           conversationId: persistedId,
         })
-        statusUpdatedRef.current = false
         return
       }
 
@@ -621,7 +591,6 @@ const ConversationTabView = memo(function ConversationTabView({
             effectiveConversationId
           )
           clearMessageInputDraft(buildNewConversationDraftStorageKey())
-          statusUpdatedRef.current = false
           refreshConversations()
 
           // Now that the row exists, kick off the actual prompt with the
@@ -1327,7 +1296,7 @@ export function ConversationDetailPanel() {
         className={cn(
           canTile
             ? cn(
-                "relative h-full min-w-96 flex-1 overflow-hidden",
+                "relative h-full min-w-[28rem] flex-1 overflow-hidden",
                 index > 0 && "border-l border-border",
                 active &&
                   "bg-gradient-to-b from-sidebar-primary/[0.03] to-transparent"

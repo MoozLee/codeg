@@ -28,38 +28,16 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 
 interface ConversationContextBarProps {
-  tabId?: string | null
   extraContent?: React.ReactNode
   hasExtraContent?: boolean
   scrollEndTrigger?: number
 }
 
 export const ConversationContextBar = memo(function ConversationContextBar({
-  tabId,
   extraContent,
   hasExtraContent = false,
   scrollEndTrigger,
 }: ConversationContextBarProps = {}) {
-  const t = useTranslations("Folder.conversationContextBar")
-  const tBd = useTranslations("Folder.branchDropdown")
-  const { tabs, activeTabId, setTabFolder } = useTabContext()
-  const { folders, allFolders, branches, setBranch, refreshFolder } =
-    useAppWorkspace()
-  const { addTask, updateTask } = useTaskContext()
-
-  const ownTab = useMemo(() => {
-    const lookupId = tabId ?? activeTabId
-    return tabs.find((x) => x.id === lookupId) ?? null
-  }, [tabs, tabId, activeTabId])
-
-  const ownFolder = useMemo(
-    () =>
-      ownTab
-        ? (allFolders.find((f) => f.id === ownTab.folderId) ?? null)
-        : null,
-    [ownTab, allFolders]
-  )
-
   const scrollRef = useRef<OverlayScrollbarsComponentRef>(null)
   const innerRef = useRef<HTMLDivElement>(null)
   const prevScrollTriggerRef = useRef<number>(scrollEndTrigger ?? 0)
@@ -78,6 +56,7 @@ export const ConversationContextBar = memo(function ConversationContextBar({
   }, [scrollEndTrigger])
 
   useEffect(() => {
+    if (!hasExtraContent) return
     const inner = innerRef.current
     if (!inner) return
     const handler = (e: WheelEvent) => {
@@ -91,84 +70,16 @@ export const ConversationContextBar = memo(function ConversationContextBar({
     }
     inner.addEventListener("wheel", handler, { passive: false })
     return () => inner.removeEventListener("wheel", handler)
-  }, [])
+  }, [hasExtraContent])
 
-  const hasSelectors = Boolean(ownTab && ownFolder)
-  if (!hasSelectors && !hasExtraContent) return null
-
-  const isNewConversation = ownTab?.conversationId == null
-  const currentBranch = ownFolder
-    ? (branches.get(ownFolder.id) ?? ownFolder.git_branch ?? null)
-    : null
-  const showBranchPicker = hasSelectors && currentBranch != null
+  if (!hasExtraContent) return null
 
   return (
     <ScrollArea x="scroll" y="hidden" className="shrink-0" ref={scrollRef}>
       <div
         ref={innerRef}
-        className={cn(
-          "flex w-max items-center gap-1.5 pr-2 pt-2 text-xs text-muted-foreground",
-          !hasSelectors && "pl-2"
-        )}
+        className="flex w-max items-center gap-1.5 px-2 pt-2 text-xs text-muted-foreground"
       >
-        {hasSelectors && ownTab && ownFolder && (
-          <div
-            className={cn(
-              "sticky left-0 z-10 flex shrink-0 items-center gap-1.5 bg-background pl-2 pr-2",
-              hasExtraContent && "border-r border-border/50"
-            )}
-          >
-            <FolderPicker
-              folders={folders}
-              currentFolderId={ownFolder.id}
-              currentFolderName={ownFolder.name}
-              title={`${t("folderTitle")}: ${ownFolder.name}`}
-              editable={isNewConversation}
-              onSelect={async (folderId) => {
-                const target = folders.find((f) => f.id === folderId)
-                if (!target) return
-                try {
-                  setTabFolder(ownTab.id, target.id, target.path)
-                  toast.success(
-                    t("toasts.folderChanged", { name: target.name })
-                  )
-                } catch (err) {
-                  console.error(
-                    "[ConversationContextBar] switch folder failed:",
-                    err
-                  )
-                  toast.error(t("toasts.openFolderFailed"))
-                }
-              }}
-              labelEmpty={t("noFolders")}
-              labelSearch={t("searchFolder")}
-            />
-
-            {showBranchPicker && (
-              <BranchPicker
-                folderId={ownFolder.id}
-                folderPath={ownFolder.path}
-                currentBranch={currentBranch}
-                title={`${t("branchTitle")}: ${currentBranch ?? t("noBranch")}`}
-                onCheckout={async (branchName) => {
-                  const taskId = `checkout-${ownFolder.id}-${Date.now()}`
-                  addTask(taskId, tBd("tasks.checkoutTo", { branchName }))
-                  updateTask(taskId, { status: "running" })
-                  try {
-                    await gitCheckout(ownFolder.path, branchName)
-                    setBranch(ownFolder.id, branchName)
-                    await refreshFolder(ownFolder.id)
-                    updateTask(taskId, { status: "completed" })
-                  } catch (err) {
-                    const msg = err instanceof Error ? err.message : String(err)
-                    updateTask(taskId, { status: "failed", error: msg })
-                    toast.error(msg)
-                  }
-                }}
-              />
-            )}
-          </div>
-        )}
         {extraContent}
       </div>
     </ScrollArea>
@@ -176,6 +87,102 @@ export const ConversationContextBar = memo(function ConversationContextBar({
 })
 
 ConversationContextBar.displayName = "ConversationContextBar"
+
+// ============================================================================
+// ConversationFolderBranchPicker — folder + branch buttons designed to sit
+// inline inside the message input action row.
+// ============================================================================
+
+interface ConversationFolderBranchPickerProps {
+  tabId?: string | null
+}
+
+export const ConversationFolderBranchPicker = memo(
+  function ConversationFolderBranchPicker({
+    tabId,
+  }: ConversationFolderBranchPickerProps) {
+    const t = useTranslations("Folder.conversationContextBar")
+    const tBd = useTranslations("Folder.branchDropdown")
+    const { tabs, activeTabId, setTabFolder } = useTabContext()
+    const { folders, allFolders, branches, setBranch, refreshFolder } =
+      useAppWorkspace()
+    const { addTask, updateTask } = useTaskContext()
+
+    const ownTab = useMemo(() => {
+      const lookupId = tabId ?? activeTabId
+      return tabs.find((x) => x.id === lookupId) ?? null
+    }, [tabs, tabId, activeTabId])
+
+    const ownFolder = useMemo(
+      () =>
+        ownTab
+          ? (allFolders.find((f) => f.id === ownTab.folderId) ?? null)
+          : null,
+      [ownTab, allFolders]
+    )
+
+    if (!ownTab || !ownFolder) return null
+
+    const isNewConversation = ownTab.conversationId == null
+    const currentBranch =
+      branches.get(ownFolder.id) ?? ownFolder.git_branch ?? null
+    const showBranchPicker = currentBranch != null
+
+    return (
+      <>
+        <FolderPicker
+          folders={folders}
+          currentFolderId={ownFolder.id}
+          currentFolderName={ownFolder.name}
+          title={`${t("folderTitle")}: ${ownFolder.name}`}
+          editable={isNewConversation}
+          onSelect={async (folderId) => {
+            const target = folders.find((f) => f.id === folderId)
+            if (!target) return
+            try {
+              setTabFolder(ownTab.id, target.id, target.path)
+              toast.success(t("toasts.folderChanged", { name: target.name }))
+            } catch (err) {
+              console.error(
+                "[ConversationFolderBranchPicker] switch folder failed:",
+                err
+              )
+              toast.error(t("toasts.openFolderFailed"))
+            }
+          }}
+          labelEmpty={t("noFolders")}
+          labelSearch={t("searchFolder")}
+        />
+
+        {showBranchPicker && (
+          <BranchPicker
+            folderId={ownFolder.id}
+            folderPath={ownFolder.path}
+            currentBranch={currentBranch}
+            title={`${t("branchTitle")}: ${currentBranch ?? t("noBranch")}`}
+            onCheckout={async (branchName) => {
+              const taskId = `checkout-${ownFolder.id}-${Date.now()}`
+              addTask(taskId, tBd("tasks.checkoutTo", { branchName }))
+              updateTask(taskId, { status: "running" })
+              try {
+                await gitCheckout(ownFolder.path, branchName)
+                setBranch(ownFolder.id, branchName)
+                await refreshFolder(ownFolder.id)
+                updateTask(taskId, { status: "completed" })
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err)
+                updateTask(taskId, { status: "failed", error: msg })
+                toast.error(msg)
+              }
+            }}
+          />
+        )}
+      </>
+    )
+  }
+)
+
+ConversationFolderBranchPicker.displayName = "ConversationFolderBranchPicker"
 
 // ============================================================================
 // FolderPicker

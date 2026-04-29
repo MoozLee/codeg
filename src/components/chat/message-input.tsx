@@ -5,17 +5,12 @@ import { isDesktop } from "@/lib/platform"
 import Image from "next/image"
 import { useLocale, useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import {
   BookOpenText,
   Check,
   ChevronUp,
-  Ellipsis,
+  Cog,
   FileSearch,
   GitFork,
   ListPlus,
@@ -41,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { ImagePreviewDialog } from "@/components/ui/image-preview-dialog"
+import { AgentIcon } from "@/components/agent-icon"
 import { cn, randomUUID } from "@/lib/utils"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
@@ -65,7 +61,10 @@ import {
   type AttachFileToSessionDetail,
   type AppendTextToSessionDetail,
 } from "@/lib/session-attachment-events"
-import { ConversationContextBar } from "@/components/chat/conversation-context-bar"
+import {
+  ConversationContextBar,
+  ConversationFolderBranchPicker,
+} from "@/components/chat/conversation-context-bar"
 import { ModeSelector } from "@/components/chat/mode-selector"
 import { SessionConfigSelector } from "@/components/chat/session-config-selector"
 import {
@@ -284,7 +283,7 @@ function buildDataUri(base64Data: string, mimeType: string | null): string {
 
 function SelectorLoadingChip({ label }: { label: string }) {
   return (
-    <div className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2 text-[11px] text-muted-foreground">
+    <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
       <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
       <span>{label}</span>
     </div>
@@ -1786,6 +1785,7 @@ export function MessageInput({
           modes={availableModes}
           selectedModeId={effectiveModeId!}
           onSelect={handleModeSelect}
+          label={t("modeLabel")}
         />
       )}
     </>
@@ -1970,7 +1970,6 @@ export function MessageInput({
         )}
       >
         <ConversationContextBar
-          tabId={attachmentTabId}
           hasExtraContent={hasImageAttachments || hasResourceAttachments}
           scrollEndTrigger={attachments.length}
           extraContent={
@@ -2043,6 +2042,7 @@ export function MessageInput({
         />
         <div className="@container flex shrink-0 items-end justify-between gap-2 px-2 pb-2">
           <div className="flex min-w-0 items-end gap-2">
+            <ConversationFolderBranchPicker tabId={attachmentTabId} />
             <DropdownMenu onOpenChange={handleAddMenuOpenChange}>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -2281,27 +2281,31 @@ export function MessageInput({
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
-            {/* 宽屏内联显示，窄屏（<34rem）通过"更多"气泡显示；用 rem 让阈值随外观缩放同步变化 */}
-            <div className="hidden @[34rem]:contents">{selectorItems}</div>
             {hasAnySelector && (
-              <Popover>
-                <PopoverTrigger asChild>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-6 w-6 shrink-0 bg-transparent @[34rem]:hidden"
+                    className="h-6 w-6 shrink-0 bg-transparent"
+                    title={t("agentSettings")}
+                    aria-label={t("agentSettings")}
                   >
-                    <Ellipsis className="size-4" />
+                    {agentType ? (
+                      <AgentIcon agentType={agentType} className="size-4" />
+                    ) : (
+                      <Cog className="size-4" />
+                    )}
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
                   side="top"
                   align="start"
-                  className="flex w-auto flex-col gap-1 rounded-xl p-1"
+                  className="min-w-56"
                 >
                   {selectorItems}
-                </PopoverContent>
-              </Popover>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
           <div className="shrink-0">{actionButtons}</div>

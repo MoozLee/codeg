@@ -54,6 +54,28 @@ pub async fn update_status(
     Ok(())
 }
 
+/// Conditional status transition (CAS): write `new_status` only if the row's
+/// current `status` equals `expected`. Returns `true` when the row was
+/// updated. Used by the lifecycle subscriber on disconnect/error so a
+/// concurrent user-driven `completed` (or a prior `pending_review` from
+/// `TurnComplete`) cannot be silently overwritten.
+pub async fn update_status_if(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    expected: conversation::ConversationStatus,
+    new_status: conversation::ConversationStatus,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let result = conversation::Entity::update_many()
+        .col_expr(conversation::Column::Status, Expr::value(new_status))
+        .col_expr(conversation::Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::Status.eq(expected))
+        .exec(conn)
+        .await?;
+    Ok(result.rows_affected > 0)
+}
+
 pub async fn update_title(
     conn: &DatabaseConnection,
     conversation_id: i32,

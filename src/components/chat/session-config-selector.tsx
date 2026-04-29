@@ -1,16 +1,14 @@
 "use client"
 
 import { Fragment } from "react"
-import { ChevronUp } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu"
 import { DropdownRadioItemContent } from "@/components/chat/dropdown-radio-item-content"
 import type { SessionConfigOptionInfo } from "@/lib/types"
@@ -26,24 +24,26 @@ export function SessionConfigSelector({
 }: SessionConfigSelectorProps) {
   if (option.kind.type !== "select") return null
 
-  const selected = option.kind.options.find(
+  const allOptions =
+    option.kind.groups.length > 0
+      ? option.kind.groups.flatMap((group) => group.options)
+      : option.kind.options
+  const selected = allOptions.find(
     (item) => item.value === option.kind.current_value
   )
-  const label = selected?.name ?? option.kind.current_value
+  const currentLabel = selected?.name ?? option.kind.current_value
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="xs"
-          className="gap-1 min-w-0 bg-transparent"
-          title={option.description ?? option.name}
-        >
-          <span className="truncate">{label}</span>
-          <ChevronUp className="size-3 shrink-0" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="min-w-72">
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger title={option.description ?? option.name}>
+        <span className="min-w-0 flex-1 truncate font-medium">
+          {option.name}
+        </span>
+        <span className="max-w-[10rem] shrink-0 truncate text-xs text-muted-foreground">
+          {currentLabel}
+        </span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-[60vh] min-w-72 max-w-xs overflow-y-auto">
         <DropdownMenuRadioGroup
           value={option.kind.current_value}
           onValueChange={(value) => onSelect(option.id, value)}
@@ -75,7 +75,7 @@ export function SessionConfigSelector({
                 </DropdownMenuRadioItem>
               ))}
         </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   )
 }

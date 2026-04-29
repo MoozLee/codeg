@@ -1652,6 +1652,8 @@
         "dropFilesToAttach": "拖曳檔案到此處附加",
         "loadingSettings": "正在載入設定...",
         "loadingMode": "正在載入模式...",
+        "modeLabel": "模式",
+        "agentSettings": "智能體設定",
         "cancel": "取消",
         "send": "傳送",
         "forkAndSend": "分叉發送",

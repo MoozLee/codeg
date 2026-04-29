@@ -1652,6 +1652,8 @@
         "dropFilesToAttach": "Suelta archivos para adjuntar",
         "loadingSettings": "Cargando ajustes...",
         "loadingMode": "Cargando modo...",
+        "modeLabel": "Modo",
+        "agentSettings": "Ajustes del agente",
         "cancel": "Cancelar",
         "send": "Enviar",
         "forkAndSend": "Fork y Enviar",

@@ -4,6 +4,7 @@
 //! fires). Decoupled from `emit_with_state` so the emit hot path stays
 //! lock-tight.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,11 +13,29 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::broadcast;
 
 use crate::acp::manager::ConnectionManager;
-use crate::acp::types::{AcpEvent, EventEnvelope};
+use crate::acp::types::{AcpEvent, ConnectionStatus, EventEnvelope};
 use crate::db::entities::conversation::ConversationStatus;
 use crate::db::error::DbError;
 use crate::db::service::conversation_service;
-use crate::web::event_bridge::{emit_with_state, WebEvent, WebEventBroadcaster};
+use crate::acp::session_state::SessionState;
+use crate::web::event_bridge::{emit_with_state, EventEmitter, WebEvent, WebEventBroadcaster};
+use tokio::sync::RwLock;
+
+/// Per-connection state that survives `ConnectionCleanupGuard::drop` so
+/// `Disconnected` / `Error` handlers can still emit a derived
+/// `ConversationStatusChanged` after the manager entry has been removed.
+///
+/// Captured on `ConversationLinked` (the earliest point a connection is bound
+/// to a conversation row) and consulted on terminal status events. Without
+/// this cache, `manager.get_state_and_emitter(connection_id)` races the
+/// cleanup guard: `emit_with_state(StatusChanged{Disconnected})` writes to the
+/// broadcaster *before* the guard drops, but the subscriber's async receive
+/// can wake up after the entry is already gone.
+struct CachedConn {
+    conversation_id: i32,
+    state: Arc<RwLock<SessionState>>,
+    emitter: EventEmitter,
+}
 
 /// Backoff schedule for `handle_event` DB writes. Most transient
 /// SQLite contention clears within the first retry; the third gives a
@@ -128,6 +147,78 @@ pub(crate) async fn handle_event(
     }
 }
 
+/// Snapshot the connection's `(state, emitter)` into the lifecycle cache when
+/// `ConversationLinked` arrives. Idempotent on repeat calls (re-link on the
+/// already-bound path is a no-op so we don't churn the cached refs).
+async fn try_cache_link(
+    cache: &mut HashMap<String, CachedConn>,
+    manager: &ConnectionManager,
+    connection_id: &str,
+    conversation_id: i32,
+) {
+    if cache.contains_key(connection_id) {
+        return;
+    }
+    // The connection is necessarily still in the manager at this point —
+    // `ConversationLinked` is emitted by `send_prompt_linked` from the
+    // connection's own send path, well before any disconnect.
+    let Some((state, emitter)) = manager.get_state_and_emitter(connection_id).await else {
+        eprintln!(
+            "[lifecycle][WARN] ConversationLinked for unknown connection {connection_id}; \
+             skipping cache (terminal-status hand-off will no-op)"
+        );
+        return;
+    };
+    cache.insert(
+        connection_id.to_string(),
+        CachedConn {
+            conversation_id,
+            state,
+            emitter,
+        },
+    );
+}
+
+/// Handle `StatusChanged{Disconnected}` / `Error` for a cached connection:
+/// CAS the row from `InProgress` → `Cancelled` (preserves any prior
+/// `PendingReview` from `TurnComplete` and any user-driven `Completed`),
+/// re-emit `ConversationStatusChanged` if the write took effect.
+///
+/// Removing the cache entry on first terminal event handles the
+/// `Error` → `Disconnected` sequence that `connection.rs` emits on the error
+/// path: the second event finds an empty cache and is a clean no-op, so we
+/// don't pay a redundant DB read.
+async fn handle_terminal_event(
+    db_conn: &DatabaseConnection,
+    cache: &mut HashMap<String, CachedConn>,
+    connection_id: &str,
+) -> Result<(), DbError> {
+    let Some(entry) = cache.remove(connection_id) else {
+        return Ok(());
+    };
+    let cid = entry.conversation_id;
+    let changed = conversation_service::update_status_if(
+        db_conn,
+        cid,
+        ConversationStatus::InProgress,
+        ConversationStatus::Cancelled,
+    )
+    .await?;
+    if !changed {
+        return Ok(());
+    }
+    emit_with_state(
+        &entry.state,
+        &entry.emitter,
+        AcpEvent::ConversationStatusChanged {
+            conversation_id: cid,
+            status: ConversationStatus::Cancelled,
+        },
+    )
+    .await;
+    Ok(())
+}
+
 /// Subscribe to the broadcaster synchronously and return the subscriber loop
 /// future. Caller spawns it onto whichever tokio runtime they manage
 /// (`tokio::spawn` from inside an async context, `tauri::async_runtime::spawn`
@@ -143,6 +234,10 @@ pub fn lifecycle_subscriber_task(
 ) -> impl Future<Output = ()> + Send + 'static {
     let mut rx = broadcaster.subscribe();
     async move {
+        // Per-connection (state, emitter, conversation_id) cache. Populated on
+        // ConversationLinked, drained on first terminal event. See `CachedConn`
+        // for why the cache is needed (cleanup-vs-subscriber race).
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
         loop {
             match rx.recv().await {
                 Ok(WebEvent { channel, payload }) => {
@@ -156,7 +251,36 @@ pub fn lifecycle_subscriber_task(
                             continue;
                         }
                     };
-                    handle_event_with_retry(&db_conn, &manager, &envelope).await;
+                    match &envelope.payload {
+                        AcpEvent::ConversationLinked {
+                            conversation_id, ..
+                        } => {
+                            try_cache_link(
+                                &mut cache,
+                                &manager,
+                                &envelope.connection_id,
+                                *conversation_id,
+                            )
+                            .await;
+                        }
+                        AcpEvent::StatusChanged {
+                            status: ConnectionStatus::Disconnected,
+                        }
+                        | AcpEvent::Error { .. } => {
+                            if let Err(e) =
+                                handle_terminal_event(&db_conn, &mut cache, &envelope.connection_id)
+                                    .await
+                            {
+                                eprintln!(
+                                    "[lifecycle][ERROR] terminal event for {}: {e}",
+                                    envelope.connection_id
+                                );
+                            }
+                        }
+                        _ => {
+                            handle_event_with_retry(&db_conn, &manager, &envelope).await;
+                        }
+                    }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     // Lagged means events were dropped between rx polls because
@@ -364,6 +488,179 @@ mod tests {
             read_row_status(&db, sentinel.id).await,
             ConversationStatus::InProgress,
             "row must be untouched when no conversation_id is bound to the connection"
+        );
+    }
+
+    /// Helper: install one cache entry seeded from a manager-registered
+    /// connection. Mirrors the runtime path where `try_cache_link` populates
+    /// the cache on `ConversationLinked`.
+    async fn seed_cache(
+        cache: &mut HashMap<String, CachedConn>,
+        manager: &ConnectionManager,
+        connection_id: &str,
+        conversation_id: i32,
+    ) {
+        try_cache_link(cache, manager, connection_id, conversation_id).await;
+    }
+
+    #[tokio::test]
+    async fn handle_terminal_event_writes_cancelled_when_in_progress() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/term-cancel").await;
+        let conv =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+        // Default-creates as InProgress.
+        assert_eq!(
+            read_row_status(&db, conv.id).await,
+            ConversationStatus::InProgress
+        );
+
+        let mgr = ConnectionManager::new();
+        {
+            let mut map = mgr.connections.lock().await;
+            map.insert(
+                "c1".to_string(),
+                fake_connection_with_state("c1", Some(conv.id)),
+            );
+        }
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
+        seed_cache(&mut cache, &mgr, "c1", conv.id).await;
+        assert!(cache.contains_key("c1"), "ConversationLinked should populate cache");
+
+        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        assert_eq!(
+            read_row_status(&db, conv.id).await,
+            ConversationStatus::Cancelled,
+            "in_progress row must be flipped to cancelled"
+        );
+        assert!(
+            !cache.contains_key("c1"),
+            "cache entry must be drained after first terminal event"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_terminal_event_preserves_pending_review() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/term-pr").await;
+        let conv =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+        // Simulate a TurnComplete-driven row already at PendingReview.
+        conversation_service::update_status(&db.conn, conv.id, ConversationStatus::PendingReview)
+            .await
+            .unwrap();
+
+        let mgr = ConnectionManager::new();
+        {
+            let mut map = mgr.connections.lock().await;
+            map.insert(
+                "c1".to_string(),
+                fake_connection_with_state("c1", Some(conv.id)),
+            );
+        }
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
+        seed_cache(&mut cache, &mgr, "c1", conv.id).await;
+
+        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        assert_eq!(
+            read_row_status(&db, conv.id).await,
+            ConversationStatus::PendingReview,
+            "CAS must not overwrite PendingReview when subscriber sees terminal event \
+             after TurnComplete"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_terminal_event_preserves_user_completed() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/term-completed").await;
+        let conv =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+        // User manually marked the conversation completed before the
+        // disconnect arrived.
+        conversation_service::update_status(&db.conn, conv.id, ConversationStatus::Completed)
+            .await
+            .unwrap();
+
+        let mgr = ConnectionManager::new();
+        {
+            let mut map = mgr.connections.lock().await;
+            map.insert(
+                "c1".to_string(),
+                fake_connection_with_state("c1", Some(conv.id)),
+            );
+        }
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
+        seed_cache(&mut cache, &mgr, "c1", conv.id).await;
+
+        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        assert_eq!(
+            read_row_status(&db, conv.id).await,
+            ConversationStatus::Completed,
+            "user-driven completed must survive the lifecycle terminal-event handler"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_terminal_event_drains_cache_on_error_then_disconnected() {
+        // connection.rs emits `Error` → `Disconnected` on failure. The first
+        // event drains the cache so the second is a clean no-op (no extra DB
+        // read, no second CAS attempt).
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/term-pair").await;
+        let conv =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+
+        let mgr = ConnectionManager::new();
+        {
+            let mut map = mgr.connections.lock().await;
+            map.insert(
+                "c1".to_string(),
+                fake_connection_with_state("c1", Some(conv.id)),
+            );
+        }
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
+        seed_cache(&mut cache, &mgr, "c1", conv.id).await;
+
+        // First terminal event: cancels, drains.
+        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        assert!(!cache.contains_key("c1"));
+        // Second terminal event: empty cache, returns Ok with no DB writes.
+        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        assert_eq!(
+            read_row_status(&db, conv.id).await,
+            ConversationStatus::Cancelled
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_terminal_event_noop_when_connection_unknown() {
+        // Defensive: a terminal event for a connection that never linked a
+        // conversation (cache miss) must not error out or touch any row.
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/term-unknown").await;
+        let sentinel =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+        assert_eq!(sentinel.status, ConversationStatus::InProgress);
+
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
+        handle_terminal_event(&db.conn, &mut cache, "ghost-connection")
+            .await
+            .unwrap();
+        assert_eq!(
+            read_row_status(&db, sentinel.id).await,
+            ConversationStatus::InProgress,
+            "no conversation should have been touched"
         );
     }
 

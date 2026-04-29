@@ -1652,6 +1652,8 @@
         "dropFilesToAttach": "ファイルをドロップして添付",
         "loadingSettings": "設定を読み込み中...",
         "loadingMode": "モードを読み込み中...",
+        "modeLabel": "モード",
+        "agentSettings": "エージェント設定",
         "cancel": "キャンセル",
         "send": "送信",
         "forkAndSend": "フォークして送信",
