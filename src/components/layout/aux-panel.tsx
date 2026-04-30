@@ -1,13 +1,14 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { FileDiff, Folder, FolderPen, GitCommit } from "lucide-react"
+import { FileDiff, Folder, FolderPen, GitCommit, History } from "lucide-react"
 import { useTranslations } from "next-intl"
 import {
   useAuxPanelContext,
   type AuxPanelTab,
 } from "@/contexts/aux-panel-context"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { UserMessagesTab } from "./aux-panel-user-messages-tab"
 import { FileTreeTab } from "./aux-panel-file-tree-tab"
 import { GitChangesTab } from "./aux-panel-git-changes-tab"
 import { GitLogTab } from "./aux-panel-git-log-tab"
@@ -48,6 +49,13 @@ export function AuxPanel() {
           className="h-10 w-full shrink-0 justify-start border-b border-border px-3 group-data-horizontal/tabs:h-10"
         >
           <TabsTrigger
+            value="user_messages"
+            title={t("userMessages")}
+            aria-label={t("userMessages")}
+          >
+            <History className="h-3.5 w-3.5" />
+          </TabsTrigger>
+          <TabsTrigger
             value="session_files"
             title={t("diff")}
             aria-label={t("diff")}
@@ -77,6 +85,12 @@ export function AuxPanel() {
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent
+          value="user_messages"
+          className="mt-0 flex-1 min-h-0 overflow-hidden"
+        >
+          <UserMessagesTab />
+        </TabsContent>
         <TabsContent
           value="session_files"
           className="mt-0 flex-1 min-h-0 overflow-hidden"

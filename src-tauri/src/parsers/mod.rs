@@ -8,10 +8,13 @@ pub mod opencode;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
+use chrono::{DateTime, Utc};
 use regex::Regex;
+use sha2::{Digest, Sha256};
 
 use crate::models::{
     ContentBlock, ConversationDetail, ConversationSummary, MessageTurn, SessionStats, TurnUsage,
+    UnifiedMessage,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -82,6 +85,55 @@ pub fn compute_session_stats(turns: &[MessageTurn]) -> Option<SessionStats> {
         context_window_max_tokens: None,
         context_window_usage_percent: None,
     })
+}
+
+pub fn stable_user_anchor_id_from_message(message: &UnifiedMessage) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"user-anchor:v1\0");
+
+    let trimmed_id = message.id.trim();
+    if trimmed_id.is_empty() {
+        hasher.update(b"ts:\0");
+        hasher.update(message.timestamp.to_rfc3339().as_bytes());
+    } else {
+        hasher.update(b"id:\0");
+        hasher.update(trimmed_id.as_bytes());
+    }
+
+    hasher.update(b"\0");
+    hasher.update(stable_message_content_signature(&message.content).as_bytes());
+    format!("user:{}", hex_prefix(&hasher.finalize(), 24))
+}
+
+pub fn stable_user_anchor_id_from_parts(
+    conversation_id: &str,
+    timestamp: DateTime<Utc>,
+    content: &[ContentBlock],
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"user-anchor:v1\0");
+    hasher.update(conversation_id.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(timestamp.to_rfc3339().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(stable_message_content_signature(content).as_bytes());
+    format!("user:{}", hex_prefix(&hasher.finalize(), 24))
+}
+
+fn stable_message_content_signature(content: &[ContentBlock]) -> String {
+    serde_json::to_string(content).unwrap_or_else(|_| format!("blocks:{}", content.len()))
+}
+
+fn hex_prefix(bytes: &[u8], prefix_len: usize) -> String {
+    let mut out = String::with_capacity(prefix_len.min(bytes.len() * 2));
+    for byte in bytes {
+        if out.len() >= prefix_len {
+            break;
+        }
+        out.push_str(&format!("{:02x}", byte));
+    }
+    out.truncate(prefix_len);
+    out
 }
 
 fn model_capacity_suffix_regex() -> &'static Regex {
@@ -691,8 +743,9 @@ mod tests {
     use super::{
         infer_context_window_max_tokens, latest_turn_total_usage_tokens,
         merge_context_window_stats, path_eq_for_matching,
+        stable_user_anchor_id_from_message, stable_user_anchor_id_from_parts,
     };
-    use crate::models::{MessageTurn, SessionStats, TurnRole, TurnUsage};
+    use crate::models::{ContentBlock, MessageTurn, SessionStats, TurnRole, TurnUsage, UnifiedMessage};
 
     #[test]
     fn infers_model_context_limits() {
@@ -717,6 +770,7 @@ mod tests {
         let turns = vec![
             MessageTurn {
                 id: "turn-0".to_string(),
+                anchor_id: None,
                 role: TurnRole::Assistant,
                 blocks: vec![],
                 timestamp,
@@ -731,6 +785,7 @@ mod tests {
             },
             MessageTurn {
                 id: "turn-1".to_string(),
+                anchor_id: None,
                 role: TurnRole::Assistant,
                 blocks: vec![],
                 timestamp,
@@ -778,6 +833,40 @@ mod tests {
         assert_eq!(merged_existing.total_tokens, Some(10));
         assert_eq!(merged_existing.context_window_used_tokens, Some(200));
         assert_eq!(merged_existing.context_window_max_tokens, Some(1000));
+    }
+
+    #[test]
+    fn stable_user_anchor_is_deterministic_for_unified_message() {
+        let timestamp = Utc::now();
+        let message = UnifiedMessage {
+            id: "msg-123".to_string(),
+            role: crate::models::MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "hello world".to_string(),
+            }],
+            timestamp,
+            usage: None,
+            duration_ms: None,
+            model: None,
+        };
+
+        let first = stable_user_anchor_id_from_message(&message);
+        let second = stable_user_anchor_id_from_message(&message);
+        assert_eq!(first, second);
+        assert!(first.starts_with("user:"));
+    }
+
+    #[test]
+    fn stable_user_anchor_from_parts_is_deterministic() {
+        let timestamp = Utc::now();
+        let content = vec![ContentBlock::Text {
+            text: "same input".to_string(),
+        }];
+
+        let first = stable_user_anchor_id_from_parts("conv-1", timestamp, &content);
+        let second = stable_user_anchor_id_from_parts("conv-1", timestamp, &content);
+        assert_eq!(first, second);
+        assert!(first.starts_with("user:"));
     }
 
     #[test]

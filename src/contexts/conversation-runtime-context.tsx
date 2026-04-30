@@ -82,6 +82,7 @@ type Action =
       type: "FETCH_DETAIL_SUCCESS"
       conversationId: number
       detail: DbConversationDetail
+      preserveOptimistic?: boolean
     }
   | {
       type: "FETCH_DETAIL_ERROR"
@@ -143,6 +144,7 @@ type Action =
         usage?: TurnUsage | null
         duration_ms?: number | null
         model?: string | null
+        anchor_id?: string | null
       }>
       sessionStats?: SessionStats | null
     }
@@ -166,6 +168,82 @@ function createEmptySession(
     sessionStats: null,
     pendingCleanup: false,
   }
+}
+
+function getTurnBlocksSignature(turn: MessageTurn): string {
+  try {
+    return JSON.stringify(turn.blocks)
+  } catch {
+    return `blocks:${turn.blocks.length}`
+  }
+}
+
+function getTimestampMs(timestamp: string): number | null {
+  const value = Date.parse(timestamp)
+  return Number.isFinite(value) ? value : null
+}
+
+function looksLikeOptimisticAnchorId(
+  anchorId: string | null | undefined
+): boolean {
+  return typeof anchorId === "string" && anchorId.startsWith("optimistic:")
+}
+
+function countUserTurns(turns: MessageTurn[]): number {
+  return turns.filter((turn) => turn.role === "user").length
+}
+
+function reconcileOptimisticTurns(
+  optimisticTurns: MessageTurn[],
+  knownCompletedTurns: MessageTurn[],
+  persistedTurns: MessageTurn[]
+): MessageTurn[] {
+  if (optimisticTurns.length === 0 || persistedTurns.length === 0) {
+    return optimisticTurns
+  }
+
+  const persistedUsers = persistedTurns
+    .filter((turn) => {
+      return (
+        turn.role === "user" && !looksLikeOptimisticAnchorId(turn.anchor_id)
+      )
+    })
+    .map((turn) => ({
+      signature: getTurnBlocksSignature(turn),
+      timestampMs: getTimestampMs(turn.timestamp),
+    }))
+
+  const baselineKnownUserCount = countUserTurns(knownCompletedTurns)
+  const appendedPersistedUsers = persistedUsers.slice(baselineKnownUserCount)
+
+  if (appendedPersistedUsers.length === 0) return optimisticTurns
+
+  let nextCandidateIndex = 0
+
+  return optimisticTurns.filter((turn) => {
+    if (turn.role !== "user") return true
+
+    const candidate = appendedPersistedUsers[nextCandidateIndex]
+    if (!candidate) return true
+
+    const optimisticSignature = getTurnBlocksSignature(turn)
+    if (candidate.signature !== optimisticSignature) {
+      return true
+    }
+
+    const optimisticTimestampMs = getTimestampMs(turn.timestamp)
+    const distance =
+      candidate.timestampMs !== null && optimisticTimestampMs !== null
+        ? Math.abs(candidate.timestampMs - optimisticTimestampMs)
+        : 0
+
+    if (distance > 5 * 60 * 1000) {
+      return true
+    }
+
+    nextCandidateIndex += 1
+    return false
+  })
 }
 
 function formatLivePlanEntries(
@@ -547,6 +625,15 @@ function reducer(
       // Only preserve optimisticTurns + liveMessage if user actively sent
       // a message and is awaiting agent response.
       const isActivelyInteracting = current.syncState === "awaiting_persist"
+      const preserveOptimistic = action.preserveOptimistic ?? false
+      const nextOptimisticTurns =
+        isActivelyInteracting || preserveOptimistic
+          ? reconcileOptimisticTurns(
+              current.optimisticTurns,
+              [...(current.detail?.turns ?? []), ...current.localTurns],
+              action.detail.turns ?? []
+            )
+          : []
 
       const nextSession: ConversationRuntimeSession = {
         ...current,
@@ -555,10 +642,12 @@ function reducer(
         detailError: null,
         externalId: nextExternalId ?? current.externalId,
         localTurns: [],
+        optimisticTurns: nextOptimisticTurns,
+        liveMessage:
+          isActivelyInteracting || preserveOptimistic
+            ? current.liveMessage
+            : null,
         sessionStats: action.detail.session_stats ?? current.sessionStats,
-        ...(isActivelyInteracting
-          ? {}
-          : { optimisticTurns: [], liveMessage: null }),
       }
 
       const nextByConversationId = new Map(state.byConversationId)
@@ -735,16 +824,19 @@ function reducer(
         const newUsage = turn.usage ?? patch.usage
         const newDuration = turn.duration_ms ?? patch.duration_ms
         const newModel = turn.model ?? patch.model
+        const newAnchorId = patch.anchor_id ?? turn.anchor_id
         if (
           newUsage !== turn.usage ||
           newDuration !== turn.duration_ms ||
-          newModel !== turn.model
+          newModel !== turn.model ||
+          newAnchorId !== turn.anchor_id
         ) {
           patchedTurns[patch.index] = {
             ...turn,
             usage: newUsage,
             duration_ms: newDuration,
             model: newModel,
+            anchor_id: newAnchorId,
           }
           changed = true
         }
@@ -796,7 +888,7 @@ interface ConversationRuntimeContextValue {
   getConversationIdByExternalId: (externalId: string) => number | null
   getTimelineTurns: (conversationId: number) => ConversationTimelineTurn[]
   fetchDetail: (conversationId: number) => void
-  refetchDetail: (conversationId: number) => void
+  refetchDetail: (conversationId: number, preserveOptimistic?: boolean) => void
   completeTurn: (conversationId: number) => void
   appendOptimisticTurn: (
     conversationId: number,
@@ -924,7 +1016,12 @@ export function ConversationRuntimeProvider({
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
     getFolderConversation(conversationId)
       .then((detail) => {
-        dispatch({ type: "FETCH_DETAIL_SUCCESS", conversationId, detail })
+        dispatch({
+          type: "FETCH_DETAIL_SUCCESS",
+          conversationId,
+          detail,
+          preserveOptimistic: false,
+        })
       })
       .catch((error: unknown) => {
         dispatch({
@@ -935,20 +1032,28 @@ export function ConversationRuntimeProvider({
       })
   }, [])
 
-  const refetchDetail = useCallback((conversationId: number) => {
-    dispatch({ type: "FETCH_DETAIL_START", conversationId })
-    getFolderConversation(conversationId)
-      .then((detail) => {
-        dispatch({ type: "FETCH_DETAIL_SUCCESS", conversationId, detail })
-      })
-      .catch((error: unknown) => {
-        dispatch({
-          type: "FETCH_DETAIL_ERROR",
-          conversationId,
-          error: error instanceof Error ? error.message : String(error),
+  const refetchDetail = useCallback(
+    (conversationId: number, preserveOptimistic = false) => {
+      dispatch({ type: "FETCH_DETAIL_START", conversationId })
+      getFolderConversation(conversationId)
+        .then((detail) => {
+          dispatch({
+            type: "FETCH_DETAIL_SUCCESS",
+            conversationId,
+            detail,
+            preserveOptimistic,
+          })
         })
-      })
-  }, [])
+        .catch((error: unknown) => {
+          dispatch({
+            type: "FETCH_DETAIL_ERROR",
+            conversationId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+    },
+    []
+  )
 
   const syncTurnMetadata = useCallback(
     (
@@ -975,27 +1080,37 @@ export function ConversationRuntimeProvider({
               if (cur.syncState === "awaiting_persist") return
 
               const localAssistantIndices: number[] = []
+              const localUserIndices: number[] = []
               for (let i = 0; i < cur.localTurns.length; i++) {
-                if (cur.localTurns[i].role === "assistant") {
+                const role = cur.localTurns[i].role
+                if (role === "assistant") {
                   localAssistantIndices.push(i)
+                } else if (role === "user") {
+                  localUserIndices.push(i)
                 }
               }
 
               const parsedAssistantTurns = parsed.turns.filter(
                 (t) => t.role === "assistant"
               )
+              const parsedUserTurns = parsed.turns.filter(
+                (t) => t.role === "user"
+              )
 
-              const offset =
+              const assistantOffset =
                 parsedAssistantTurns.length - localAssistantIndices.length
+              const userOffset =
+                parsedUserTurns.length - localUserIndices.length
               const patches: Array<{
                 index: number
                 usage?: TurnUsage | null
                 duration_ms?: number | null
                 model?: string | null
+                anchor_id?: string | null
               }> = []
 
               for (let i = 0; i < localAssistantIndices.length; i++) {
-                const parsedIdx = offset + i
+                const parsedIdx = assistantOffset + i
                 if (parsedIdx < 0 || parsedIdx >= parsedAssistantTurns.length)
                   continue
                 const pt = parsedAssistantTurns[parsedIdx]
@@ -1008,6 +1123,18 @@ export function ConversationRuntimeProvider({
                 })
               }
 
+              for (let i = 0; i < localUserIndices.length; i++) {
+                const parsedIdx = userOffset + i
+                if (parsedIdx < 0 || parsedIdx >= parsedUserTurns.length)
+                  continue
+                const pt = parsedUserTurns[parsedIdx]
+                if (!pt.anchor_id) continue
+                patches.push({
+                  index: localUserIndices[i],
+                  anchor_id: pt.anchor_id,
+                })
+              }
+
               if (patches.length > 0 || parsed.session_stats) {
                 dispatch({
                   type: "PATCH_TURN_METADATA",
@@ -1017,8 +1144,22 @@ export function ConversationRuntimeProvider({
                 })
               }
 
-              const latestPatch = patches[patches.length - 1]
-              if (!latestPatch?.usage && attempt < 1) {
+              const latestAssistantPatch = [...patches]
+                .reverse()
+                .find(
+                  (patch) => patch.usage || patch.duration_ms || patch.model
+                )
+              const missingUserAnchor = localUserIndices.some((index) => {
+                const turn = cur.localTurns[index]
+                return (
+                  !turn?.anchor_id ||
+                  looksLikeOptimisticAnchorId(turn.anchor_id)
+                )
+              })
+              if (
+                (!latestAssistantPatch?.usage || missingUserAnchor) &&
+                attempt < 1
+              ) {
                 trySync(attempt + 1)
               }
             })

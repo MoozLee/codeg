@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "Benutzernachrichten",
         "diff": "Unterschiede",
         "files": "Dateien",
         "changes": "Änderungen",
         "commits": "Einträge"
+      },
+      "userMessages": {
+        "loading": "Lädt...",
+        "fallbackLabel": "Benutzernachricht",
+        "noConversationTitle": "Keine Unterhaltung ausgewählt",
+        "noConversationHint": "Öffnen Sie eine Unterhaltung, um hier ihre Benutzernachrichten zu durchsuchen.",
+        "draftConversationTitle": "Noch keine gespeicherten Nachrichten",
+        "draftConversationHint": "Senden Sie in dieser Unterhaltung eine Nachricht, damit Sie hierhin navigieren können.",
+        "emptyTitle": "Keine Benutzernachrichten",
+        "emptyHint": "Diese Unterhaltung hat noch keine Benutzernachrichten zum Navigieren.",
+        "countLabel": "{count} gesamt",
+        "showingLabel": "{visible} von {total} angezeigt",
+        "showMore": "{count} weitere anzeigen",
+        "activeBadge": "Aktiv",
+        "dateGroupToday": "Heute",
+        "dateGroupYesterday": "Gestern",
+        "imageAttachmentCount": "{count} {count, plural, one {Bild} other {Bilder}}",
+        "groupCountLabel": "{count} {count, plural, one {Nachricht} other {Nachrichten}}"
       },
       "noFolderTitle": "Kein Ordner geöffnet",
       "noFolderHint": "Öffnen Sie einen Ordner, um seinen Inhalt hier zu sehen"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "Noch keine Nachrichten",
-        "emptyDescription": "Starten Sie eine Unterhaltung, um hier Nachrichten zu sehen"
+        "emptyDescription": "Starten Sie eine Unterhaltung, um hier Nachrichten zu sehen",
+        "scrollToTop": "Nach oben scrollen",
+        "scrollToBottom": "Nach unten scrollen"
       },
       "chatInput": {
         "connecting": "Verbinden...",

@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "Messages utilisateur",
         "diff": "Différences",
         "files": "Fichiers",
         "changes": "Changements",
         "commits": "Validations"
+      },
+      "userMessages": {
+        "loading": "Chargement...",
+        "fallbackLabel": "Message utilisateur",
+        "noConversationTitle": "Aucune conversation sélectionnée",
+        "noConversationHint": "Ouvrez une conversation pour parcourir ici ses messages utilisateur.",
+        "draftConversationTitle": "Aucun message enregistré pour le moment",
+        "draftConversationHint": "Envoyez un message dans cette conversation pour pouvoir y naviguer ici.",
+        "emptyTitle": "Aucun message utilisateur",
+        "emptyHint": "Cette conversation n'a pas encore de messages utilisateur à parcourir.",
+        "countLabel": "{count} au total",
+        "showingLabel": "{visible} sur {total} affichés",
+        "showMore": "Afficher encore {count}",
+        "activeBadge": "Actif",
+        "dateGroupToday": "Aujourd’hui",
+        "dateGroupYesterday": "Hier",
+        "imageAttachmentCount": "{count} {count, plural, one {image} other {images}}",
+        "groupCountLabel": "{count} {count, plural, one {message} other {messages}}"
       },
       "noFolderTitle": "Aucun dossier ouvert",
       "noFolderHint": "Ouvrez un dossier pour voir son contenu ici"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "Aucun message pour le moment",
-        "emptyDescription": "Commencez une conversation pour voir les messages ici"
+        "emptyDescription": "Commencez une conversation pour voir les messages ici",
+        "scrollToTop": "Faire défiler vers le haut",
+        "scrollToBottom": "Faire défiler vers le bas"
       },
       "chatInput": {
         "connecting": "Connexion...",

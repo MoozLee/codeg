@@ -96,7 +96,8 @@ interface ConversationTabViewProps {
 
 function buildOptimisticUserTurnFromDraft(
   draft: PromptDraft,
-  attachedResourcesFallback: string
+  attachedResourcesFallback: string,
+  conversationId: number
 ): MessageTurn {
   const displayText = getPromptDraftDisplayText(
     draft,
@@ -122,11 +123,14 @@ function buildOptimisticUserTurnFromDraft(
   }
   blocks.push({ type: "text", text })
 
+  const timestamp = new Date().toISOString()
+  const optimisticId = `optimistic-${randomUUID()}`
   return {
-    id: `optimistic-${randomUUID()}`,
+    id: optimisticId,
+    anchor_id: `optimistic:${conversationId}:${optimisticId}:${timestamp}`,
     role: "user",
     blocks,
-    timestamp: new Date().toISOString(),
+    timestamp,
   }
 }
 
@@ -473,7 +477,7 @@ const ConversationTabView = memo(function ConversationTabView({
       signal: reloadSignal,
       sawLoading: false,
     }
-    refetchDetail(dbConversationId)
+    refetchDetail(dbConversationId, true)
   }, [dbConversationId, reloadSignal, refetchDetail])
 
   useEffect(() => {
@@ -522,7 +526,8 @@ const ConversationTabView = memo(function ConversationTabView({
 
       const optimisticTurn = buildOptimisticUserTurnFromDraft(
         draft,
-        sharedT("attachedResources")
+        sharedT("attachedResources"),
+        effectiveConversationId
       )
       appendOptimisticTurn(
         effectiveConversationId,
@@ -765,11 +770,14 @@ const ConversationTabView = memo(function ConversationTabView({
   const handleAnswerQuestion = useCallback(
     (answer: string) => {
       if (connStatus !== "connected") return
+      const optimisticTurnTimestamp = new Date().toISOString()
+      const optimisticTurnId = `optimistic-${randomUUID()}`
       const optimisticTurn: MessageTurn = {
-        id: `optimistic-${randomUUID()}`,
+        id: optimisticTurnId,
+        anchor_id: `optimistic:${effectiveConversationId}:${optimisticTurnId}:${optimisticTurnTimestamp}`,
         role: "user",
         blocks: [{ type: "text", text: answer }],
-        timestamp: new Date().toISOString(),
+        timestamp: optimisticTurnTimestamp,
       }
       appendOptimisticTurn(
         effectiveConversationId,
@@ -825,6 +833,7 @@ const ConversationTabView = memo(function ConversationTabView({
   const messageListNode = (
     <MessageListView
       conversationId={effectiveConversationId}
+      anchorStorageConversationId={dbConversationId ?? undefined}
       agentType={selectedAgent}
       connStatus={connStatus}
       isActive={isActive}

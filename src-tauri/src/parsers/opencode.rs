@@ -10,7 +10,10 @@ use sea_orm::{
 };
 
 use crate::models::*;
-use crate::parsers::{folder_name_from_path, truncate_str, AgentParser, ParseError};
+use crate::parsers::{
+    folder_name_from_path, stable_user_anchor_id_from_message, truncate_str, AgentParser,
+    ParseError,
+};
 
 pub struct OpenCodeParser {
     base_dir: PathBuf,
@@ -780,6 +783,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         if matches!(msg.role, MessageRole::User) {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: Some(stable_user_anchor_id_from_message(msg)),
                 role: TurnRole::User,
                 blocks: msg.content.clone(),
                 timestamp: msg.timestamp,
@@ -791,6 +795,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         } else if matches!(msg.role, MessageRole::System) {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: None,
                 role: TurnRole::System,
                 blocks: msg.content.clone(),
                 timestamp: msg.timestamp,
@@ -825,6 +830,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
 
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: None,
                 role: TurnRole::Assistant,
                 blocks,
                 timestamp,

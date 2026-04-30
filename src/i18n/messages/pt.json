@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "Mensagens do usuário",
         "diff": "Diferenças",
         "files": "Arquivos",
         "changes": "Alterações",
         "commits": "Confirmações"
+      },
+      "userMessages": {
+        "loading": "Carregando...",
+        "fallbackLabel": "Mensagem do usuário",
+        "noConversationTitle": "Nenhuma conversa selecionada",
+        "noConversationHint": "Abra uma conversa para navegar aqui pelas mensagens do usuário.",
+        "draftConversationTitle": "Ainda não há mensagens salvas",
+        "draftConversationHint": "Envie uma mensagem nesta conversa para poder navegá-la aqui.",
+        "emptyTitle": "Nenhuma mensagem do usuário",
+        "emptyHint": "Esta conversa ainda não tem mensagens do usuário para navegar.",
+        "countLabel": "{count} no total",
+        "showingLabel": "Mostrando {visible} de {total}",
+        "showMore": "Mostrar mais {count}",
+        "activeBadge": "Atual",
+        "dateGroupToday": "Hoje",
+        "dateGroupYesterday": "Ontem",
+        "imageAttachmentCount": "{count} {count, plural, one {imagem} other {imagens}}",
+        "groupCountLabel": "{count} {count, plural, one {mensagem} other {mensagens}}"
       },
       "noFolderTitle": "Nenhuma pasta aberta",
       "noFolderHint": "Abra uma pasta para ver seu conteúdo aqui"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "Ainda não há mensagens",
-        "emptyDescription": "Inicie uma conversa para ver mensagens aqui"
+        "emptyDescription": "Inicie uma conversa para ver mensagens aqui",
+        "scrollToTop": "Rolar para o topo",
+        "scrollToBottom": "Rolar para o fim"
       },
       "chatInput": {
         "connecting": "Conectando...",

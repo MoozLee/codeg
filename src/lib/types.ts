@@ -111,6 +111,7 @@ export interface SessionStats {
 
 export interface MessageTurn {
   id: string
+  anchor_id?: string | null
   role: TurnRole
   blocks: ContentBlock[]
   timestamp: string

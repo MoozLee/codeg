@@ -114,6 +114,8 @@ pub enum TurnRole {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageTurn {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_id: Option<String>,
     pub role: TurnRole,
     pub blocks: Vec<ContentBlock>,
     pub timestamp: DateTime<Utc>,

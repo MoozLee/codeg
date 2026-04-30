@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, type Ref } from "react"
 import type { CSSProperties, ReactNode, RefObject } from "react"
-import { Virtualizer } from "virtua"
+import { Virtualizer, type VirtualizerHandle } from "virtua"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 import {
   MessageThreadContent,
@@ -35,6 +35,8 @@ interface VirtualizedMessageThreadProps<T> {
   contentClassName?: string
   /** Extra props forwarded to MessageThreadContent. */
   contentProps?: Omit<MessageThreadContentProps, "children" | "className">
+  /** Optional ref for imperative virtual scroll control. */
+  virtualizerRef?: Ref<VirtualizerHandle>
 }
 
 export function VirtualizedMessageThread<T>({
@@ -48,6 +50,7 @@ export function VirtualizedMessageThread<T>({
   className,
   contentClassName,
   contentProps,
+  virtualizerRef,
 }: VirtualizedMessageThreadProps<T>) {
   const { scrollRef } = useStickToBottomContext()
 
@@ -80,6 +83,7 @@ export function VirtualizedMessageThread<T>({
         (emptyState ?? null)
       ) : (
         <Virtualizer
+          ref={virtualizerRef}
           scrollRef={scrollRef as unknown as RefObject<HTMLElement | null>}
           itemSize={itemSize}
         >

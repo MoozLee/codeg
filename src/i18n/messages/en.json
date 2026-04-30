@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "User Messages",
         "diff": "Diff",
         "files": "Files",
         "changes": "Changes",
         "commits": "Commits"
+      },
+      "userMessages": {
+        "loading": "Loading...",
+        "fallbackLabel": "User message",
+        "noConversationTitle": "No conversation selected",
+        "noConversationHint": "Open a conversation to browse its user messages.",
+        "draftConversationTitle": "No saved messages yet",
+        "draftConversationHint": "Send a message in this conversation to navigate it here.",
+        "emptyTitle": "No user messages",
+        "emptyHint": "This conversation has no user messages to navigate yet.",
+        "countLabel": "{count, number} total",
+        "showingLabel": "Showing {visible, number} of {total, number}",
+        "showMore": "Show {count, number} more",
+        "activeBadge": "Active",
+        "dateGroupToday": "Today",
+        "dateGroupYesterday": "Yesterday",
+        "imageAttachmentCount": "{count, plural, one {# image} other {# images}}",
+        "groupCountLabel": "{count, plural, one {# message} other {# messages}}"
       },
       "noFolderTitle": "No folder open",
       "noFolderHint": "Open a folder to see its contents here"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "No messages yet",
-        "emptyDescription": "Start a conversation to see messages here"
+        "emptyDescription": "Start a conversation to see messages here",
+        "scrollToTop": "Scroll to top",
+        "scrollToBottom": "Scroll to bottom"
       },
       "chatInput": {
         "connecting": "Connecting...",

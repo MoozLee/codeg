@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "用户消息",
         "diff": "差异",
         "files": "文件",
         "changes": "变更",
         "commits": "提交"
+      },
+      "userMessages": {
+        "loading": "加载中...",
+        "fallbackLabel": "用户消息",
+        "noConversationTitle": "未选择会话",
+        "noConversationHint": "打开一个会话后可在这里浏览用户消息。",
+        "draftConversationTitle": "暂无已保存消息",
+        "draftConversationHint": "先在当前会话中发送一条消息，即可在这里导航。",
+        "emptyTitle": "暂无用户消息",
+        "emptyHint": "当前会话还没有可导航的用户消息。",
+        "countLabel": "共 {count} 条",
+        "showingLabel": "已显示 {visible} / {total}",
+        "showMore": "再显示 {count} 条",
+        "activeBadge": "当前",
+        "dateGroupToday": "今天",
+        "dateGroupYesterday": "昨天",
+        "imageAttachmentCount": "{count} 张图片",
+        "groupCountLabel": "{count} 条消息"
       },
       "noFolderTitle": "暂无打开的文件夹",
       "noFolderHint": "打开一个文件夹后在这里查看"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "暂无消息",
-        "emptyDescription": "开始一个会话后，消息会显示在这里"
+        "emptyDescription": "开始一个会话后，消息会显示在这里",
+        "scrollToTop": "滚动到顶部",
+        "scrollToBottom": "滚动到底部"
       },
       "chatInput": {
         "connecting": "连接中...",
