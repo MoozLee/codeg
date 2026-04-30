@@ -11,8 +11,8 @@ use serde::Deserialize;
 use crate::models::*;
 use crate::parsers::{
     compute_session_stats, folder_name_from_path, infer_context_window_max_tokens,
-    latest_turn_total_usage_tokens, merge_context_window_stats, truncate_str, AgentParser,
-    ParseError,
+    latest_turn_total_usage_tokens, merge_context_window_stats, stable_user_anchor_id_from_message,
+    truncate_str, AgentParser, ParseError,
 };
 
 /// Regex to strip the "Sender (untrusted metadata):" block and optional
@@ -1079,6 +1079,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         if matches!(msg.role, MessageRole::User) {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: Some(stable_user_anchor_id_from_message(msg)),
                 role: TurnRole::User,
                 blocks: msg.content.clone(),
                 timestamp: msg.timestamp,
@@ -1090,6 +1091,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         } else if matches!(msg.role, MessageRole::System) {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: None,
                 role: TurnRole::System,
                 blocks: msg.content.clone(),
                 timestamp: msg.timestamp,
@@ -1119,6 +1121,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
 
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: None,
                 role: TurnRole::Assistant,
                 blocks,
                 timestamp,

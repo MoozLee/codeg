@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "Mensajes del usuario",
         "diff": "Diferencias",
         "files": "Archivos",
         "changes": "Cambios",
         "commits": "Confirmaciones"
+      },
+      "userMessages": {
+        "loading": "Cargando...",
+        "fallbackLabel": "Mensaje del usuario",
+        "noConversationTitle": "No hay conversación seleccionada",
+        "noConversationHint": "Abre una conversación para navegar sus mensajes de usuario aquí.",
+        "draftConversationTitle": "Aún no hay mensajes guardados",
+        "draftConversationHint": "Envía un mensaje en esta conversación para poder navegarla aquí.",
+        "emptyTitle": "No hay mensajes de usuario",
+        "emptyHint": "Esta conversación todavía no tiene mensajes de usuario para navegar.",
+        "countLabel": "{count} en total",
+        "showingLabel": "Mostrando {visible} de {total}",
+        "showMore": "Mostrar {count} más",
+        "activeBadge": "Actual",
+        "dateGroupToday": "Hoy",
+        "dateGroupYesterday": "Ayer",
+        "imageAttachmentCount": "{count} {count, plural, one {imagen} other {imágenes}}",
+        "groupCountLabel": "{count} {count, plural, one {mensaje} other {mensajes}}"
       },
       "noFolderTitle": "No hay carpeta abierta",
       "noFolderHint": "Abre una carpeta para ver su contenido aquí"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "Aún no hay mensajes",
-        "emptyDescription": "Inicia una conversación para ver mensajes aquí"
+        "emptyDescription": "Inicia una conversación para ver mensajes aquí",
+        "scrollToTop": "Desplazarse arriba",
+        "scrollToBottom": "Desplazarse abajo"
       },
       "chatInput": {
         "connecting": "Conectando...",

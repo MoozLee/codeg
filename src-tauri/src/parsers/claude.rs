@@ -7,7 +7,10 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 
 use crate::models::*;
-use crate::parsers::{folder_name_from_path, truncate_str, AgentParser, ParseError};
+use crate::parsers::{
+    folder_name_from_path, stable_user_anchor_id_from_message, truncate_str, AgentParser,
+    ParseError,
+};
 
 /// Regex that matches Claude Code system-injected XML tags and their content.
 /// These tags are internal metadata and should not be displayed to users.
@@ -1304,6 +1307,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
 
             turns.push(MessageTurn {
                 id,
+                anchor_id: None,
                 role: TurnRole::Assistant,
                 blocks,
                 timestamp,
@@ -1314,6 +1318,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         } else if matches!(msg.role, MessageRole::System) {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: None,
                 role: TurnRole::System,
                 blocks: msg.content.clone(),
                 timestamp: msg.timestamp,
@@ -1325,6 +1330,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         } else {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: Some(stable_user_anchor_id_from_message(msg)),
                 role: TurnRole::User,
                 blocks: msg.content.clone(),
                 timestamp: msg.timestamp,
@@ -1377,6 +1383,7 @@ mod tests {
         let turns = vec![
             MessageTurn {
                 id: "turn-0".to_string(),
+                anchor_id: None,
                 role: TurnRole::Assistant,
                 blocks: vec![],
                 timestamp,
@@ -1391,6 +1398,7 @@ mod tests {
             },
             MessageTurn {
                 id: "turn-1".to_string(),
+                anchor_id: None,
                 role: TurnRole::Assistant,
                 blocks: vec![],
                 timestamp,

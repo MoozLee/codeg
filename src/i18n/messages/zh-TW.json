@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "使用者訊息",
         "diff": "差異",
         "files": "檔案",
         "changes": "變更",
         "commits": "提交"
+      },
+      "userMessages": {
+        "loading": "載入中...",
+        "fallbackLabel": "使用者訊息",
+        "noConversationTitle": "未選取會話",
+        "noConversationHint": "開啟一個會話後可在此瀏覽使用者訊息。",
+        "draftConversationTitle": "尚無已儲存訊息",
+        "draftConversationHint": "先在目前會話中送出一則訊息，即可在此導覽。",
+        "emptyTitle": "尚無使用者訊息",
+        "emptyHint": "目前會話還沒有可導覽的使用者訊息。",
+        "countLabel": "共 {count} 則",
+        "showingLabel": "已顯示 {visible} / {total}",
+        "showMore": "再顯示 {count} 則",
+        "activeBadge": "目前",
+        "dateGroupToday": "今天",
+        "dateGroupYesterday": "昨天",
+        "imageAttachmentCount": "{count} 張圖片",
+        "groupCountLabel": "{count} 則訊息"
       },
       "noFolderTitle": "尚無開啟的資料夾",
       "noFolderHint": "開啟一個資料夾後可在此查看"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "暫無訊息",
-        "emptyDescription": "開始一個會話後，訊息會顯示在這裡"
+        "emptyDescription": "開始一個會話後，訊息會顯示在這裡",
+        "scrollToTop": "捲動到頂部",
+        "scrollToBottom": "捲動到底部"
       },
       "chatInput": {
         "connecting": "連線中...",

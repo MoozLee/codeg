@@ -9,7 +9,10 @@ use crate::models::{
     TurnUsage,
 };
 
-use super::{compute_session_stats, folder_name_from_path, truncate_str, AgentParser, ParseError};
+use super::{
+    compute_session_stats, folder_name_from_path, stable_user_anchor_id_from_parts, truncate_str,
+    AgentParser, ParseError,
+};
 
 // ---------------------------------------------------------------------------
 // On-disk JSON structures
@@ -256,6 +259,7 @@ impl AgentParser for ClineParser {
                     turn_counter += 1;
                     turns.push(MessageTurn {
                         id: format!("{}-{}", conversation_id, turn_counter),
+                        anchor_id: None,
                         role: TurnRole::Assistant,
                         blocks,
                         timestamp,
@@ -275,6 +279,7 @@ impl AgentParser for ClineParser {
                         turn_counter += 1;
                         turns.push(MessageTurn {
                             id: format!("{}-{}", conversation_id, turn_counter),
+                            anchor_id: None,
                             role: TurnRole::System,
                             blocks: parsed.tool_results,
                             timestamp,
@@ -289,6 +294,11 @@ impl AgentParser for ClineParser {
                         turn_counter += 1;
                         turns.push(MessageTurn {
                             id: format!("{}-{}", conversation_id, turn_counter),
+                            anchor_id: Some(stable_user_anchor_id_from_parts(
+                                conversation_id,
+                                timestamp,
+                                &parsed.user_blocks,
+                            )),
                             role: TurnRole::User,
                             blocks: parsed.user_blocks,
                             timestamp,

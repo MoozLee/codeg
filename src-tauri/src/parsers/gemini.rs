@@ -5,7 +5,10 @@ use chrono::{DateTime, Utc};
 use walkdir::WalkDir;
 
 use crate::models::*;
-use crate::parsers::{folder_name_from_path, truncate_str, AgentParser, ParseError};
+use crate::parsers::{
+    folder_name_from_path, stable_user_anchor_id_from_message, stable_user_anchor_id_from_parts,
+    truncate_str, AgentParser, ParseError,
+};
 
 pub struct GeminiParser {
     base_dir: PathBuf,
@@ -476,11 +479,10 @@ impl GeminiParser {
 
         let mut messages: Vec<UnifiedMessage> = Vec::new();
         for raw in messages_raw {
-            let msg_id = raw
+            let raw_id = raw
                 .get("id")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("msg-{}", messages.len()));
+                .map(|s| s.to_string());
             let timestamp =
                 Self::parse_timestamp(raw.get("timestamp")).unwrap_or(summary.started_at);
             let msg_type = raw
@@ -495,6 +497,12 @@ impl GeminiParser {
                     if blocks.is_empty() {
                         continue;
                     }
+                    let msg_id = raw_id.clone().unwrap_or_else(|| {
+                        format!(
+                            "user-anchor-{}",
+                            stable_user_anchor_id_from_parts(conversation_id, timestamp, &blocks)
+                        )
+                    });
                     messages.push(UnifiedMessage {
                         id: msg_id,
                         role: MessageRole::User,
@@ -510,6 +518,9 @@ impl GeminiParser {
                     if blocks.is_empty() {
                         continue;
                     }
+                    let msg_id = raw_id
+                        .clone()
+                        .unwrap_or_else(|| format!("msg-{}", messages.len()));
                     messages.push(UnifiedMessage {
                         id: msg_id,
                         role: MessageRole::Assistant,
@@ -527,6 +538,9 @@ impl GeminiParser {
                     let Some(text) = Self::extract_message_text(&raw) else {
                         continue;
                     };
+                    let msg_id = raw_id
+                        .clone()
+                        .unwrap_or_else(|| format!("msg-{}", messages.len()));
                     messages.push(UnifiedMessage {
                         id: msg_id,
                         role: MessageRole::System,
@@ -653,6 +667,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         if matches!(msg.role, MessageRole::User) {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: Some(stable_user_anchor_id_from_message(msg)),
                 role: TurnRole::User,
                 blocks: msg.content.clone(),
                 timestamp: msg.timestamp,
@@ -667,6 +682,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         if matches!(msg.role, MessageRole::System) {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
+                anchor_id: None,
                 role: TurnRole::System,
                 blocks: msg.content.clone(),
                 timestamp: msg.timestamp,
@@ -705,6 +721,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
 
         turns.push(MessageTurn {
             id: format!("turn-{}", turns.len()),
+            anchor_id: None,
             role: TurnRole::Assistant,
             blocks,
             timestamp,
@@ -788,7 +805,12 @@ mod tests {
         let detail = parser
             .get_conversation("32c7d221-0553-46c8-ba50-e664719cae7f")
             .expect("get conversation");
+        let detail_again = parser
+            .get_conversation("32c7d221-0553-46c8-ba50-e664719cae7f")
+            .expect("get conversation again");
         assert_eq!(detail.turns.len(), 2);
+        assert_eq!(detail.turns[0].anchor_id, detail_again.turns[0].anchor_id);
+        assert!(detail.turns[0].anchor_id.is_some());
         assert_eq!(
             detail.summary.folder_path.as_deref(),
             Some("/Users/test/workspace/demo")
@@ -858,5 +880,29 @@ mod tests {
             ContentBlock::Image { data, mime_type, uri }
             if data == "QUJD" && mime_type == "image/png" && uri.is_none()
         ));
+    }
+
+    #[test]
+    fn fallback_anchor_matches_turn_anchor_when_message_id_is_missing() {
+        let timestamp = DateTime::parse_from_rfc3339("2026-03-02T04:30:20.796Z")
+            .expect("timestamp parses")
+            .with_timezone(&Utc);
+        let blocks = vec![ContentBlock::Text {
+            text: "hello from fallback".to_string(),
+        }];
+        let message = UnifiedMessage {
+            id: "msg-0".to_string(),
+            role: MessageRole::User,
+            content: blocks.clone(),
+            timestamp,
+            usage: None,
+            duration_ms: None,
+            model: None,
+        };
+
+        let fallback = stable_user_anchor_id_from_parts("conversation-1", timestamp, &blocks);
+        let from_message = stable_user_anchor_id_from_message(&message);
+
+        assert_ne!(fallback, from_message);
     }
 }

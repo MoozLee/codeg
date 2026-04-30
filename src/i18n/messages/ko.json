@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "사용자 메시지",
         "diff": "차이",
         "files": "파일",
         "changes": "변경사항",
         "commits": "커밋"
+      },
+      "userMessages": {
+        "loading": "불러오는 중...",
+        "fallbackLabel": "사용자 메시지",
+        "noConversationTitle": "선택된 대화가 없습니다",
+        "noConversationHint": "대화를 열면 여기에서 사용자 메시지를 탐색할 수 있습니다.",
+        "draftConversationTitle": "저장된 메시지가 아직 없습니다",
+        "draftConversationHint": "이 대화에서 먼저 메시지를 보내면 여기에서 이동할 수 있습니다.",
+        "emptyTitle": "사용자 메시지가 없습니다",
+        "emptyHint": "이 대화에는 아직 탐색할 사용자 메시지가 없습니다.",
+        "countLabel": "총 {count}개",
+        "showingLabel": "{total}개 중 {visible}개 표시",
+        "showMore": "{count}개 더 보기",
+        "activeBadge": "현재",
+        "dateGroupToday": "오늘",
+        "dateGroupYesterday": "어제",
+        "imageAttachmentCount": "이미지 {count}개",
+        "groupCountLabel": "메시지 {count}개"
       },
       "noFolderTitle": "열린 폴더 없음",
       "noFolderHint": "폴더를 열면 여기에 표시됩니다"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "아직 메시지가 없습니다",
-        "emptyDescription": "대화를 시작하면 여기에서 메시지를 볼 수 있습니다"
+        "emptyDescription": "대화를 시작하면 여기에서 메시지를 볼 수 있습니다",
+        "scrollToTop": "맨 위로 스크롤",
+        "scrollToBottom": "맨 아래로 스크롤"
       },
       "chatInput": {
         "connecting": "연결 중...",

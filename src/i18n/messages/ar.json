@@ -1008,10 +1008,29 @@
     },
     "auxPanel": {
       "tabs": {
+        "userMessages": "رسائل المستخدم",
         "diff": "الفرق",
         "files": "الملفات",
         "changes": "التغييرات",
         "commits": "الالتزامات"
+      },
+      "userMessages": {
+        "loading": "جارٍ التحميل...",
+        "fallbackLabel": "رسالة المستخدم",
+        "noConversationTitle": "لا توجد محادثة محددة",
+        "noConversationHint": "افتح محادثة لتصفح رسائل المستخدم هنا.",
+        "draftConversationTitle": "لا توجد رسائل محفوظة بعد",
+        "draftConversationHint": "أرسل رسالة في هذه المحادثة لتتمكن من التنقل إليها من هنا.",
+        "emptyTitle": "لا توجد رسائل مستخدم",
+        "emptyHint": "لا تحتوي هذه المحادثة على رسائل مستخدم يمكن التنقل إليها بعد.",
+        "countLabel": "{count} إجمالاً",
+        "showingLabel": "عرض {visible} من {total}",
+        "showMore": "إظهار {count} أخرى",
+        "activeBadge": "الحالية",
+        "dateGroupToday": "اليوم",
+        "dateGroupYesterday": "أمس",
+        "imageAttachmentCount": "{count} {count, plural, one {صورة} other {صور}}",
+        "groupCountLabel": "{count} {count, plural, one {رسالة} other {رسائل}}"
       },
       "noFolderTitle": "لا يوجد مجلد مفتوح",
       "noFolderHint": "افتح مجلدا لعرض محتواه هنا"
@@ -1633,7 +1652,9 @@
       },
       "messageThread": {
         "emptyTitle": "لا توجد رسائل بعد",
-        "emptyDescription": "ابدأ محادثة لرؤية الرسائل هنا"
+        "emptyDescription": "ابدأ محادثة لرؤية الرسائل هنا",
+        "scrollToTop": "التمرير إلى الأعلى",
+        "scrollToBottom": "التمرير إلى الأسفل"
       },
       "chatInput": {
         "connecting": "جارٍ الاتصال...",
