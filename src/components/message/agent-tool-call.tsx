@@ -94,6 +94,17 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   const [bodyOpen, setBodyOpen] = useState(isRunning || isError)
   const [promptOpen, setPromptOpen] = useState(false)
 
+  // Auto-collapse once when the agent transitions from running to completed
+  // (non-error). The running → completed transition only fires once per tool
+  // call, so this is naturally one-shot.
+  const [prevIsRunning, setPrevIsRunning] = useState(isRunning)
+  if (prevIsRunning !== isRunning) {
+    setPrevIsRunning(isRunning)
+    if (prevIsRunning && !isRunning && !isError) {
+      setBodyOpen(false)
+    }
+  }
+
   const parsed = useMemo(
     () => (part.input ? tryParseJson(part.input) : null),
     [part.input]

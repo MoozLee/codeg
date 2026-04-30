@@ -626,9 +626,7 @@ export function SidebarConversationList({
 
   const filteredConversations = useMemo(() => {
     if (showCompleted) return conversations
-    return conversations.filter(
-      (c) => c.status !== "completed" && c.status !== "cancelled"
-    )
+    return conversations.filter((c) => c.status !== "completed")
   }, [conversations, showCompleted])
 
   const byFolder = useMemo(() => {
