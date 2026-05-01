@@ -1071,7 +1071,18 @@
       "closeOthers": "他を閉じる",
       "closeAll": "すべて閉じる",
       "hideTerminal": "ターミナルを隠す ({shortcut})",
-      "openFolderFirst": "先にフォルダを開いてください"
+      "openFolderFirst": "先にフォルダを開いてください",
+      "defaultTitle": "ターミナル {number}",
+      "newTerminalTab": "新しいターミナルタブ",
+      "splitTerminal": "ターミナルを分割",
+      "selectTerminalFirst": "先にターミナルタブを選択してください",
+      "noTerminalsForConversation": "この会話にはまだターミナルタブがありません",
+      "paneList": "ペイン",
+      "paneLabel": "Pane {number}",
+      "closePane": "Pane {number} を閉じる",
+      "startingTerminal": "ターミナルを起動中...",
+      "processExited": "プロセスが終了しました",
+      "startFailed": "ターミナルの起動に失敗しました: {message}"
     },
     "sessionFiles": {
       "currentResponse": "現在の応答",

@@ -1071,7 +1071,18 @@
       "closeOthers": "關閉其它",
       "closeAll": "關閉所有",
       "hideTerminal": "隱藏終端（{shortcut}）",
-      "openFolderFirst": "請先開啟一個資料夾"
+      "openFolderFirst": "請先開啟一個資料夾",
+      "defaultTitle": "終端 {number}",
+      "newTerminalTab": "新增終端分頁",
+      "splitTerminal": "分割終端",
+      "selectTerminalFirst": "請先選擇一個終端分頁",
+      "noTerminalsForConversation": "目前會話尚無終端分頁",
+      "paneList": "分欄",
+      "paneLabel": "Pane {number}",
+      "closePane": "關閉 Pane {number}",
+      "startingTerminal": "正在啟動終端...",
+      "processExited": "行程已結束",
+      "startFailed": "啟動終端失敗：{message}"
     },
     "sessionFiles": {
       "currentResponse": "目前回應",

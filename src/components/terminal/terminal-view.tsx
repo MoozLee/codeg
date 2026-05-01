@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
 import { subscribe } from "@/lib/platform"
 import {
   terminalSpawn,
@@ -97,29 +98,6 @@ function getTerminalTheme(container: HTMLDivElement | null): ITheme {
   }
 }
 
-function refitTerminalAfterMetricsChange({
-  container,
-  fit,
-  refresh,
-}: {
-  container: HTMLDivElement | null
-  fit: (() => void) | undefined
-  refresh?: () => void
-}) {
-  requestAnimationFrame(() => {
-    refresh?.()
-    requestAnimationFrame(() => {
-      if (
-        container &&
-        container.clientWidth > 0 &&
-        container.clientHeight > 0
-      ) {
-        fit?.()
-      }
-    })
-  })
-}
-
 interface TerminalViewProps {
   terminalId: string
   workingDir: string
@@ -139,13 +117,17 @@ export function TerminalView({
   isVisible,
   onProcessExited,
 }: TerminalViewProps) {
+  const t = useTranslations("Folder.terminal")
   const containerRef = useRef<HTMLDivElement>(null)
   const fitAddonRef = useRef<{ fit: () => void } | null>(null)
   const termRef = useRef<XTermTerminal | null>(null)
   const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null)
-  const isActiveRef = useRef(isActive)
   const isVisibleRef = useRef(isVisible)
   const onProcessExitedRef = useRef(onProcessExited)
+  const processExitedLabelRef = useRef(t("processExited"))
+  const startFailedLabelRef = useRef(
+    t("startFailed", { message: "__MESSAGE__" })
+  )
   const { zoomLevel } = useZoomLevel()
   const { codeFontFamilyStack } = useCodeFontFamily()
   const zoomLevelRef = useRef(zoomLevel)
@@ -153,13 +135,17 @@ export function TerminalView({
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    isActiveRef.current = isActive
     isVisibleRef.current = isVisible
-  }, [isActive, isVisible])
+  }, [isVisible])
 
   useEffect(() => {
     onProcessExitedRef.current = onProcessExited
   }, [onProcessExited])
+
+  useEffect(() => {
+    processExitedLabelRef.current = t("processExited")
+    startFailedLabelRef.current = t("startFailed", { message: "__MESSAGE__" })
+  }, [t])
 
   useEffect(() => {
     let cancelled = false
@@ -190,18 +176,9 @@ export function TerminalView({
       fitAddonRef.current = fitAddon
       termRef.current = term
 
-      // Shell line-editing shortcuts. Sends readline/zle bindings so they
-      // work regardless of terminfo.
-      //   Alt/Option + ←/→ / Backspace: word-level moves & delete
-      //   macOS Cmd + ←/→ / Backspace : line-level moves & clear
-      // Uses `e.code` (physical key) to be robust against dead-key layouts on
-      // macOS where Option can turn some keys into `key: "Dead"`.
-      // AltGr on Windows/Linux is reported as ctrlKey+altKey and is excluded
-      // by the `!ctrlKey` guard below.
       const isMac = detectPlatform() === "macos"
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== "keydown") return true
-        // Skip during IME composition to avoid corrupting candidate buffer.
         if (e.isComposing) return true
 
         const { code, altKey, metaKey, ctrlKey, shiftKey } = e
@@ -227,7 +204,6 @@ export function TerminalView({
         return true
       })
 
-      // Watch <html> class changes for theme switching
       const themeObserver = new MutationObserver(() => {
         term.options.theme = getTerminalTheme(containerRef.current)
       })
@@ -236,15 +212,11 @@ export function TerminalView({
         attributeFilter: ["class"],
       })
 
-      // Send input to PTY
       const onDataDisposable = term.onData((data: string) => {
-        // Some apps toggle focus reporting; don't leak focus in/out sequences
-        // into the shell prompt when tabs are switched.
         if (data === "\x1b[I" || data === "\x1b[O") return
         terminalWrite(terminalId, data).catch(() => {})
       })
 
-      // Debounced resize — avoid flooding IPC during drag
       let resizeTimer: ReturnType<typeof setTimeout> | null = null
       const onResizeDisposable = term.onResize(
         ({ cols, rows }: { cols: number; rows: number }) => {
@@ -258,7 +230,6 @@ export function TerminalView({
         }
       )
 
-      // Subscribe to events BEFORE spawning so no initial output is lost
       const unlisten = await subscribe<TerminalEvent>(
         `terminal://output/${terminalId}`,
         (payload) => {
@@ -270,7 +241,9 @@ export function TerminalView({
         `terminal://exit/${terminalId}`,
         () => {
           onProcessExitedRef.current?.(terminalId)
-          term.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n")
+          term.write(
+            `\r\n\x1b[90m[${processExitedLabelRef.current}]\x1b[0m\r\n`
+          )
         }
       )
 
@@ -284,17 +257,17 @@ export function TerminalView({
         return
       }
 
-      // Spawn the terminal AFTER subscribing to events
       try {
         await terminalSpawn(workingDir, shell, initialCommand, terminalId)
       } catch (err) {
         onProcessExitedRef.current?.(terminalId)
-        term.write(`\r\n\x1b[31m[Failed to start terminal: ${err}]\x1b[0m\r\n`)
+        term.write(
+          `\r\n\x1b[31m[${startFailedLabelRef.current.replace("__MESSAGE__", String(err))}]\x1b[0m\r\n`
+        )
       } finally {
         if (!cancelled) setLoading(false)
       }
 
-      // If unmounted while spawn was in flight, clean up the spawned PTY
       if (cancelled) {
         terminalKill(terminalId).catch(() => {})
         themeObserver.disconnect()
@@ -309,17 +282,15 @@ export function TerminalView({
       const fitIfReady = () => {
         const el = containerRef.current
         if (!el) return
-        if (!isActiveRef.current || !isVisibleRef.current) return
+        if (!isVisibleRef.current) return
         if (el.clientWidth <= 0 || el.clientHeight <= 0) return
         fitAddon.fit()
       }
 
-      // Only fit when terminal is actually visible/active.
       requestAnimationFrame(() => {
         if (!cancelled) fitIfReady()
       })
 
-      // Debounced fit on container resize while active
       let fitTimer: ReturnType<typeof setTimeout> | null = null
       const resizeObserver = new ResizeObserver(() => {
         if (fitTimer) clearTimeout(fitTimer)
@@ -353,46 +324,46 @@ export function TerminalView({
     }
   }, [terminalId, workingDir, shell, initialCommand])
 
-  // Refit and focus when becoming active or panel becomes visible
   useEffect(() => {
-    if (isActive && isVisible) {
-      requestAnimationFrame(() => {
-        const el = containerRef.current
-        if (el && el.clientWidth > 0 && el.clientHeight > 0) {
-          fitAddonRef.current?.fit()
-        }
+    if (!isVisible) return
+    requestAnimationFrame(() => {
+      const el = containerRef.current
+      if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+        fitAddonRef.current?.fit()
+      }
+      if (isActive) {
         termRef.current?.focus()
-      })
-    }
+      }
+    })
   }, [isActive, isVisible])
 
-  // React to zoom level changes. Updates the ref synchronously so async init()
-  // always reads the latest zoom, and pushes the new font size to already-mounted
-  // terminals. Double rAF ensures xterm's renderer has recomputed cell metrics
-  // before we refit.
   useEffect(() => {
     zoomLevelRef.current = zoomLevel
     const term = termRef.current
     if (!term) return
     term.options.fontSize = computeTerminalFontSize(zoomLevel)
-    refitTerminalAfterMetricsChange({
-      container: containerRef.current,
-      fit: () => fitAddonRef.current?.fit(),
-      refresh: () => term.refresh(0, Math.max(term.rows - 1, 0)),
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = containerRef.current
+        if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+          fitAddonRef.current?.fit()
+        }
+      })
     })
   }, [zoomLevel])
 
-  // React to code font changes. xterm needs its font option updated explicitly;
-  // CSS variables alone do not update mounted canvas/DOM renderer metrics.
   useEffect(() => {
     codeFontFamilyStackRef.current = codeFontFamilyStack
     const term = termRef.current
     if (!term) return
     term.options.fontFamily = codeFontFamilyStack
-    refitTerminalAfterMetricsChange({
-      container: containerRef.current,
-      fit: () => fitAddonRef.current?.fit(),
-      refresh: () => term.refresh(0, Math.max(term.rows - 1, 0)),
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = containerRef.current
+        if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+          fitAddonRef.current?.fit()
+        }
+      })
     })
   }, [codeFontFamilyStack])
 
@@ -400,13 +371,13 @@ export function TerminalView({
     <div
       className="absolute inset-0 h-full w-full p-2"
       style={{
-        visibility: isActive ? "visible" : "hidden",
-        pointerEvents: isActive ? "auto" : "none",
+        visibility: isVisible ? "visible" : "hidden",
+        pointerEvents: isVisible && isActive ? "auto" : "none",
       }}
-      aria-hidden={!isActive}
+      aria-hidden={!isVisible}
     >
       <div ref={containerRef} className="h-full w-full" />
-      {loading && isActive && (
+      {loading && isVisible && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <svg
@@ -428,7 +399,7 @@ export function TerminalView({
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
               />
             </svg>
-            <span>Starting terminal...</span>
+            <span>{t("startingTerminal")}</span>
           </div>
         </div>
       )}

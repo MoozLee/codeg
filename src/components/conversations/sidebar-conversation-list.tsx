@@ -31,6 +31,7 @@ import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useTaskContext } from "@/contexts/task-context"
+import { useTerminalContext } from "@/contexts/terminal-context"
 import { useZoomLevel } from "@/hooks/use-appearance"
 import {
   importLocalConversations,
@@ -554,6 +555,7 @@ export function SidebarConversationList({
     activeTabId,
     tabs,
   } = useTabContext()
+  const { closeTerminalsByFolder } = useTerminalContext()
   const { addTask, updateTask } = useTaskContext()
 
   const folderIndex = useMemo(() => {
@@ -768,6 +770,7 @@ export function SidebarConversationList({
     const { folderId, folderName } = removeConfirm
     try {
       closeTabsByFolder(folderId)
+      closeTerminalsByFolder(folderId)
       await removeFolderFromWorkspace(folderId)
       toast.success(t("toasts.folderRemoved", { name: folderName }))
     } catch (e) {
@@ -776,7 +779,13 @@ export function SidebarConversationList({
     } finally {
       setRemoveConfirm(null)
     }
-  }, [removeConfirm, closeTabsByFolder, removeFolderFromWorkspace, t])
+  }, [
+    removeConfirm,
+    closeTabsByFolder,
+    closeTerminalsByFolder,
+    removeFolderFromWorkspace,
+    t,
+  ])
 
   const handleSelect = useCallback(
     (id: number, agentType: string) => {

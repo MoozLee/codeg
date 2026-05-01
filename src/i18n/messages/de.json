@@ -1071,7 +1071,18 @@
       "closeOthers": "Andere schließen",
       "closeAll": "Alle schließen",
       "hideTerminal": "Terminal ausblenden ({shortcut})",
-      "openFolderFirst": "Öffnen Sie zuerst einen Ordner"
+      "openFolderFirst": "Öffnen Sie zuerst einen Ordner",
+      "defaultTitle": "Terminal {number}",
+      "newTerminalTab": "Neuer Terminal-Tab",
+      "splitTerminal": "Terminal aufteilen",
+      "selectTerminalFirst": "Wählen Sie zuerst einen Terminal-Tab aus",
+      "noTerminalsForConversation": "Für diese Konversation gibt es keine Terminal-Tabs",
+      "paneList": "Bereiche",
+      "paneLabel": "Bereich {number}",
+      "closePane": "Bereich {number} schließen",
+      "startingTerminal": "Terminal wird gestartet...",
+      "processExited": "Prozess beendet",
+      "startFailed": "Terminal konnte nicht gestartet werden: {message}"
     },
     "sessionFiles": {
       "currentResponse": "Aktuelle Antwort",
