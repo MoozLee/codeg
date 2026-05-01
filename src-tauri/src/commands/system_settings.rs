@@ -14,9 +14,10 @@ use crate::db::AppDatabase;
 #[cfg(feature = "tauri-runtime")]
 use crate::models::{SystemOpenTarget, SystemRenderingSettings};
 use crate::models::{
-    AvailableTerminalShells, SystemFontFamily, SystemFontFamilyList, SystemFontFamilySource,
-    SystemFontSettings, SystemLanguageSettings, SystemOpenTargetSettings, SystemProxySettings,
-    SystemTerminalSettings, TerminalShellOption,
+    AvailableTerminalShells, SystemFontFamily, SystemFontFamilyList,
+    SystemFontFamilySource, SystemFontSettings, SystemLanguageSettings,
+    SystemOpenTargetSettings, SystemProxySettings, SystemTerminalSettings,
+    TerminalShellOption,
 };
 #[cfg(feature = "tauri-runtime")]
 use crate::network::proxy;
@@ -164,10 +165,6 @@ fn normalize_proxy_settings(
     })
 }
 
-fn normalize_open_target_settings(settings: SystemOpenTargetSettings) -> SystemOpenTargetSettings {
-    settings
-}
-
 fn normalize_font_family_preference(value: Option<String>) -> Option<String> {
     let value = value?;
     let trimmed = value.trim();
@@ -252,7 +249,8 @@ fn spawn_code_cli(root: &Path, target: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
 fn spawn_platform_vscode(root: &Path, target: &Path) -> Result<(), std::io::Error> {
-    let app_cli = Path::new("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code");
+    let app_cli =
+        Path::new("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code");
     if app_cli.exists() {
         let mut command = crate::process::std_command(app_cli);
         command.arg("--new-window").arg(root).arg(target);
@@ -403,11 +401,10 @@ pub(crate) async fn load_system_open_target_settings(
         return Ok(SystemOpenTargetSettings::default());
     };
 
-    let parsed = serde_json::from_str::<SystemOpenTargetSettings>(&raw).map_err(|e| {
+    serde_json::from_str::<SystemOpenTargetSettings>(&raw).map_err(|e| {
         AppCommandError::configuration_invalid("Failed to parse stored open target settings")
             .with_detail(e.to_string())
-    })?;
-    Ok(normalize_open_target_settings(parsed))
+    })
 }
 
 pub(crate) async fn load_system_font_settings(
@@ -449,8 +446,7 @@ pub(crate) async fn update_system_open_target_settings_core(
     conn: &DatabaseConnection,
     settings: SystemOpenTargetSettings,
 ) -> Result<SystemOpenTargetSettings, AppCommandError> {
-    let normalized = normalize_open_target_settings(settings);
-    let serialized = serde_json::to_string(&normalized).map_err(|e| {
+    let serialized = serde_json::to_string(&settings).map_err(|e| {
         AppCommandError::invalid_input("Failed to serialize open target settings")
             .with_detail(e.to_string())
     })?;
@@ -459,7 +455,7 @@ pub(crate) async fn update_system_open_target_settings_core(
         .await
         .map_err(AppCommandError::from)?;
 
-    Ok(normalized)
+    Ok(settings)
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -469,16 +465,12 @@ pub(crate) async fn open_path_with_target_core(
     target: Option<SystemOpenTarget>,
     conn: &DatabaseConnection,
 ) -> Result<(), AppCommandError> {
-    let settings = match target {
-        Some(target) => SystemOpenTargetSettings {
-            target,
-            ..SystemOpenTargetSettings::default()
-        },
-        None => load_system_open_target_settings(conn).await?,
+    let target = match target {
+        Some(target) => target,
+        None => load_system_open_target_settings(conn).await?.target,
     };
-    let normalized = normalize_open_target_settings(settings);
 
-    match normalized.target {
+    match target {
         SystemOpenTarget::Vscode => {
             let resolved_path = resolve_workspace_relative_path(&folder_path, &relative_path)?;
             open_path_in_vscode(&resolved_path.root, &resolved_path.target)?;
@@ -613,6 +605,23 @@ pub async fn list_system_font_families() -> Result<SystemFontFamilyList, AppComm
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn get_system_font_settings(
+    db: State<'_, AppDatabase>,
+) -> Result<SystemFontSettings, AppCommandError> {
+    load_system_font_settings(&db.conn).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_system_font_settings(
+    settings: SystemFontSettings,
+    db: State<'_, AppDatabase>,
+) -> Result<SystemFontSettings, AppCommandError> {
+    update_system_font_settings_core(&db.conn, settings).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn get_system_proxy_settings(
     db: State<'_, AppDatabase>,
 ) -> Result<SystemProxySettings, AppCommandError> {
@@ -649,47 +658,36 @@ pub async fn get_system_language_settings(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_system_language_settings(
+    settings: SystemLanguageSettings,
+    db: State<'_, AppDatabase>,
+    app: tauri::AppHandle,
+) -> Result<SystemLanguageSettings, AppCommandError> {
+    let serialized = serde_json::to_string(&settings).map_err(|e| {
+        AppCommandError::invalid_input("Failed to serialize language settings")
+            .with_detail(e.to_string())
+    })?;
+
+    app_metadata_service::upsert_value(&db.conn, SYSTEM_LANGUAGE_SETTINGS_KEY, &serialized)
+        .await
+        .map_err(AppCommandError::from)?;
+
+    let emitter = crate::web::event_bridge::EventEmitter::Tauri(app);
+    crate::web::event_bridge::emit_event(
+        &emitter,
+        LANGUAGE_SETTINGS_UPDATED_EVENT,
+        settings.clone(),
+    );
+
+    Ok(settings)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn get_system_open_target_settings(
     db: State<'_, AppDatabase>,
 ) -> Result<SystemOpenTargetSettings, AppCommandError> {
     load_system_open_target_settings(&db.conn).await
-}
-
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn get_system_terminal_settings(
-    db: State<'_, AppDatabase>,
-) -> Result<SystemTerminalSettings, AppCommandError> {
-    load_system_terminal_settings(&db.conn).await
-}
-
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn get_available_terminal_shells() -> Result<AvailableTerminalShells, AppCommandError> {
-    Ok(build_available_terminal_shells())
-}
-
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn get_system_font_settings(
-    db: State<'_, AppDatabase>,
-) -> Result<SystemFontSettings, AppCommandError> {
-    load_system_font_settings(&db.conn).await
-}
-
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn probe_terminal_shell_path(path: String) -> Result<bool, AppCommandError> {
-    Ok(probe_terminal_shell_path_core(&path))
-}
-
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn update_system_font_settings(
-    settings: SystemFontSettings,
-    db: State<'_, AppDatabase>,
-) -> Result<SystemFontSettings, AppCommandError> {
-    update_system_font_settings_core(&db.conn, settings).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -714,28 +712,22 @@ pub async fn open_path_with_target(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn update_system_language_settings(
-    settings: SystemLanguageSettings,
+pub async fn get_system_terminal_settings(
     db: State<'_, AppDatabase>,
-    app: tauri::AppHandle,
-) -> Result<SystemLanguageSettings, AppCommandError> {
-    let serialized = serde_json::to_string(&settings).map_err(|e| {
-        AppCommandError::invalid_input("Failed to serialize language settings")
-            .with_detail(e.to_string())
-    })?;
+) -> Result<SystemTerminalSettings, AppCommandError> {
+    load_system_terminal_settings(&db.conn).await
+}
 
-    app_metadata_service::upsert_value(&db.conn, SYSTEM_LANGUAGE_SETTINGS_KEY, &serialized)
-        .await
-        .map_err(AppCommandError::from)?;
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn get_available_terminal_shells() -> Result<AvailableTerminalShells, AppCommandError> {
+    Ok(build_available_terminal_shells())
+}
 
-    let emitter = crate::web::event_bridge::EventEmitter::Tauri(app);
-    crate::web::event_bridge::emit_event(
-        &emitter,
-        LANGUAGE_SETTINGS_UPDATED_EVENT,
-        settings.clone(),
-    );
-
-    Ok(settings)
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn probe_terminal_shell_path(path: String) -> Result<bool, AppCommandError> {
+    Ok(probe_terminal_shell_path_core(&path))
 }
 
 #[cfg(feature = "tauri-runtime")]
