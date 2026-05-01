@@ -10,20 +10,40 @@ import {
   useState,
   type ReactNode,
 } from "react"
+import { useTranslations } from "next-intl"
 import { getSystemTerminalSettings, terminalKill } from "@/lib/api"
 import { getTransport } from "@/lib/transport"
 import { randomUUID } from "@/lib/utils"
 import { useActiveFolder } from "@/contexts/active-folder-context"
+import { useTabContext, type TabItem } from "@/contexts/tab-context"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
+
+export interface TerminalPane {
+  id: string
+  title?: string
+  workingDir: string
+  shell?: string
+  initialCommand?: string
+}
+
+export type TerminalOwner =
+  | {
+      kind: "conversation"
+      conversationId: number
+    }
+  | {
+      kind: "tab"
+      conversationTabId: string
+    }
 
 export interface TerminalTab {
   id: string
   folderId: number
   title: string
-  workingDir: string
-  shell?: string
-  initialCommand?: string
+  owner: TerminalOwner | null
+  panes: TerminalPane[]
+  activePaneId: string
 }
 
 const DEFAULT_HEIGHT = 300
@@ -39,7 +59,10 @@ interface TerminalContextValue {
   toggle: () => void
   setHeight: (h: number) => void
   tabs: TerminalTab[]
+  visibleTabs: TerminalTab[]
   activeTabId: string | null
+  activeVisibleTabId: string | null
+  activePaneId: string | null
   exitedTerminals: Set<string>
   markTerminalExited: (id: string) => void
   createTerminal: () => Promise<void>
@@ -52,14 +75,98 @@ interface TerminalContextValue {
     title: string,
     command: string
   ) => Promise<string | null>
+  splitTerminal: () => Promise<string | null>
   closeTerminal: (id: string) => void
   closeOtherTerminals: (id: string) => void
   closeAllTerminals: () => void
+  closePane: (tabId: string, paneId: string) => void
+  closeOtherPanes: (tabId: string, paneId: string) => void
+  closeAllPanes: (tabId: string) => void
+  closeTerminalsByFolder: (folderId: number) => void
   renameTerminal: (id: string, title: string) => void
+  renamePane: (tabId: string, paneId: string, title: string) => void
   switchTerminal: (id: string) => void
+  switchPane: (tabId: string, paneId: string) => void
 }
 
 const TerminalContext = createContext<TerminalContextValue | null>(null)
+
+function getTerminalOwnerFromConversationTab(
+  tab: TabItem | null
+): TerminalOwner | null {
+  if (!tab) return null
+  if (tab.conversationId != null) {
+    return {
+      kind: "conversation",
+      conversationId: tab.conversationId,
+    }
+  }
+  return {
+    kind: "tab",
+    conversationTabId: tab.id,
+  }
+}
+
+function resolveTerminalOwner(
+  owner: TerminalOwner | null,
+  conversationIdsByTabId: ReadonlyMap<string, number>
+): TerminalOwner | null {
+  if (owner?.kind !== "tab") return owner
+  const conversationId = conversationIdsByTabId.get(owner.conversationTabId)
+  if (conversationId == null) return owner
+  return {
+    kind: "conversation",
+    conversationId,
+  }
+}
+
+function isSameOwner(
+  a: TerminalOwner | null,
+  b: TerminalOwner | null
+): boolean {
+  if (!a || !b) return a === b
+  if (a.kind !== b.kind) return false
+  if (a.kind === "conversation" && b.kind === "conversation") {
+    return a.conversationId === b.conversationId
+  }
+  if (a.kind === "tab" && b.kind === "tab") {
+    return a.conversationTabId === b.conversationTabId
+  }
+  return false
+}
+
+function matchesConversationTab(
+  terminalTab: TerminalTab,
+  conversationTab: TabItem | null
+): boolean {
+  if (!conversationTab) return terminalTab.owner == null
+  if (!terminalTab.owner) return false
+
+  if (terminalTab.owner.kind === "conversation") {
+    return terminalTab.owner.conversationId === conversationTab.conversationId
+  }
+
+  return terminalTab.owner.conversationTabId === conversationTab.id
+}
+
+function collectPaneIds(terminalTabs: TerminalTab[]): string[] {
+  return terminalTabs.flatMap((tab) => tab.panes.map((pane) => pane.id))
+}
+
+function createTerminalPane(
+  workingDir: string,
+  shell?: string,
+  initialCommand?: string,
+  title?: string
+): TerminalPane {
+  return {
+    id: randomUUID(),
+    title,
+    workingDir,
+    shell,
+    initialCommand,
+  }
+}
 
 export function useTerminalContext() {
   const ctx = useContext(TerminalContext)
@@ -70,7 +177,13 @@ export function useTerminalContext() {
 }
 
 export function TerminalProvider({ children }: { children: ReactNode }) {
+  const t = useTranslations("Folder.terminal")
   const { activeFolder, activeFolderId } = useActiveFolder()
+  const {
+    tabs: conversationTabs,
+    activeTabId: activeConversationTabId,
+    activeTabActivationSeq,
+  } = useTabContext()
   const { shortcuts } = useShortcutSettings()
   const [isOpen, setIsOpen] = useState(false)
   const [height, setHeightState] = useState(DEFAULT_HEIGHT)
@@ -82,11 +195,60 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     string | null
   >(null)
   const lastMouseActivityInTerminalRef = useRef(false)
-  // Keep a ref of tabs for cleanup on unmount (effect [] captures stale state)
   const tabsRef = useRef(tabs)
+  const activeTabIdRef = useRef(activeTabId)
+  const activeConversationTabRef = useRef<TabItem | null>(null)
+  const [manualSelection, setManualSelection] = useState<{
+    conversationKey: string | null
+    conversationTabId: string | null
+    activationSeq: number
+  } | null>(null)
+
   useEffect(() => {
     tabsRef.current = tabs
   }, [tabs])
+
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId
+  }, [activeTabId])
+
+  const activeConversationTab = useMemo(
+    () =>
+      conversationTabs.find((tab) => tab.id === activeConversationTabId) ??
+      null,
+    [conversationTabs, activeConversationTabId]
+  )
+
+  const conversationIdsByTabId = useMemo(
+    () =>
+      new Map(
+        conversationTabs
+          .filter((tab) => tab.conversationId != null)
+          .map((tab) => [tab.id, tab.conversationId as number] as const)
+      ),
+    [conversationTabs]
+  )
+
+  const resolvedTabs = useMemo(
+    () =>
+      tabs.map((tab) => ({
+        ...tab,
+        owner: resolveTerminalOwner(tab.owner, conversationIdsByTabId),
+      })),
+    [tabs, conversationIdsByTabId]
+  )
+
+  const activeConversationKey = useMemo(() => {
+    if (!activeConversationTab) return null
+    if (activeConversationTab.conversationId != null) {
+      return `conversation:${activeConversationTab.conversationId}`
+    }
+    return `tab:${activeConversationTab.id}`
+  }, [activeConversationTab])
+
+  useEffect(() => {
+    activeConversationTabRef.current = activeConversationTab
+  }, [activeConversationTab])
 
   const folderPath = activeFolder?.path ?? ""
   const currentFolderId = activeFolderId ?? 0
@@ -94,6 +256,70 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     (shell?: string) => shell ?? defaultTerminalShell ?? undefined,
     [defaultTerminalShell]
   )
+
+  const visibleTabs = useMemo(
+    () =>
+      resolvedTabs.filter((tab) =>
+        matchesConversationTab(tab, activeConversationTab)
+      ),
+    [resolvedTabs, activeConversationTab]
+  )
+
+  const activeVisibleTabId = useMemo(() => {
+    if (visibleTabs.length === 0) return null
+
+    const activeConversationTabId = activeConversationTab?.id ?? null
+    const manualConversationTabId = manualSelection?.conversationTabId ?? null
+    const manualConversationId =
+      manualConversationTabId != null
+        ? (conversationIdsByTabId.get(manualConversationTabId) ?? null)
+        : null
+    const resolvedManualConversationKey =
+      manualConversationTabId != null
+        ? manualConversationId != null
+          ? `conversation:${manualConversationId}`
+          : `tab:${manualConversationTabId}`
+        : (manualSelection?.conversationKey ?? null)
+    const sameConversationScope =
+      manualSelection?.activationSeq === activeTabActivationSeq &&
+      (manualSelection.conversationTabId === activeConversationTabId ||
+        resolvedManualConversationKey === activeConversationKey)
+    const canReuseManualSelection =
+      sameConversationScope &&
+      activeTabId != null &&
+      visibleTabs.some((tab) => tab.id === activeTabId)
+
+    return canReuseManualSelection ? activeTabId : (visibleTabs[0]?.id ?? null)
+  }, [
+    activeConversationKey,
+    activeConversationTab,
+    activeTabActivationSeq,
+    activeTabId,
+    conversationIdsByTabId,
+    manualSelection,
+    visibleTabs,
+  ])
+
+  const activePaneId = useMemo(() => {
+    const activeVisibleTab = visibleTabs.find(
+      (tab) => tab.id === activeVisibleTabId
+    )
+    return activeVisibleTab?.activePaneId ?? null
+  }, [activeVisibleTabId, visibleTabs])
+
+  const livePaneIds = useMemo(
+    () => new Set(collectPaneIds(resolvedTabs)),
+    [resolvedTabs]
+  )
+
+  const visibleExitedTerminals = useMemo(() => {
+    if (exitedTerminals.size === 0) return exitedTerminals
+    const next = new Set<string>()
+    for (const id of exitedTerminals) {
+      if (livePaneIds.has(id)) next.add(id)
+    }
+    return next
+  }, [exitedTerminals, livePaneIds])
 
   useEffect(() => {
     let cancelled = false
@@ -154,37 +380,92 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
 
   const killTerminalTabs = useCallback((targetTabs: TerminalTab[]) => {
     targetTabs.forEach((tab) => {
-      terminalKill(tab.id).catch(() => {})
+      tab.panes.forEach((pane) => {
+        terminalKill(pane.id).catch(() => {})
+      })
     })
   }, [])
 
+  const createOwnedTerminalTab = useCallback(
+    ({
+      folderId,
+      title,
+      workingDir,
+      shell,
+      initialCommand,
+    }: {
+      folderId: number
+      title: string
+      workingDir: string
+      shell?: string
+      initialCommand?: string
+    }) => {
+      const pane = createTerminalPane(workingDir, shell, initialCommand)
+      const tabId = randomUUID()
+      const owner = getTerminalOwnerFromConversationTab(
+        activeConversationTabRef.current
+      )
+
+      const tab: TerminalTab = {
+        id: tabId,
+        folderId,
+        title,
+        owner,
+        panes: [pane],
+        activePaneId: pane.id,
+      }
+
+      setManualSelection({
+        conversationKey: activeConversationKey,
+        conversationTabId: activeConversationTabRef.current?.id ?? null,
+        activationSeq: activeTabActivationSeq,
+      })
+      setTabs((prev) => [...prev, tab])
+      setActiveTabId(tabId)
+      return pane.id
+    },
+    [activeConversationKey, activeTabActivationSeq]
+  )
+
   const toggle = useCallback(() => {
-    const autoId = randomUUID()
     const nextCounter = tabCounterRef.current + 1
+    const defaultTitle = t("defaultTitle", { number: nextCounter })
+    const resolvedShell = resolveTerminalShell()
+    const shouldAutoCreate = tabsRef.current.length === 0 && Boolean(folderPath)
+    const autoPane = shouldAutoCreate
+      ? createTerminalPane(folderPath, resolvedShell)
+      : null
+    const autoTabId = shouldAutoCreate ? randomUUID() : null
 
     setIsOpen((wasOpen) => !wasOpen)
 
-    // Auto-create first terminal when opening with no tabs
     setTabs((currentTabs) => {
-      if (currentTabs.length > 0 || !folderPath) return currentTabs
+      if (
+        !shouldAutoCreate ||
+        !autoPane ||
+        !autoTabId ||
+        currentTabs.length > 0
+      ) {
+        return currentTabs
+      }
+
       tabCounterRef.current = nextCounter
       return [
         {
-          id: autoId,
+          id: autoTabId,
           folderId: currentFolderId,
-          title: `Terminal ${nextCounter}`,
-          workingDir: folderPath,
-          shell: resolveTerminalShell(),
+          title: defaultTitle,
+          owner: getTerminalOwnerFromConversationTab(
+            activeConversationTabRef.current
+          ),
+          panes: [autoPane],
+          activePaneId: autoPane.id,
         },
       ]
     })
 
-    setActiveTabId((prev) => {
-      if (prev !== null) return prev
-      if (!folderPath) return null
-      return autoId
-    })
-  }, [folderPath, currentFolderId, resolveTerminalShell])
+    setActiveTabId((prev) => prev ?? autoTabId)
+  }, [currentFolderId, folderPath, resolveTerminalShell, t])
 
   const createTerminalWithCommand = useCallback(
     async (title: string, command: string) => {
@@ -192,24 +473,17 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
 
       setIsOpen(true)
 
-      const id = randomUUID()
-      tabCounterRef.current += 1
-      setTabs((prev) => [
-        ...prev,
-        {
-          id,
-          folderId: currentFolderId,
-          title,
-          workingDir: folderPath,
-          shell: resolveTerminalShell(),
-          initialCommand: command,
-        },
-      ])
-      setActiveTabId(id)
+      const paneId = createOwnedTerminalTab({
+        folderId: currentFolderId,
+        title,
+        workingDir: folderPath,
+        shell: resolveTerminalShell(),
+        initialCommand: command,
+      })
 
-      return id
+      return paneId
     },
-    [folderPath, currentFolderId, resolveTerminalShell]
+    [createOwnedTerminalTab, folderPath, currentFolderId, resolveTerminalShell]
   )
 
   const createTerminalInDirectory = useCallback(
@@ -218,24 +492,20 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
 
       setIsOpen(true)
 
-      const id = randomUUID()
       tabCounterRef.current += 1
-      const defaultTitle = `Terminal ${tabCounterRef.current}`
-      setTabs((prev) => [
-        ...prev,
-        {
-          id,
-          folderId: currentFolderId,
-          title: title ?? defaultTitle,
-          workingDir,
-          shell: resolveTerminalShell(shell),
-        },
-      ])
-      setActiveTabId(id)
+      const defaultTitle = t("defaultTitle", {
+        number: tabCounterRef.current,
+      })
+      const paneId = createOwnedTerminalTab({
+        folderId: currentFolderId,
+        title: title ?? defaultTitle,
+        workingDir,
+        shell: resolveTerminalShell(shell),
+      })
 
-      return id
+      return paneId
     },
-    [currentFolderId, resolveTerminalShell]
+    [createOwnedTerminalTab, currentFolderId, resolveTerminalShell, t]
   )
 
   const createTerminal = useCallback(async () => {
@@ -243,63 +513,309 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     await createTerminalInDirectory(folderPath)
   }, [folderPath, createTerminalInDirectory])
 
+  const splitTerminal = useCallback(async () => {
+    const targetTabId =
+      activeVisibleTabId ??
+      activeTabIdRef.current ??
+      tabsRef.current[0]?.id ??
+      null
+    if (!targetTabId) return null
+
+    const targetTab = tabsRef.current.find((tab) => tab.id === targetTabId)
+    if (!targetTab) return null
+
+    const activePane =
+      targetTab.panes.find((pane) => pane.id === targetTab.activePaneId) ??
+      targetTab.panes[0]
+    if (!activePane) return null
+
+    const nextPane = createTerminalPane(
+      activePane.workingDir,
+      activePane.shell,
+      undefined
+    )
+
+    setManualSelection({
+      conversationKey: activeConversationKey,
+      conversationTabId: activeConversationTabRef.current?.id ?? null,
+      activationSeq: activeTabActivationSeq,
+    })
+    setIsOpen(true)
+    setTabs((prev) =>
+      prev.map((tab) =>
+        tab.id === targetTab.id
+          ? {
+              ...tab,
+              panes: [...tab.panes, nextPane],
+              activePaneId: nextPane.id,
+            }
+          : tab
+      )
+    )
+    setActiveTabId(targetTab.id)
+
+    return nextPane.id
+  }, [activeConversationKey, activeTabActivationSeq, activeVisibleTabId])
+
   const setHeight = useCallback((h: number) => {
     setHeightState(Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, h)))
   }, [])
 
   const closeTerminal = useCallback(
     (id: string) => {
-      markTerminalExited(id)
-      removeExitedTerminals([id])
-      terminalKill(id).catch(() => {})
       setTabs((prev) => {
-        const next = prev.filter((t) => t.id !== id)
+        const index = prev.findIndex((tab) => tab.id === id)
+        if (index < 0) return prev
+
+        const closingTab = prev[index]
+        const next = prev.filter((tab) => tab.id !== id)
+        const closingPaneIds = closingTab.panes.map((pane) => pane.id)
+
+        killTerminalTabs([closingTab])
+        removeExitedTerminals(closingPaneIds)
+
         if (next.length === 0) {
           tabCounterRef.current = 0
           setIsOpen(false)
           setActiveTabId(null)
-        } else {
-          setActiveTabId((prevActive) =>
-            prevActive === id ? next[next.length - 1].id : prevActive
-          )
+          return next
         }
+
+        const resolvedClosingOwner = resolveTerminalOwner(
+          closingTab.owner,
+          conversationIdsByTabId
+        )
+        const sameOwner = next.filter((tab) =>
+          isSameOwner(
+            resolveTerminalOwner(tab.owner, conversationIdsByTabId),
+            resolvedClosingOwner
+          )
+        )
+        const fallbackTab = sameOwner[0] ?? next[next.length - 1]
+
+        if (activeTabIdRef.current === id) {
+          setActiveTabId(fallbackTab.id)
+        }
+
         return next
       })
     },
-    [markTerminalExited, removeExitedTerminals]
+    [conversationIdsByTabId, killTerminalTabs, removeExitedTerminals]
   )
 
   const closeOtherTerminals = useCallback(
     (id: string) => {
+      const scopeIds = new Set(visibleTabs.map((tab) => tab.id))
+      if (scopeIds.size <= 1) return
+
+      setManualSelection({
+        conversationKey: activeConversationKey,
+        conversationTabId: activeConversationTabRef.current?.id ?? null,
+        activationSeq: activeTabActivationSeq,
+      })
       setTabs((prev) => {
-        const closed = prev.filter((t) => t.id !== id)
+        const closed = prev.filter(
+          (tab) => scopeIds.has(tab.id) && tab.id !== id
+        )
+        if (closed.length === 0) return prev
+
         killTerminalTabs(closed)
-        removeExitedTerminals(closed.map((t) => t.id))
-        return prev.filter((t) => t.id === id)
+        removeExitedTerminals(collectPaneIds(closed))
+        return prev.filter((tab) => !scopeIds.has(tab.id) || tab.id === id)
       })
       setActiveTabId(id)
+    },
+    [
+      activeConversationKey,
+      activeTabActivationSeq,
+      killTerminalTabs,
+      removeExitedTerminals,
+      visibleTabs,
+    ]
+  )
+
+  const closeAllTerminals = useCallback(() => {
+    const scopeIds = new Set(visibleTabs.map((tab) => tab.id))
+    if (scopeIds.size === 0) return
+
+    setTabs((prev) => {
+      const closed = prev.filter((tab) => scopeIds.has(tab.id))
+      if (closed.length === 0) return prev
+
+      const next = prev.filter((tab) => !scopeIds.has(tab.id))
+      killTerminalTabs(closed)
+      removeExitedTerminals(collectPaneIds(closed))
+
+      if (next.length === 0) {
+        tabCounterRef.current = 0
+        setActiveTabId(null)
+        setIsOpen(false)
+      } else if (
+        activeTabIdRef.current &&
+        scopeIds.has(activeTabIdRef.current)
+      ) {
+        setActiveTabId(next[next.length - 1].id)
+      }
+
+      return next
+    })
+  }, [killTerminalTabs, removeExitedTerminals, visibleTabs])
+
+  const closePane = useCallback(
+    (tabId: string, paneId: string) => {
+      const targetTab = tabsRef.current.find((tab) => tab.id === tabId)
+      if (!targetTab) return
+      if (targetTab.panes.length <= 1) {
+        closeTerminal(tabId)
+        return
+      }
+
+      terminalKill(paneId).catch(() => {})
+      removeExitedTerminals([paneId])
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== tabId) return tab
+
+          const nextPanes = tab.panes.filter((pane) => pane.id !== paneId)
+          const nextActivePaneId =
+            tab.activePaneId === paneId
+              ? (nextPanes[0]?.id ?? tab.activePaneId)
+              : tab.activePaneId
+
+          return {
+            ...tab,
+            panes: nextPanes,
+            activePaneId: nextActivePaneId,
+          }
+        })
+      )
+    },
+    [closeTerminal, removeExitedTerminals]
+  )
+
+  const closeOtherPanes = useCallback(
+    (tabId: string, paneId: string) => {
+      const targetTab = tabsRef.current.find((tab) => tab.id === tabId)
+      if (!targetTab || targetTab.panes.length <= 1) return
+
+      const paneIdsToClose = targetTab.panes
+        .filter((pane) => pane.id !== paneId)
+        .map((pane) => pane.id)
+      if (paneIdsToClose.length === 0) return
+
+      paneIdsToClose.forEach((id) => {
+        terminalKill(id).catch(() => {})
+      })
+      removeExitedTerminals(paneIdsToClose)
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== tabId) return tab
+          const remainingPane =
+            tab.panes.find((pane) => pane.id === paneId) ?? tab.panes[0]
+          if (!remainingPane) return tab
+          return {
+            ...tab,
+            panes: [remainingPane],
+            activePaneId: remainingPane.id,
+          }
+        })
+      )
+      setActiveTabId(tabId)
+    },
+    [removeExitedTerminals]
+  )
+
+  const closeAllPanes = useCallback(
+    (tabId: string) => {
+      closeTerminal(tabId)
+    },
+    [closeTerminal]
+  )
+
+  const closeTerminalsByFolder = useCallback(
+    (folderId: number) => {
+      setTabs((prev) => {
+        const closed = prev.filter((tab) => tab.folderId === folderId)
+        if (closed.length === 0) return prev
+
+        const next = prev.filter((tab) => tab.folderId !== folderId)
+        killTerminalTabs(closed)
+        removeExitedTerminals(collectPaneIds(closed))
+
+        if (next.length === 0) {
+          tabCounterRef.current = 0
+          setActiveTabId(null)
+          setIsOpen(false)
+        } else if (
+          activeTabIdRef.current &&
+          closed.some((tab) => tab.id === activeTabIdRef.current)
+        ) {
+          setActiveTabId(next[next.length - 1].id)
+        }
+
+        return next
+      })
     },
     [killTerminalTabs, removeExitedTerminals]
   )
 
-  const closeAllTerminals = useCallback(() => {
-    setTabs((prev) => {
-      killTerminalTabs(prev)
-      removeExitedTerminals(prev.map((t) => t.id))
-      return []
-    })
-    tabCounterRef.current = 0
-    setActiveTabId(null)
-    setIsOpen(false)
-  }, [killTerminalTabs, removeExitedTerminals])
-
   const renameTerminal = useCallback((id: string, title: string) => {
-    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, title } : t)))
+    setTabs((prev) =>
+      prev.map((tab) => (tab.id === id ? { ...tab, title } : tab))
+    )
   }, [])
 
-  const switchTerminal = useCallback((id: string) => {
-    setActiveTabId(id)
-  }, [])
+  const renamePane = useCallback(
+    (tabId: string, paneId: string, title: string) => {
+      const normalizedTitle = title.trim()
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== tabId) return tab
+          return {
+            ...tab,
+            panes: tab.panes.map((pane) =>
+              pane.id === paneId
+                ? {
+                    ...pane,
+                    title: normalizedTitle || undefined,
+                  }
+                : pane
+            ),
+          }
+        })
+      )
+    },
+    []
+  )
+
+  const switchTerminal = useCallback(
+    (id: string) => {
+      setManualSelection({
+        conversationKey: activeConversationKey,
+        conversationTabId: activeConversationTabRef.current?.id ?? null,
+        activationSeq: activeTabActivationSeq,
+      })
+      setActiveTabId(id)
+    },
+    [activeConversationKey, activeTabActivationSeq]
+  )
+
+  const switchPane = useCallback(
+    (tabId: string, paneId: string) => {
+      setManualSelection({
+        conversationKey: activeConversationKey,
+        conversationTabId: activeConversationTabRef.current?.id ?? null,
+        activationSeq: activeTabActivationSeq,
+      })
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === tabId ? { ...tab, activePaneId: paneId } : tab
+        )
+      )
+      setActiveTabId(tabId)
+    },
+    [activeConversationKey, activeTabActivationSeq]
+  )
 
   const isInTerminalRegion = useCallback((target: EventTarget | null) => {
     if (!(target instanceof Element)) return false
@@ -359,12 +875,12 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
       }
 
       if (
-        activeTabId &&
+        activeVisibleTabId &&
         matchShortcutEvent(event, shortcuts.close_current_terminal_tab)
       ) {
         event.preventDefault()
         event.stopPropagation()
-        closeTerminal(activeTabId)
+        closeTerminal(activeVisibleTabId)
       }
     }
 
@@ -373,7 +889,7 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("keydown", handleTerminalHotkeys, true)
     }
   }, [
-    activeTabId,
+    activeVisibleTabId,
     closeTerminal,
     createTerminal,
     isInTerminalRegion,
@@ -382,11 +898,12 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     shortcuts.new_terminal_tab,
   ])
 
-  // Cleanup all terminals on unmount — uses ref to get current tabs
   useEffect(() => {
     return () => {
-      tabsRef.current.forEach((t) => {
-        terminalKill(t.id).catch(() => {})
+      tabsRef.current.forEach((tab) => {
+        tab.panes.forEach((pane) => {
+          terminalKill(pane.id).catch(() => {})
+        })
       })
     }
   }, [])
@@ -399,36 +916,56 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
       maxHeight: MAX_HEIGHT,
       toggle,
       setHeight,
-      tabs,
+      tabs: resolvedTabs,
+      visibleTabs,
       activeTabId,
-      exitedTerminals,
+      activeVisibleTabId,
+      activePaneId,
+      exitedTerminals: visibleExitedTerminals,
       markTerminalExited,
       createTerminal,
       createTerminalInDirectory,
       createTerminalWithCommand,
+      splitTerminal,
       closeTerminal,
       closeOtherTerminals,
       closeAllTerminals,
+      closePane,
+      closeOtherPanes,
+      closeAllPanes,
+      closeTerminalsByFolder,
       renameTerminal,
+      renamePane,
       switchTerminal,
+      switchPane,
     }),
     [
       isOpen,
       height,
       toggle,
       setHeight,
-      tabs,
+      resolvedTabs,
+      visibleTabs,
       activeTabId,
-      exitedTerminals,
+      activeVisibleTabId,
+      activePaneId,
+      visibleExitedTerminals,
       markTerminalExited,
       createTerminal,
       createTerminalInDirectory,
       createTerminalWithCommand,
+      splitTerminal,
       closeTerminal,
       closeOtherTerminals,
       closeAllTerminals,
+      closePane,
+      closeOtherPanes,
+      closeAllPanes,
+      closeTerminalsByFolder,
       renameTerminal,
+      renamePane,
       switchTerminal,
+      switchPane,
     ]
   )
 

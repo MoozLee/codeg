@@ -1071,7 +1071,18 @@
       "closeOthers": "Cerrar otros",
       "closeAll": "Cerrar todo",
       "hideTerminal": "Ocultar terminal ({shortcut})",
-      "openFolderFirst": "Abre primero una carpeta"
+      "openFolderFirst": "Abre primero una carpeta",
+      "defaultTitle": "Terminal {number}",
+      "newTerminalTab": "Nueva pestaña de terminal",
+      "splitTerminal": "Dividir terminal",
+      "selectTerminalFirst": "Selecciona primero una pestaña de terminal",
+      "noTerminalsForConversation": "No hay pestañas de terminal para esta conversación",
+      "paneList": "Paneles",
+      "paneLabel": "Panel {number}",
+      "closePane": "Cerrar panel {number}",
+      "startingTerminal": "Iniciando terminal...",
+      "processExited": "Proceso finalizado",
+      "startFailed": "No se pudo iniciar el terminal: {message}"
     },
     "sessionFiles": {
       "currentResponse": "Respuesta actual",

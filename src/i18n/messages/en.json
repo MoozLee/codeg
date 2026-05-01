@@ -1071,7 +1071,18 @@
       "closeOthers": "Close Others",
       "closeAll": "Close All",
       "hideTerminal": "Hide Terminal ({shortcut})",
-      "openFolderFirst": "Open a folder first"
+      "openFolderFirst": "Open a folder first",
+      "defaultTitle": "Terminal {number}",
+      "newTerminalTab": "New terminal tab",
+      "splitTerminal": "Split terminal",
+      "selectTerminalFirst": "Select a terminal tab first",
+      "noTerminalsForConversation": "No terminal tabs for this conversation",
+      "paneList": "Panes",
+      "paneLabel": "Pane {number}",
+      "closePane": "Close Pane {number}",
+      "startingTerminal": "Starting terminal...",
+      "processExited": "Process exited",
+      "startFailed": "Failed to start terminal: {message}"
     },
     "sessionFiles": {
       "currentResponse": "Current response",

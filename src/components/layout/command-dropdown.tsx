@@ -85,11 +85,13 @@ export function CommandDropdown() {
   useEffect(() => {
     setRunningCommandTerminals((prev) => {
       if (Object.keys(prev).length === 0) return prev
-      const tabIds = new Set(terminalTabs.map((t) => t.id))
+      const paneIds = new Set(
+        terminalTabs.flatMap((tab) => tab.panes.map((pane) => pane.id))
+      )
       let changed = false
       const next = { ...prev }
       for (const [cmdId, termId] of Object.entries(prev)) {
-        if (!tabIds.has(termId)) {
+        if (!paneIds.has(termId)) {
           delete next[Number(cmdId)]
           changed = true
         }

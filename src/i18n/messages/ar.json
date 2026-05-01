@@ -1071,7 +1071,18 @@
       "closeOthers": "إغلاق البقية",
       "closeAll": "إغلاق الكل",
       "hideTerminal": "إخفاء الطرفية ({shortcut})",
-      "openFolderFirst": "افتح مجلدا أولا"
+      "openFolderFirst": "افتح مجلدا أولا",
+      "defaultTitle": "الطرفية {number}",
+      "newTerminalTab": "علامة تبويب طرفية جديدة",
+      "splitTerminal": "تقسيم الطرفية",
+      "selectTerminalFirst": "اختر علامة تبويب طرفية أولا",
+      "noTerminalsForConversation": "لا توجد علامات تبويب طرفية لهذه المحادثة",
+      "paneList": "الأجزاء",
+      "paneLabel": "الجزء {number}",
+      "closePane": "إغلاق الجزء {number}",
+      "startingTerminal": "جارٍ تشغيل الطرفية...",
+      "processExited": "انتهت العملية",
+      "startFailed": "فشل بدء الطرفية: {message}"
     },
     "sessionFiles": {
       "currentResponse": "الاستجابة الحالية",

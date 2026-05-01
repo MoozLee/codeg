@@ -1071,7 +1071,18 @@
       "closeOthers": "Fermer les autres",
       "closeAll": "Tout fermer",
       "hideTerminal": "Masquer le terminal ({shortcut})",
-      "openFolderFirst": "Ouvrez d'abord un dossier"
+      "openFolderFirst": "Ouvrez d'abord un dossier",
+      "defaultTitle": "Terminal {number}",
+      "newTerminalTab": "Nouvel onglet terminal",
+      "splitTerminal": "Diviser le terminal",
+      "selectTerminalFirst": "Sélectionnez d'abord un onglet terminal",
+      "noTerminalsForConversation": "Aucun onglet terminal pour cette conversation",
+      "paneList": "Volets",
+      "paneLabel": "Volet {number}",
+      "closePane": "Fermer le volet {number}",
+      "startingTerminal": "Démarrage du terminal...",
+      "processExited": "Processus terminé",
+      "startFailed": "Échec du démarrage du terminal : {message}"
     },
     "sessionFiles": {
       "currentResponse": "Réponse actuelle",

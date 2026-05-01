@@ -1071,7 +1071,18 @@
       "closeOthers": "关闭其它",
       "closeAll": "关闭所有",
       "hideTerminal": "隐藏终端（{shortcut}）",
-      "openFolderFirst": "请先打开一个文件夹"
+      "openFolderFirst": "请先打开一个文件夹",
+      "defaultTitle": "终端 {number}",
+      "newTerminalTab": "新建终端标签",
+      "splitTerminal": "分栏终端",
+      "selectTerminalFirst": "请先选择一个终端标签",
+      "noTerminalsForConversation": "当前会话还没有终端标签",
+      "paneList": "分栏",
+      "paneLabel": "Pane {number}",
+      "closePane": "关闭 Pane {number}",
+      "startingTerminal": "正在启动终端...",
+      "processExited": "进程已退出",
+      "startFailed": "启动终端失败：{message}"
     },
     "sessionFiles": {
       "currentResponse": "当前响应",
