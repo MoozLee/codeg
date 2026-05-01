@@ -43,12 +43,25 @@ pub struct ProbeTerminalShellPathParams {
     pub path: String,
 }
 
+#[derive(Deserialize)]
+pub struct UpdateFontSettingsParams {
+    pub settings: SystemFontSettings,
+}
+
 // ---------------------------------------------------------------------------
 // Read handlers
 // ---------------------------------------------------------------------------
 
 pub async fn list_system_font_families() -> Result<Json<SystemFontFamilyList>, AppCommandError> {
     Ok(Json(settings_commands::fallback_system_font_families()))
+}
+
+pub async fn get_system_font_settings(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<SystemFontSettings>, AppCommandError> {
+    let db = &state.db;
+    let settings = settings_commands::load_system_font_settings(&db.conn).await?;
+    Ok(Json(settings))
 }
 
 pub async fn get_system_proxy_settings(
@@ -100,6 +113,16 @@ pub async fn probe_terminal_shell_path(
 // Update handlers
 // ---------------------------------------------------------------------------
 
+pub async fn update_system_font_settings(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdateFontSettingsParams>,
+) -> Result<Json<SystemFontSettings>, AppCommandError> {
+    let db = &state.db;
+    let settings = settings_commands::update_system_font_settings_core(&db.conn, params.settings)
+        .await?;
+    Ok(Json(settings))
+}
+
 pub async fn update_system_proxy_settings(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<UpdateProxySettingsParams>,
@@ -107,8 +130,6 @@ pub async fn update_system_proxy_settings(
     let settings = params.settings;
     let db = &state.db;
 
-    // TODO: call normalize_proxy_settings once it is made pub(crate) in
-    // commands/system_settings.rs. For now the frontend validates the URL.
     let serialized = serde_json::to_string(&settings).map_err(|e| {
         AppCommandError::invalid_input("Failed to serialize proxy settings")
             .with_detail(e.to_string())

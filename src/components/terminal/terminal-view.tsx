@@ -98,6 +98,29 @@ function getTerminalTheme(container: HTMLDivElement | null): ITheme {
   }
 }
 
+function refitTerminalAfterMetricsChange({
+  container,
+  fit,
+  refresh,
+}: {
+  container: HTMLDivElement | null
+  fit: (() => void) | undefined
+  refresh?: () => void
+}) {
+  requestAnimationFrame(() => {
+    refresh?.()
+    requestAnimationFrame(() => {
+      if (
+        container &&
+        container.clientWidth > 0 &&
+        container.clientHeight > 0
+      ) {
+        fit?.()
+      }
+    })
+  })
+}
+
 interface TerminalViewProps {
   terminalId: string
   workingDir: string
@@ -342,28 +365,24 @@ export function TerminalView({
     const term = termRef.current
     if (!term) return
     term.options.fontSize = computeTerminalFontSize(zoomLevel)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const el = containerRef.current
-        if (el && el.clientWidth > 0 && el.clientHeight > 0) {
-          fitAddonRef.current?.fit()
-        }
-      })
+    refitTerminalAfterMetricsChange({
+      container: containerRef.current,
+      fit: () => fitAddonRef.current?.fit(),
+      refresh: () => term.refresh(0, Math.max(term.rows - 1, 0)),
     })
   }, [zoomLevel])
 
+  // React to code font changes. xterm needs its font option updated explicitly;
+  // CSS variables alone do not update mounted canvas/DOM renderer metrics.
   useEffect(() => {
     codeFontFamilyStackRef.current = codeFontFamilyStack
     const term = termRef.current
     if (!term) return
     term.options.fontFamily = codeFontFamilyStack
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const el = containerRef.current
-        if (el && el.clientWidth > 0 && el.clientHeight > 0) {
-          fitAddonRef.current?.fit()
-        }
-      })
+    refitTerminalAfterMetricsChange({
+      container: containerRef.current,
+      fit: () => fitAddonRef.current?.fit(),
+      refresh: () => term.refresh(0, Math.max(term.rows - 1, 0)),
     })
   }, [codeFontFamilyStack])
 

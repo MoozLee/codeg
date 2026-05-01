@@ -379,6 +379,10 @@ pub fn build_router(
             post(handlers::system_settings::list_system_font_families),
         )
         .route(
+            "/get_system_font_settings",
+            post(handlers::system_settings::get_system_font_settings),
+        )
+        .route(
             "/get_system_proxy_settings",
             post(handlers::system_settings::get_system_proxy_settings),
         )
@@ -401,6 +405,10 @@ pub fn build_router(
         .route(
             "/probe_terminal_shell_path",
             post(handlers::system_settings::probe_terminal_shell_path),
+        )
+        .route(
+            "/update_system_font_settings",
+            post(handlers::system_settings::update_system_font_settings),
         )
         .route(
             "/update_system_proxy_settings",
