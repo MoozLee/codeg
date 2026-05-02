@@ -27,6 +27,10 @@ Docker-Container — Remote-Entwicklung von jedem Browser aus — mit Konversati
 paralleler `git worktree`-Entwicklung, MCP/Skills-Verwaltung, Chat-Kanal-Integration
 (Telegram, Lark, iLink usw.) und integrierten Git/Datei/Terminal-Workflows.
 
+## Hinweis zu Fork und Release-Zweig
+
+Dieses Repository ist ein Fork von [xintaofei/codeg](https://github.com/xintaofei/codeg). Der Branch `main` bleibt nah am Upstream, während der Fork-Branch `release` zusätzliche nutzerseitige Änderungen vor oder über Upstream hinaus enthalten kann. Jüngere Beispiele sind die Navigation im Nachrichtenverlauf sowie konfigurierbare Datei-Öffnungsziele und Schriftarten über verschiedene Laufzeiten hinweg. Weitere fork-spezifische Funktionen werden unten beschrieben, darunter **Chat-Kanäle**, die Bereitstellung von **`codeg-server`**, **Docker-Unterstützung** und der **Projekt-Starter**.
+
 ![gallery](../images/gallery.svg)
 
 ## Hauptoberfläche
