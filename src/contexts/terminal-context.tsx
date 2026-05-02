@@ -228,6 +228,10 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
       ),
     [conversationTabs]
   )
+  const conversationTabIds = useMemo(
+    () => new Set(conversationTabs.map((tab) => tab.id)),
+    [conversationTabs]
+  )
 
   const resolvedTabs = useMemo(
     () =>
@@ -249,6 +253,52 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     activeConversationTabRef.current = activeConversationTab
   }, [activeConversationTab])
+
+  useEffect(() => {
+    // Draft-owned terminals start life bound to a conversation tab id.
+    // Persist that temporary ownership into a conversation owner once the tab
+    // is bound, and if the draft tab disappears first, reassign the terminal to
+    // the current surviving conversation scope so it stays reachable.
+    const fallbackOwner = getTerminalOwnerFromConversationTab(
+      activeConversationTabRef.current ?? conversationTabs[0] ?? null
+    )
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Terminal ownership intentionally follows tab-context binding/removal so draft-created terminals stay reachable and stable conversations migrate to conversation ownership.
+    setTabs((prev) => {
+      let changed = false
+
+      const next = prev.map((tab) => {
+        if (tab.owner?.kind !== "tab") return tab
+
+        const conversationId = conversationIdsByTabId.get(
+          tab.owner.conversationTabId
+        )
+        if (conversationId != null) {
+          changed = true
+          const owner: TerminalOwner = {
+            kind: "conversation",
+            conversationId,
+          }
+          return {
+            ...tab,
+            owner,
+          }
+        }
+
+        if (!conversationTabIds.has(tab.owner.conversationTabId)) {
+          changed = true
+          return {
+            ...tab,
+            owner: fallbackOwner,
+          }
+        }
+
+        return tab
+      })
+
+      return changed ? next : prev
+    })
+  }, [conversationIdsByTabId, conversationTabIds, conversationTabs])
 
   const folderPath = activeFolder?.path ?? ""
   const currentFolderId = activeFolderId ?? 0
