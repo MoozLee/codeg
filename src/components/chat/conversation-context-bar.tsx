@@ -30,12 +30,16 @@ import { cn } from "@/lib/utils"
 interface ConversationContextBarProps {
   extraContent?: React.ReactNode
   hasExtraContent?: boolean
+  leadingContent?: React.ReactNode
+  hasLeadingContent?: boolean
   scrollEndTrigger?: number
 }
 
 export const ConversationContextBar = memo(function ConversationContextBar({
   extraContent,
   hasExtraContent = false,
+  leadingContent,
+  hasLeadingContent = false,
   scrollEndTrigger,
 }: ConversationContextBarProps = {}) {
   const scrollRef = useRef<OverlayScrollbarsComponentRef>(null)
@@ -72,17 +76,28 @@ export const ConversationContextBar = memo(function ConversationContextBar({
     return () => inner.removeEventListener("wheel", handler)
   }, [hasExtraContent])
 
-  if (!hasExtraContent) return null
+  if (!hasExtraContent && !hasLeadingContent) return null
 
   return (
-    <ScrollArea x="scroll" y="hidden" className="shrink-0" ref={scrollRef}>
-      <div
-        ref={innerRef}
-        className="flex w-max items-center gap-1.5 px-2 pt-2 text-xs text-muted-foreground"
-      >
-        {extraContent}
-      </div>
-    </ScrollArea>
+    <div className="flex shrink-0 items-center gap-1.5 px-2 pt-2 text-xs text-muted-foreground">
+      {hasLeadingContent && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          {leadingContent}
+        </div>
+      )}
+      {hasExtraContent && (
+        <ScrollArea
+          x="scroll"
+          y="hidden"
+          className="min-w-0 flex-1"
+          ref={scrollRef}
+        >
+          <div ref={innerRef} className="flex w-max items-center gap-1.5">
+            {extraContent}
+          </div>
+        </ScrollArea>
+      )}
+    </div>
   )
 })
 
@@ -183,6 +198,26 @@ export const ConversationFolderBranchPicker = memo(
 )
 
 ConversationFolderBranchPicker.displayName = "ConversationFolderBranchPicker"
+
+/**
+ * Mirror the visibility check inside `ConversationFolderBranchPicker` so the
+ * parent can decide whether the surrounding bar should reserve space for it.
+ * The picker itself returns `null` when no tab/folder is resolved (e.g. while
+ * folders are still loading on first paint), and the parent must avoid
+ * rendering an otherwise-empty leading wrapper in that interval.
+ */
+export function useConversationFolderBranchPickerVisible(
+  tabId?: string | null
+): boolean {
+  const { tabs, activeTabId } = useTabContext()
+  const { allFolders } = useAppWorkspace()
+  const lookupId = tabId ?? activeTabId
+  const ownTab = tabs.find((x) => x.id === lookupId) ?? null
+  const ownFolder = ownTab
+    ? (allFolders.find((f) => f.id === ownTab.folderId) ?? null)
+    : null
+  return Boolean(ownTab && ownFolder)
+}
 
 // ============================================================================
 // FolderPicker

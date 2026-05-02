@@ -13,7 +13,6 @@ import {
   Cog,
   FileSearch,
   GitFork,
-  ListPlus,
   MessageSquareText,
   Paperclip,
   Plus,
@@ -64,9 +63,16 @@ import {
 import {
   ConversationContextBar,
   ConversationFolderBranchPicker,
+  useConversationFolderBranchPickerVisible,
 } from "@/components/chat/conversation-context-bar"
-import { ModeSelector } from "@/components/chat/mode-selector"
-import { SessionConfigSelector } from "@/components/chat/session-config-selector"
+import {
+  InlineModeSelector,
+  ModeSelector,
+} from "@/components/chat/mode-selector"
+import {
+  InlineSessionConfigSelector,
+  SessionConfigSelector,
+} from "@/components/chat/session-config-selector"
 import {
   getExpertIcon,
   pickExpertLocalized,
@@ -503,6 +509,9 @@ export function MessageInput({
   const showConfigLoading = configOptionsLoading && !hasConfigOptions
   const hasAnySelector =
     showConfigLoading || hasConfigOptions || showModeLoading || showModeSelector
+  const hasInlineSelectors = hasConfigOptions || showModeSelector
+  const hasFolderBranchPicker =
+    useConversationFolderBranchPickerVisible(attachmentTabId)
   const imageAttachments = useMemo(
     () =>
       attachments.filter(
@@ -573,20 +582,17 @@ export function MessageInput({
     setSlashDropdownOpen(open)
     if (!open) setSlashDropdownSearch("")
   }, [])
-  // Radix composes this handler with its own content-focus via
-  // composeEventHandlers (default `checkForDefaultPrevented: true`), so
-  // calling preventDefault here skips radix's autofocus entirely. The prop
-  // is accepted at runtime but omitted from DropdownMenuContent's public
-  // TypeScript surface, so it has to be passed through an untyped spread.
-  const slashDropdownFocusProps = useMemo(
-    () => ({
-      onOpenAutoFocus: (event: Event) => {
-        event.preventDefault()
-        slashDropdownInputRef.current?.focus()
-      },
-    }),
-    []
-  )
+  // Radix's MenuSubContent hardcodes its own onOpenAutoFocus that overwrites
+  // any prop we pass in (see @radix-ui/react-menu MenuSubContent). To put the
+  // search input in focus when the slash submenu opens, defer focus to a
+  // microtask after Radix finishes its own focus dance.
+  useEffect(() => {
+    if (!slashDropdownOpen) return
+    const id = requestAnimationFrame(() => {
+      slashDropdownInputRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [slashDropdownOpen])
   const slashFilterText = useMemo(() => {
     if (!slashMenuOpen || slashTriggerPos == null) return ""
     const trigger = text[slashTriggerPos]
@@ -1791,6 +1797,29 @@ export function MessageInput({
     </>
   )
 
+  const inlineSelectorItems = (
+    <>
+      {hasConfigOptions &&
+        availableConfigOptions.map((option) => (
+          <InlineSessionConfigSelector
+            key={option.id}
+            option={option}
+            onSelect={(configId, valueId) =>
+              onConfigOptionChange?.(configId, valueId)
+            }
+          />
+        ))}
+      {showModeSelector && (
+        <InlineModeSelector
+          modes={availableModes}
+          selectedModeId={effectiveModeId!}
+          onSelect={handleModeSelect}
+          label={t("modeLabel")}
+        />
+      )}
+    </>
+  )
+
   const actionButtons = isEditingQueueItem ? (
     <div className="flex items-center gap-1">
       <Button
@@ -1800,58 +1829,48 @@ export function MessageInput({
         className="h-8 w-8"
         title={tQueue("cancelEdit")}
       >
-        <X className="h-4 w-4" />
+        <X className="size-4" />
       </Button>
       <Button
         onClick={handleSend}
         disabled={!hasSendableContent}
         size="icon"
+        className="h-8 w-8"
         title={tQueue("saveEdit")}
       >
-        <Check className="h-4 w-4" />
+        <Check className="size-4" />
       </Button>
     </div>
   ) : isPrompting && onCancel ? (
-    <div className="flex items-center gap-1">
-      <Button
-        onClick={handleSend}
-        disabled={!hasSendableContent}
-        variant="secondary"
-        size="icon"
-        className="h-8 w-8"
-        title={tQueue("addToQueue")}
-      >
-        <ListPlus className="h-4 w-4" />
-      </Button>
-      <Button
-        onClick={onCancel}
-        variant="destructive"
-        size="icon"
-        title={t("cancel")}
-      >
-        <Square className="h-4 w-4" />
-      </Button>
-    </div>
+    <Button
+      onClick={onCancel}
+      variant="destructive"
+      size="icon"
+      className="h-8 w-8"
+      title={t("cancel")}
+    >
+      <Square className="size-4" />
+    </Button>
   ) : onForkSend ? (
     <div className="flex items-center">
       <Button
         onClick={handleSend}
         disabled={disabled || !hasSendableContent}
         size="icon"
-        className="rounded-r-none"
+        className="h-8 w-8 rounded-r-none"
         title={t("send")}
       >
-        <Send className="h-4 w-4" />
+        <Send className="size-4" />
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             disabled={disabled || !hasSendableContent}
             size="icon"
-            className="rounded-l-none border-l border-primary-foreground/20 w-6"
+            className="h-8 w-5 rounded-l-none border-l border-primary-foreground/20"
             aria-label={t("forkAndSend")}
           >
-            <ChevronUp className="h-3 w-3" />
+            <ChevronUp className="size-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="top">
@@ -1867,9 +1886,10 @@ export function MessageInput({
       onClick={handleSend}
       disabled={disabled || !hasSendableContent}
       size="icon"
+      className="h-8 w-8"
       title={t("send")}
     >
-      <Send className="h-4 w-4" />
+      <Send className="size-4" />
     </Button>
   )
 
@@ -1964,7 +1984,7 @@ export function MessageInput({
       )}
       <div
         className={cn(
-          "flex flex-col rounded-xl border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+          "@container flex flex-col rounded-xl border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
           showDragActive && "ring-1 ring-primary/40",
           className
         )}
@@ -1972,6 +1992,12 @@ export function MessageInput({
         <ConversationContextBar
           hasExtraContent={hasImageAttachments || hasResourceAttachments}
           scrollEndTrigger={attachments.length}
+          hasLeadingContent={hasFolderBranchPicker}
+          leadingContent={
+            hasFolderBranchPicker ? (
+              <ConversationFolderBranchPicker tabId={attachmentTabId} />
+            ) : null
+          }
           extraContent={
             <>
               {imageAttachments.map((attachment) => (
@@ -2040,16 +2066,15 @@ export function MessageInput({
           className="min-h-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent text-base md:text-sm shadow-none focus-visible:border-0 focus-visible:ring-0"
           autoFocus={autoFocus}
         />
-        <div className="@container flex shrink-0 items-end justify-between gap-2 px-2 pb-2">
-          <div className="flex min-w-0 items-end gap-2">
-            <ConversationFolderBranchPicker tabId={attachmentTabId} />
+        <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">
+          <div className="flex min-w-0 items-end gap-1">
             <DropdownMenu onOpenChange={handleAddMenuOpenChange}>
               <DropdownMenuTrigger asChild>
                 <Button
                   disabled={disabled}
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
-                  className="h-6 w-6 shrink-0 bg-transparent"
+                  className="h-8 w-8 shrink-0"
                   title={t("addActions")}
                   aria-label={t("addActions")}
                 >
@@ -2082,6 +2107,7 @@ export function MessageInput({
                   <DropdownMenuSubContent
                     className="min-w-40 overflow-y-auto"
                     style={{
+                      maxWidth: "min(20rem, calc(100vw - 1rem))",
                       maxHeight:
                         "min(32rem, var(--radix-dropdown-menu-content-available-height))",
                     }}
@@ -2112,200 +2138,199 @@ export function MessageInput({
                     )}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  disabled={disabled}
-                  variant="outline"
-                  size="icon"
-                  className="h-6 w-6 shrink-0 bg-transparent"
-                  title={t("expertSkills")}
-                  aria-label={t("expertSkills")}
-                >
-                  <Sparkles className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="top"
-                align="start"
-                className="min-w-80 overflow-y-auto"
-                style={{
-                  maxHeight:
-                    "min(32rem, var(--radix-dropdown-menu-content-available-height))",
-                }}
-              >
-                {availableExperts.length === 0 ? (
-                  <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                    {t("expertsEmptyForAgent")}
-                  </div>
-                ) : (
-                  groupedExperts.map(([category, items], groupIndex) => (
-                    <div key={category}>
-                      {groupIndex > 0 && <DropdownMenuSeparator />}
-                      <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-wide">
-                        {translateExpertCategory(category)}
-                      </DropdownMenuLabel>
-                      {items.map((expert) => {
-                        const Icon = getExpertIcon(expert.metadata.icon)
-                        const name =
-                          pickExpertLocalized(
-                            expert.metadata.display_name,
-                            locale
-                          ) || expert.metadata.id
-                        const description = pickExpertLocalized(
-                          expert.metadata.description,
-                          locale
-                        )
-                        return (
-                          <DropdownMenuItem
-                            key={expert.metadata.id}
-                            onClick={() => handleExpertPopoverSelect(expert)}
-                            className="items-start gap-2"
-                          >
-                            <Icon className="mt-0.5 size-4 shrink-0" />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate font-medium">{name}</div>
-                              {description && (
-                                <div className="line-clamp-2 text-xs text-muted-foreground">
-                                  {description}
-                                </div>
-                              )}
-                            </div>
-                          </DropdownMenuItem>
-                        )
-                      })}
-                    </div>
-                  ))
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu
-              open={slashDropdownOpen}
-              onOpenChange={handleSlashDropdownOpenChange}
-            >
-              <DropdownMenuTrigger asChild>
-                <Button
-                  disabled={disabled || slashCommands.length === 0}
-                  variant="outline"
-                  size="icon"
-                  className="h-6 w-6 shrink-0 bg-transparent"
-                  onPointerDown={() => {
-                    cursorPosRef.current =
-                      textareaRef.current?.selectionStart ?? null
-                  }}
-                  title={t("slashCommands")}
-                >
-                  <Command className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="top"
-                align="start"
-                className="flex min-w-72 flex-col overflow-hidden p-0"
-                style={{
-                  maxHeight:
-                    "min(32rem, var(--radix-dropdown-menu-content-available-height))",
-                }}
-                {...slashDropdownFocusProps}
-              >
-                <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
-                  <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <input
-                    ref={slashDropdownInputRef}
-                    type="text"
-                    role="searchbox"
-                    aria-label={t("slashSearchPlaceholder")}
-                    value={slashDropdownSearch}
-                    onChange={(e) => setSlashDropdownSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "ArrowDown") {
-                        e.preventDefault()
-                        const container = e.currentTarget.closest(
-                          '[data-slot="dropdown-menu-content"]'
-                        )
-                        const firstItem =
-                          container?.querySelector<HTMLElement>(
-                            '[role="menuitem"]'
-                          )
-                        firstItem?.focus()
-                        return
-                      }
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        const first = filteredSlashDropdownCommands[0]
-                        if (first) {
-                          handleSlashPopoverSelect(first)
-                          setSlashDropdownOpen(false)
-                        }
-                        return
-                      }
-                      if (e.key === "Escape" || e.key === "Tab") return
-                      // Prevent radix DropdownMenu's built-in typeahead from
-                      // hijacking letter keys while the user is typing.
-                      e.stopPropagation()
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Sparkles className="size-4" />
+                    {t("expertSkills")}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent
+                    className="min-w-72 overflow-y-auto"
+                    style={{
+                      maxWidth: "min(20rem, calc(100vw - 1rem))",
+                      maxHeight:
+                        "min(32rem, var(--radix-dropdown-menu-content-available-height))",
                     }}
-                    placeholder={t("slashSearchPlaceholder")}
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div className="flex-1 overflow-y-auto p-1">
-                  {filteredSlashDropdownCommands.length === 0 ? (
-                    <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                      {t("slashSearchEmpty")}
+                  >
+                    {availableExperts.length === 0 ? (
+                      <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                        {t("expertsEmptyForAgent")}
+                      </div>
+                    ) : (
+                      groupedExperts.map(([category, items], groupIndex) => (
+                        <div key={category}>
+                          {groupIndex > 0 && <DropdownMenuSeparator />}
+                          <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-wide">
+                            {translateExpertCategory(category)}
+                          </DropdownMenuLabel>
+                          {items.map((expert) => {
+                            const Icon = getExpertIcon(expert.metadata.icon)
+                            const name =
+                              pickExpertLocalized(
+                                expert.metadata.display_name,
+                                locale
+                              ) || expert.metadata.id
+                            const description = pickExpertLocalized(
+                              expert.metadata.description,
+                              locale
+                            )
+                            return (
+                              <DropdownMenuItem
+                                key={expert.metadata.id}
+                                onClick={() =>
+                                  handleExpertPopoverSelect(expert)
+                                }
+                                className="items-start gap-2"
+                              >
+                                <Icon className="mt-0.5 size-4 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate font-medium">
+                                    {name}
+                                  </div>
+                                  {description && (
+                                    <div className="line-clamp-2 text-xs text-muted-foreground">
+                                      {description}
+                                    </div>
+                                  )}
+                                </div>
+                              </DropdownMenuItem>
+                            )
+                          })}
+                        </div>
+                      ))
+                    )}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSub
+                  open={slashDropdownOpen}
+                  onOpenChange={handleSlashDropdownOpenChange}
+                >
+                  <DropdownMenuSubTrigger
+                    disabled={slashCommands.length === 0}
+                    onPointerDown={() => {
+                      cursorPosRef.current =
+                        textareaRef.current?.selectionStart ?? null
+                    }}
+                  >
+                    <Command className="size-4" />
+                    {t("slashCommands")}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent
+                    className="flex min-w-72 flex-col overflow-hidden p-0"
+                    style={{
+                      maxWidth: "min(20rem, calc(100vw - 1rem))",
+                      maxHeight:
+                        "min(32rem, var(--radix-dropdown-menu-content-available-height))",
+                    }}
+                  >
+                    <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
+                      <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <input
+                        ref={slashDropdownInputRef}
+                        type="text"
+                        role="searchbox"
+                        aria-label={t("slashSearchPlaceholder")}
+                        value={slashDropdownSearch}
+                        onChange={(e) => setSlashDropdownSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "ArrowDown") {
+                            e.preventDefault()
+                            const container = e.currentTarget.closest(
+                              '[data-slot="dropdown-menu-sub-content"]'
+                            )
+                            const firstItem =
+                              container?.querySelector<HTMLElement>(
+                                '[role="menuitem"]'
+                              )
+                            firstItem?.focus()
+                            return
+                          }
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            const first = filteredSlashDropdownCommands[0]
+                            if (first) {
+                              handleSlashPopoverSelect(first)
+                              setSlashDropdownOpen(false)
+                            }
+                            return
+                          }
+                          if (e.key === "Escape" || e.key === "Tab") return
+                          // Prevent radix DropdownMenu's built-in typeahead
+                          // from hijacking letter keys while the user is
+                          // typing.
+                          e.stopPropagation()
+                        }}
+                        placeholder={t("slashSearchPlaceholder")}
+                        className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
                     </div>
-                  ) : (
-                    filteredSlashDropdownCommands.map((cmd) => (
-                      <DropdownMenuItem
-                        key={cmd.name}
-                        onClick={() => handleSlashPopoverSelect(cmd)}
-                        // Radix focuses the item on pointermove, which fires
-                        // while scrolling (items slide under the cursor) and
-                        // steals focus from the search input. Short-circuit
-                        // that default with preventDefault so the search
-                        // keeps focus until the user explicitly clicks.
-                        onPointerMove={(e) => e.preventDefault()}
-                        onPointerLeave={(e) => e.preventDefault()}
-                        className="hover:bg-accent hover:text-accent-foreground"
-                      >
-                        <DropdownRadioItemContent
-                          label={`/${cmd.name}`}
-                          description={cmd.description}
-                        />
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                </div>
+                    <div className="flex-1 overflow-y-auto p-1">
+                      {filteredSlashDropdownCommands.length === 0 ? (
+                        <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                          {t("slashSearchEmpty")}
+                        </div>
+                      ) : (
+                        filteredSlashDropdownCommands.map((cmd) => (
+                          <DropdownMenuItem
+                            key={cmd.name}
+                            onClick={() => handleSlashPopoverSelect(cmd)}
+                            // Radix focuses the item on pointermove, which
+                            // fires while scrolling (items slide under the
+                            // cursor) and steals focus from the search input.
+                            // Short-circuit that default with preventDefault
+                            // so the search keeps focus until the user
+                            // explicitly clicks.
+                            onPointerMove={(e) => e.preventDefault()}
+                            onPointerLeave={(e) => e.preventDefault()}
+                            className="hover:bg-accent hover:text-accent-foreground"
+                          >
+                            <DropdownRadioItemContent
+                              label={`/${cmd.name}`}
+                              description={cmd.description}
+                            />
+                          </DropdownMenuItem>
+                        ))
+                      )}
+                    </div>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
               </DropdownMenuContent>
             </DropdownMenu>
+            {hasInlineSelectors && (
+              <div className="hidden min-w-0 items-end gap-1 @[34rem]:flex">
+                {inlineSelectorItems}
+              </div>
+            )}
             {hasAnySelector && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-6 w-6 shrink-0 bg-transparent"
-                    title={t("agentSettings")}
-                    aria-label={t("agentSettings")}
+              <div
+                className={cn("flex", hasInlineSelectors && "@[34rem]:hidden")}
+              >
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      title={t("agentSettings")}
+                      aria-label={t("agentSettings")}
+                    >
+                      {agentType ? (
+                        <AgentIcon agentType={agentType} className="size-4" />
+                      ) : (
+                        <Cog className="size-4" />
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    side="top"
+                    align="start"
+                    className="min-w-56"
                   >
-                    {agentType ? (
-                      <AgentIcon agentType={agentType} className="size-4" />
-                    ) : (
-                      <Cog className="size-4" />
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  side="top"
-                  align="start"
-                  className="min-w-56"
-                >
-                  {selectorItems}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    {selectorItems}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             )}
           </div>
           <div className="shrink-0">{actionButtons}</div>

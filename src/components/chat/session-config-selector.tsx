@@ -1,7 +1,11 @@
 "use client"
 
 import { Fragment } from "react"
+import { ChevronDown } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -9,6 +13,7 @@ import {
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { DropdownRadioItemContent } from "@/components/chat/dropdown-radio-item-content"
 import type { SessionConfigOptionInfo } from "@/lib/types"
@@ -77,5 +82,77 @@ export function SessionConfigSelector({
         </DropdownMenuRadioGroup>
       </DropdownMenuSubContent>
     </DropdownMenuSub>
+  )
+}
+
+export function InlineSessionConfigSelector({
+  option,
+  onSelect,
+}: SessionConfigSelectorProps) {
+  if (option.kind.type !== "select") return null
+
+  const allOptions =
+    option.kind.groups.length > 0
+      ? option.kind.groups.flatMap((group) => group.options)
+      : option.kind.options
+  const selected = allOptions.find(
+    (item) => item.value === option.kind.current_value
+  )
+  const currentLabel = selected?.name ?? option.kind.current_value
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          title={option.description ?? option.name}
+          className="min-w-0 text-muted-foreground"
+        >
+          <span className="max-w-[10rem] truncate">{currentLabel}</span>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="top"
+        align="start"
+        className="max-h-[60vh] min-w-72 overflow-y-auto"
+        style={{
+          maxWidth: "min(20rem, calc(100vw - 1rem))",
+        }}
+      >
+        <DropdownMenuRadioGroup
+          value={option.kind.current_value}
+          onValueChange={(value) => onSelect(option.id, value)}
+        >
+          {option.kind.groups.length > 0
+            ? option.kind.groups.map((group, index) => (
+                <Fragment key={group.group}>
+                  {index > 0 && <DropdownMenuSeparator />}
+                  <DropdownMenuLabel>{group.name}</DropdownMenuLabel>
+                  {group.options.map((item) => (
+                    <DropdownMenuRadioItem
+                      key={`${group.group}-${item.value}`}
+                      value={item.value}
+                    >
+                      <DropdownRadioItemContent
+                        label={item.name}
+                        description={item.description}
+                      />
+                    </DropdownMenuRadioItem>
+                  ))}
+                </Fragment>
+              ))
+            : option.kind.options.map((item) => (
+                <DropdownMenuRadioItem key={item.value} value={item.value}>
+                  <DropdownRadioItemContent
+                    label={item.name}
+                    description={item.description}
+                  />
+                </DropdownMenuRadioItem>
+              ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
