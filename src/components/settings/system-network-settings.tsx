@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ArrowUpCircle,
   CheckCircle2,
+  ExternalLink,
   Languages,
   Loader2,
   MonitorCog,
@@ -31,19 +32,25 @@ import {
 } from "@/components/ui/select"
 import {
   getAvailableTerminalShells,
+  getSystemOpenTargetSettings,
   getSystemProxySettings,
   getSystemRenderingSettings,
   getSystemTerminalSettings,
   probeTerminalShellPath,
   updateSystemLanguageSettings,
+  updateSystemOpenTargetSettings,
   updateSystemProxySettings,
   updateSystemRenderingSettings,
   updateSystemTerminalSettings,
 } from "@/lib/api"
+import { toErrorMessage } from "@/lib/app-error"
+import { OPEN_TARGET_REGISTRY, isSystemOpenTarget } from "@/lib/open-targets"
 import { isDesktop, openUrl } from "@/lib/platform"
 import type {
   AppLocale,
   AvailableTerminalShells,
+  SystemOpenTarget,
+  SystemWebFileOpenMethod,
   TerminalShellOption,
 } from "@/lib/types"
 import { usePlatform } from "@/hooks/use-platform"
@@ -91,6 +98,12 @@ function resolveSelectedShellId(
   return matched?.id ?? TERMINAL_SHELL_OPTION_CUSTOM
 }
 
+function isSystemWebFileOpenMethod(
+  value: string
+): value is SystemWebFileOpenMethod {
+  return value === "browser" || value === "editor"
+}
+
 type UpdateAction = "check" | "install"
 
 // Captured the first time settings page loads: represents the value that the
@@ -118,8 +131,16 @@ export function SystemNetworkSettings() {
   const [savingTerminal, setSavingTerminal] = useState(false)
   const [enabled, setEnabled] = useState(false)
   const [proxyUrl, setProxyUrl] = useState("")
+  const [openTarget, setOpenTarget] = useState<SystemOpenTarget>("file_manager")
+  const [webFileOpenMethod, setWebFileOpenMethod] =
+    useState<SystemWebFileOpenMethod>("browser")
+  const [openTargetLoadError, setOpenTargetLoadError] = useState<string | null>(
+    null
+  )
   const [loadError, setLoadError] = useState<string | null>(null)
   const [disableHwAccel, setDisableHwAccel] = useState(false)
+  const [savingOpenTarget, setSavingOpenTarget] = useState(false)
+  const [savingWebFileOpenMethod, setSavingWebFileOpenMethod] = useState(false)
   const [savingRendering, setSavingRendering] = useState(false)
   const [persistedDisableHwAccel, setPersistedDisableHwAccel] = useState(false)
   const [processStartLoaded, setProcessStartLoaded] = useState(
@@ -127,6 +148,7 @@ export function SystemNetworkSettings() {
   )
   const renderingDirty =
     processStartLoaded && persistedDisableHwAccel !== processStartDisableHwAccel
+  const savingOpenSettings = savingOpenTarget || savingWebFileOpenMethod
   const [currentVersion, setCurrentVersion] = useState<string>("")
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
@@ -206,58 +228,82 @@ export function SystemNetworkSettings() {
 
   const loadSettings = useCallback(async () => {
     setLoading(true)
+    setOpenTargetLoadError(null)
     setLoadError(null)
 
-    try {
-      const [
-        proxySettings,
-        terminalSettings,
-        terminalShells,
-        version,
-        renderingSettings,
-      ] = await Promise.all([
-        getSystemProxySettings(),
-        getSystemTerminalSettings(),
-        getAvailableTerminalShells(),
-        getCurrentAppVersion(),
-        renderingSettingsLoadable
-          ? getSystemRenderingSettings()
-          : Promise.resolve(null),
-      ])
+    const tasks: Promise<void>[] = [
+      getSystemOpenTargetSettings()
+        .then((settings) => {
+          setOpenTarget(settings.target)
+          setWebFileOpenMethod(settings.web_file_open_method ?? "browser")
+        })
+        .catch((err) => {
+          setOpenTargetLoadError(toErrorMessage(err))
+          console.error("[Settings] load open target settings failed:", err)
+        }),
+      getSystemProxySettings()
+        .then((settings) => {
+          setEnabled(settings.enabled)
+          setProxyUrl(settings.proxy_url ?? "")
+        })
+        .catch((err) => {
+          setLoadError(toErrorMessage(err))
+          console.error("[Settings] load proxy settings failed:", err)
+        }),
+      getSystemTerminalSettings()
+        .then(async (terminalSettings) => {
+          const terminalShells = await getAvailableTerminalShells()
+          setAvailableShells(terminalShells)
+          const initialId = resolveSelectedShellId(
+            terminalSettings.default_shell,
+            terminalShells.options
+          )
+          setSelectedShellId(initialId)
+          if (initialId === TERMINAL_SHELL_OPTION_CUSTOM) {
+            setCustomShellPath(terminalSettings.default_shell ?? "")
+            setCustomPathExists(
+              terminalSettings.default_shell
+                ? await probeTerminalShellPath(terminalSettings.default_shell)
+                : null
+            )
+          } else {
+            setCustomShellPath("")
+            setCustomPathExists(null)
+          }
+        })
+        .catch((err) => {
+          setLoadError(toErrorMessage(err))
+          console.error("[Settings] load terminal settings failed:", err)
+        }),
+      getCurrentAppVersion()
+        .then((version) => {
+          setCurrentVersion(version)
+        })
+        .catch((err) => {
+          console.error("[Settings] load app version failed:", err)
+        }),
+    ]
 
-      setEnabled(proxySettings.enabled)
-      setProxyUrl(proxySettings.proxy_url ?? "")
-      setAvailableShells(terminalShells)
-      const initialId = resolveSelectedShellId(
-        terminalSettings.default_shell,
-        terminalShells.options
+    if (renderingSettingsLoadable) {
+      tasks.push(
+        getSystemRenderingSettings()
+          .then((settings) => {
+            const value = settings.disable_hardware_acceleration
+            setDisableHwAccel(value)
+            setPersistedDisableHwAccel(value)
+            if (processStartDisableHwAccel === null) {
+              processStartDisableHwAccel = value
+              setProcessStartLoaded(true)
+            }
+          })
+          .catch((err) => {
+            console.error("[Settings] load rendering settings failed:", err)
+          })
       )
-      setSelectedShellId(initialId)
-      if (initialId === TERMINAL_SHELL_OPTION_CUSTOM) {
-        setCustomShellPath(terminalSettings.default_shell ?? "")
-        setCustomPathExists(
-          terminalSettings.default_shell
-            ? await probeTerminalShellPath(terminalSettings.default_shell)
-            : null
-        )
-      } else {
-        setCustomShellPath("")
-        setCustomPathExists(null)
-      }
-      setCurrentVersion(version)
-      if (renderingSettings) {
-        const value = renderingSettings.disable_hardware_acceleration
-        setDisableHwAccel(value)
-        setPersistedDisableHwAccel(value)
-        if (processStartDisableHwAccel === null) {
-          processStartDisableHwAccel = value
-          setProcessStartLoaded(true)
-        }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      setLoadError(message)
-      console.error("[Settings] load system settings failed:", err)
+    }
+
+    try {
+      await Promise.all(tasks)
     } finally {
       setLoading(false)
     }
@@ -340,6 +386,52 @@ export function SystemNetworkSettings() {
     void persistTerminalShell(trimmed)
   }, [customShellPath, persistTerminalShell])
 
+  const saveOpenTarget = useCallback(
+    async (target: SystemOpenTarget, previous: SystemOpenTarget) => {
+      setSavingOpenTarget(true)
+
+      try {
+        const next = await updateSystemOpenTargetSettings({
+          target,
+          web_file_open_method: webFileOpenMethod,
+        })
+        setOpenTarget(next.target)
+        setWebFileOpenMethod(next.web_file_open_method)
+      } catch (err) {
+        setOpenTarget(previous)
+        const message = toErrorMessage(err)
+        toast.error(t("openTargetSaveFailed", { message }))
+      } finally {
+        setSavingOpenTarget(false)
+      }
+    },
+    [t, webFileOpenMethod]
+  )
+
+  const saveWebFileOpenMethod = useCallback(
+    async (
+      method: SystemWebFileOpenMethod,
+      previous: SystemWebFileOpenMethod
+    ) => {
+      setSavingWebFileOpenMethod(true)
+
+      try {
+        const next = await updateSystemOpenTargetSettings({
+          target: openTarget,
+          web_file_open_method: method,
+        })
+        setOpenTarget(next.target)
+        setWebFileOpenMethod(next.web_file_open_method)
+      } catch (err) {
+        setWebFileOpenMethod(previous)
+        const message = toErrorMessage(err)
+        toast.error(t("webFileOpenMethodSaveFailed", { message }))
+      } finally {
+        setSavingWebFileOpenMethod(false)
+      }
+    },
+    [openTarget, t]
+  )
   const saveProxySettings = useCallback(
     async (nextEnabled: boolean, nextProxyUrl: string) => {
       if (nextEnabled && !nextProxyUrl.trim()) return
@@ -692,6 +784,86 @@ export function SystemNetworkSettings() {
             <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
               {t("updateError", { message: updateError })}
             </div>
+          )}
+        </section>
+
+        <section className="rounded-xl border bg-card p-4 space-y-4">
+          <div className="flex items-center gap-2">
+            <ExternalLink className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">{t("openTargetTitle")}</h2>
+          </div>
+
+          {openTargetLoadError && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+              {t("loadFailed", { message: openTargetLoadError })}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">{t("defaultOpenTarget")}</p>
+              <p className="text-xs text-muted-foreground leading-5">
+                {t("defaultOpenTargetDescription")}
+              </p>
+            </div>
+            <Select
+              value={openTarget}
+              onValueChange={(value) => {
+                if (!isSystemOpenTarget(value)) return
+                const previous = openTarget
+                setOpenTarget(value)
+                void saveOpenTarget(value, previous)
+              }}
+              disabled={savingOpenSettings || !isDesktop()}
+            >
+              <SelectTrigger className="w-full sm:w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start">
+                {OPEN_TARGET_REGISTRY.map((target) => (
+                  <SelectItem key={target.id} value={target.id}>
+                    {t(target.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">{t("webFileOpenMethod")}</p>
+              <p className="text-xs text-muted-foreground leading-5">
+                {t("webFileOpenMethodDescription")}
+              </p>
+            </div>
+            <Select
+              value={webFileOpenMethod}
+              onValueChange={(value) => {
+                if (!isSystemWebFileOpenMethod(value)) return
+                const previous = webFileOpenMethod
+                setWebFileOpenMethod(value)
+                void saveWebFileOpenMethod(value, previous)
+              }}
+              disabled={savingOpenSettings || !isDesktop()}
+            >
+              <SelectTrigger className="w-full sm:w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start">
+                <SelectItem value="browser">
+                  {t("webFileOpenMethods.browser")}
+                </SelectItem>
+                <SelectItem value="editor">
+                  {t("webFileOpenMethods.editor")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {!isDesktop() && (
+            <p className="text-[11px] text-muted-foreground">
+              {t("openTargetDesktopOnly")}
+            </p>
           )}
         </section>
 
