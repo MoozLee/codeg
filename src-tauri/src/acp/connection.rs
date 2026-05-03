@@ -21,8 +21,8 @@ use sacp::schema::{
 };
 use sacp::util::MatchDispatch;
 use sacp::{
-    on_receive_request, Agent, Client, ConnectionTo, Dispatch, Responder, SessionMessage,
-    UntypedMessage,
+    on_receive_request, Agent, Client, ConnectionTo, Dispatch, JsonRpcMessage, Responder,
+    SessionMessage, UntypedMessage,
 };
 use sacp_tokio::AcpAgent;
 use tokio::sync::{mpsc, RwLock};
@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, RwLock};
 use crate::acp::error::AcpError;
 use crate::acp::file_system_runtime::{FileSystemRuntime, FileSystemRuntimeError};
 use crate::acp::registry::{self, AgentDistribution};
-use crate::acp::session_state::SessionState;
+use crate::acp::session_state::{LiveContentBlock, SessionState, ToolCallStatus};
 use crate::acp::terminal_runtime::{TerminalRuntime, TerminalRuntimeError};
 use crate::acp::types::{
     AcpEvent, AvailableCommandInfo, ConnectionInfo, ConnectionStatus, PermissionOptionInfo,
@@ -1039,8 +1039,7 @@ async fn run_connection(
                                             // forwards AvailableCommandsUpdate,
                                             // which never carries tool output
                                             // — a throwaway cache is fine.
-                                            let mut replay_cache =
-                                                ToolCallOutputCache::default();
+                                            let mut replay_cache = ToolCallOutputCache::default();
                                             emit_conversation_update(
                                                 &st,
                                                 &h,
@@ -1055,7 +1054,8 @@ async fn run_connection(
                                     })
                                     .await
                                     .otherwise(async |dispatch| {
-                                        maybe_emit_claude_sdk_ext_notification(&st, &h, dispatch).await;
+                                        maybe_emit_claude_sdk_ext_notification(&st, &h, dispatch)
+                                            .await;
                                         Ok(())
                                     })
                                     .await;
@@ -1405,6 +1405,12 @@ async fn set_session_config_option(
 
 const TERMINAL_POLL_INTERVAL_MS: u64 = 200;
 const TERMINAL_POLL_MISSING_LIMIT: u8 = 10;
+/// When a turn has already shown an explicit completion candidate (currently a
+/// tool call reaching a final status) but then goes completely quiet while the
+/// backend SessionState shows no pending permission and no in-flight non-final
+/// tool calls, treat that silence as a completion fallback. This stays narrow on
+/// purpose: plain text/thinking silence alone must not be treated as completion.
+const TURN_COMPLETION_FALLBACK_IDLE_MS: u64 = 15_000;
 
 /// Hard cap on the size of a single ACP event's `raw_output` payload.
 ///
@@ -1481,11 +1487,9 @@ impl ToolCallOutputCache {
 
         // Update cache snapshot to current state so the next update can
         // still detect a prefix extension.
-        let tail = trim_partial_ansi_tail(truncate_tail_at_char_boundary(
-            curr,
-            MAX_CACHED_TAIL_BYTES,
-        ))
-        .to_string();
+        let tail =
+            trim_partial_ansi_tail(truncate_tail_at_char_boundary(curr, MAX_CACHED_TAIL_BYTES))
+                .to_string();
         let generation = self.next_generation;
         self.next_generation = self.next_generation.wrapping_add(1);
         self.entries.insert(
@@ -1506,11 +1510,9 @@ impl ToolCallOutputCache {
     /// treats `raw_output` as a full replacement.
     fn seed(&mut self, tool_call_id: &str, curr: &str) -> Option<String> {
         let (payload, _append) = build_emit_payload(curr, false);
-        let tail = trim_partial_ansi_tail(truncate_tail_at_char_boundary(
-            curr,
-            MAX_CACHED_TAIL_BYTES,
-        ))
-        .to_string();
+        let tail =
+            trim_partial_ansi_tail(truncate_tail_at_char_boundary(curr, MAX_CACHED_TAIL_BYTES))
+                .to_string();
         let generation = self.next_generation;
         self.next_generation = self.next_generation.wrapping_add(1);
         self.entries.insert(
@@ -1532,10 +1534,7 @@ impl ToolCallOutputCache {
     /// Drop cached state for a tool call that has finished. Keeps the
     /// session-scoped cache bounded in long-running sessions.
     fn remove_if_final(&mut self, tool_call_id: &str, status: Option<&str>) {
-        if matches!(
-            status,
-            Some("completed" | "failed" | "cancelled" | "error")
-        ) {
+        if matches!(status, Some("completed" | "failed" | "cancelled" | "error")) {
             self.entries.remove(tool_call_id);
         }
     }
@@ -1571,10 +1570,8 @@ impl ToolCallOutputCache {
 /// append)`. An empty `text` yields an empty `payload`; callers should
 /// decide whether to suppress the emission in that case.
 fn build_emit_payload(text: &str, append: bool) -> (String, bool) {
-    let truncated = trim_partial_ansi_tail(truncate_tail_at_char_boundary(
-        text,
-        MAX_SINGLE_EMIT_BYTES,
-    ));
+    let truncated =
+        trim_partial_ansi_tail(truncate_tail_at_char_boundary(text, MAX_SINGLE_EMIT_BYTES));
     let out = if truncated.len() < text.len() {
         format!("{TRUNCATION_MARKER}{truncated}")
     } else {
@@ -1620,11 +1617,11 @@ fn trim_partial_ansi_tail(s: &str) -> &str {
         return &s[..esc_pos];
     }
     let terminated = match after[0] {
-        b'[' => after[1..]
-            .iter()
-            .any(|&b| (0x40..=0x7E).contains(&b)),
-        b']' => after[1..].contains(&0x07)
-            || after[1..].windows(2).any(|w| w[0] == 0x1B && w[1] == b'\\'),
+        b'[' => after[1..].iter().any(|&b| (0x40..=0x7E).contains(&b)),
+        b']' => {
+            after[1..].contains(&0x07)
+                || after[1..].windows(2).any(|w| w[0] == 0x1B && w[1] == b'\\')
+        }
         // Two-byte escape sequences (ESC M, ESC D, …) are complete as
         // soon as the second byte is present.
         _ => true,
@@ -1654,8 +1651,11 @@ struct TerminalPollResult {
     all_exited: bool,
 }
 
-fn is_final_tool_call_status(status: Option<&str>) -> bool {
-    matches!(status, Some("completed" | "failed"))
+fn is_final_tool_call_status(status: Option<&sacp::schema::ToolCallStatus>) -> bool {
+    matches!(
+        status,
+        Some(sacp::schema::ToolCallStatus::Completed | sacp::schema::ToolCallStatus::Failed)
+    )
 }
 
 fn merge_terminal_ids(existing: &mut Vec<String>, incoming: Vec<String>) -> bool {
@@ -1917,17 +1917,11 @@ async fn poll_tracked_terminal_tool_calls(
         }
 
         if let Some(output) = poll_result.output {
-            emit_terminal_output_update(
-                state,
-                emitter,
-                &tool_call_id,
-                output,
-                poll_result.append,
-            )
-            .await;
+            emit_terminal_output_update(state, emitter, &tool_call_id, output, poll_result.append)
+                .await;
         }
 
-        if (is_final_tool_call_status(entry.status.as_deref())
+        if (matches!(entry.status.as_deref(), Some("completed" | "failed"))
             && (!poll_result.any_found || poll_result.all_exited))
             || entry.missing_polls >= TERMINAL_POLL_MISSING_LIMIT
         {
@@ -1988,6 +1982,120 @@ fn map_prompt_blocks(blocks: Vec<PromptInputBlock>) -> Vec<ContentBlock> {
             }
         })
         .collect()
+}
+
+fn stop_reason_label(reason: StopReason) -> &'static str {
+    match reason {
+        StopReason::EndTurn => "end_turn",
+        StopReason::Cancelled => "cancelled",
+        StopReason::MaxTokens => "max_tokens",
+        StopReason::MaxTurnRequests => "max_turn_requests",
+        StopReason::Refusal => "refusal",
+        _ => "unknown",
+    }
+}
+
+fn session_update_marks_completion_candidate(update: &SessionUpdate) -> bool {
+    match update {
+        SessionUpdate::ToolCall(tc) => is_final_tool_call_status(Some(&tc.status)),
+        SessionUpdate::ToolCallUpdate(tcu) => {
+            is_final_tool_call_status(tcu.fields.status.as_ref())
+        }
+        _ => false,
+    }
+}
+
+async fn emit_turn_complete_once(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    session_id: &SessionId,
+    agent_type: AgentType,
+    stop_reason: &str,
+    turn_completed: &mut bool,
+) {
+    if *turn_completed {
+        return;
+    }
+    *turn_completed = true;
+    emit_with_state(
+        state,
+        emitter,
+        AcpEvent::TurnComplete {
+            session_id: session_id.0.to_string(),
+            stop_reason: stop_reason.into(),
+            agent_type: agent_type.to_string(),
+        },
+    )
+    .await;
+}
+
+async fn clear_pending_permission_state_if_matches(
+    state: &Arc<RwLock<SessionState>>,
+    request_id: &str,
+) {
+    let mut session_state = state.write().await;
+    if session_state
+        .pending_permission
+        .as_ref()
+        .is_some_and(|pending| pending.request_id == request_id)
+    {
+        session_state.pending_permission = None;
+        session_state.last_activity_at = chrono::Utc::now();
+    }
+}
+
+async fn should_force_complete_turn(
+    state: &Arc<RwLock<SessionState>>,
+    tracked_terminal_tool_calls: &HashMap<String, TrackedTerminalToolCall>,
+    has_pending_permission: bool,
+    saw_completion_candidate: bool,
+) -> bool {
+    if !saw_completion_candidate {
+        return false;
+    }
+
+    let state = state.read().await;
+
+    if has_pending_permission || state.pending_permission.is_some() {
+        return false;
+    }
+
+    if !tracked_terminal_tool_calls.is_empty() {
+        return false;
+    }
+
+    if state.status != ConnectionStatus::Prompting {
+        return false;
+    }
+
+    let Some(live_message) = state.live_message.as_ref() else {
+        return false;
+    };
+
+    let has_meaningful_content = live_message.content.iter().any(|block| match block {
+        LiveContentBlock::Text { text } | LiveContentBlock::Thinking { text } => {
+            !text.trim().is_empty()
+        }
+        LiveContentBlock::ToolCallRef { .. } => true,
+        LiveContentBlock::Plan { entries } => entries
+            .as_array()
+            .map(|arr| !arr.is_empty())
+            .unwrap_or(!entries.is_null()),
+    });
+    if !has_meaningful_content {
+        return false;
+    }
+
+    if state.active_tool_calls.values().any(|tool| {
+        matches!(
+            tool.status,
+            ToolCallStatus::Pending | ToolCallStatus::InProgress
+        )
+    }) {
+        return false;
+    }
+
+    true
 }
 
 /// Result when the conversation loop exits due to a fork request.
@@ -2193,6 +2301,12 @@ async fn run_conversation_loop<'a>(
                 );
                 terminal_poll_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let completion_fallback_timer = tokio::time::sleep(
+                    std::time::Duration::from_millis(TURN_COMPLETION_FALLBACK_IDLE_MS),
+                );
+                tokio::pin!(completion_fallback_timer);
+                let mut turn_completed = false;
+                let mut saw_completion_candidate = false;
                 let mut disconnect_requested = false;
 
                 // Read updates until turn completes.
@@ -2208,6 +2322,12 @@ async fn run_conversation_loop<'a>(
                                     continue;
                                 }
                             };
+                            completion_fallback_timer.as_mut().reset(
+                                tokio::time::Instant::now()
+                                    + std::time::Duration::from_millis(
+                                        TURN_COMPLETION_FALLBACK_IDLE_MS,
+                                    ),
+                            );
                             match update {
                                 SessionMessage::SessionMessage(dispatch) => {
                                     let h = emitter.clone();
@@ -2216,35 +2336,53 @@ async fn run_conversation_loop<'a>(
                                     let session_id = sid.clone();
                                     let cwd_opt = Some(cwd);
                                     let dispatch = fix_usage_update_nulls(dispatch);
-                                    if let Err(e) = MatchDispatch::new(dispatch)
-                                        .if_notification(
-                                            async |notif: SessionNotification| {
-                                                let should_poll_now = track_terminal_tool_calls(
-                                                    &notif.update,
-                                                    &mut tracked_terminal_tool_calls,
-                                                );
-                                                emit_conversation_update(&st, &h, agent_type, notif.update, cwd_opt, &mut raw_output_cache).await;
-                                                if should_poll_now {
-                                                    poll_tracked_terminal_tool_calls(
-                                                        runtime.as_ref(),
-                                                        &session_id,
+                                    match dispatch {
+                                        Dispatch::Notification(untyped_notification) => {
+                                            match SessionNotification::parse_message(
+                                                untyped_notification.method(),
+                                                untyped_notification.params(),
+                                            ) {
+                                                Ok(notif) => {
+                                                    if session_update_marks_completion_candidate(&notif.update) {
+                                                        saw_completion_candidate = true;
+                                                    }
+                                                    let should_poll_now = track_terminal_tool_calls(
+                                                        &notif.update,
+                                                        &mut tracked_terminal_tool_calls,
+                                                    );
+                                                    emit_conversation_update(
                                                         &st,
                                                         &h,
-                                                        &mut tracked_terminal_tool_calls,
+                                                        agent_type,
+                                                        notif.update,
+                                                        cwd_opt,
+                                                        &mut raw_output_cache,
+                                                    )
+                                                    .await;
+                                                    if should_poll_now {
+                                                        poll_tracked_terminal_tool_calls(
+                                                            runtime.as_ref(),
+                                                            &session_id,
+                                                            &st,
+                                                            &h,
+                                                            &mut tracked_terminal_tool_calls,
+                                                        )
+                                                        .await;
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    maybe_emit_claude_sdk_ext_notification(
+                                                        &st,
+                                                        &h,
+                                                        Dispatch::Notification(untyped_notification),
                                                     )
                                                     .await;
                                                 }
-                                                Ok(())
-                                            },
-                                        )
-                                        .await
-                                        .otherwise(async |dispatch| {
-                                            maybe_emit_claude_sdk_ext_notification(&st, &h, dispatch).await;
-                                            Ok(())
-                                        })
-                                        .await
-                                    {
-                                        eprintln!("[ACP] Ignoring dispatch parse error: {e}");
+                                            }
+                                        }
+                                        other => {
+                                            maybe_emit_claude_sdk_ext_notification(&st, &h, other).await;
+                                        }
                                     }
                                 }
                                 SessionMessage::StopReason(reason) => {
@@ -2258,19 +2396,13 @@ async fn run_conversation_loop<'a>(
                                         )
                                         .await;
                                     }
-                                    let reason_str = match reason {
-                                        StopReason::EndTurn => "end_turn",
-                                        StopReason::Cancelled => "cancelled",
-                                        _ => "unknown",
-                                    };
-                                    emit_with_state(
+                                    emit_turn_complete_once(
                                         state,
                                         emitter,
-                                        AcpEvent::TurnComplete {
-                                            session_id: sid.0.to_string(),
-                                            stop_reason: reason_str.into(),
-                                            agent_type: agent_type.to_string(),
-                                        },
+                                        &sid,
+                                        agent_type,
+                                        stop_reason_label(reason),
+                                        &mut turn_completed,
                                     )
                                     .await;
                                     break;
@@ -2290,19 +2422,13 @@ async fn run_conversation_loop<'a>(
                                 )
                                 .await;
                             }
-                            let reason_str = match reason {
-                                StopReason::EndTurn => "end_turn",
-                                StopReason::Cancelled => "cancelled",
-                                _ => "unknown",
-                            };
-                            emit_with_state(
+                            emit_turn_complete_once(
                                 state,
                                 emitter,
-                                AcpEvent::TurnComplete {
-                                    session_id: sid.0.to_string(),
-                                    stop_reason: reason_str.into(),
-                                    agent_type: agent_type.to_string(),
-                                },
+                                &sid,
+                                agent_type,
+                                stop_reason_label(reason),
+                                &mut turn_completed,
                             )
                             .await;
                             break;
@@ -2317,6 +2443,53 @@ async fn run_conversation_loop<'a>(
                             )
                             .await;
                         }
+                        _ = &mut completion_fallback_timer => {
+                            if !tracked_terminal_tool_calls.is_empty() {
+                                poll_tracked_terminal_tool_calls(
+                                    terminal_runtime.as_ref(),
+                                    &sid,
+                                    state,
+                                    emitter,
+                                    &mut tracked_terminal_tool_calls,
+                                )
+                                .await;
+                            }
+
+                            let has_pending_permission = !perms.lock().await.is_empty();
+                            if should_force_complete_turn(
+                                state,
+                                &tracked_terminal_tool_calls,
+                                has_pending_permission,
+                                saw_completion_candidate,
+                            )
+                            .await
+                            {
+                                eprintln!(
+                                    "[ACP] forcing turn completion after idle silence; connection_id={conn_id} session_id={}",
+                                    sid.0
+                                );
+                                emit_turn_complete_once(
+                                    state,
+                                    emitter,
+                                    &sid,
+                                    agent_type,
+                                    "end_turn",
+                                    &mut turn_completed,
+                                )
+                                .await;
+                                tokio::spawn(async move {
+                                    let _ = prompt_response.await;
+                                });
+                                break;
+                            }
+
+                            completion_fallback_timer.as_mut().reset(
+                                tokio::time::Instant::now()
+                                    + std::time::Duration::from_millis(
+                                        TURN_COMPLETION_FALLBACK_IDLE_MS,
+                                    ),
+                            );
+                        }
                         cmd = cmd_rx.recv() => {
                             match cmd {
                                 Some(ConnectionCommand::RespondPermission {
@@ -2328,6 +2501,14 @@ async fn run_conversation_loop<'a>(
                                             SelectedPermissionOutcome::new(option_id),
                                         );
                                         let _ = responder.respond(RequestPermissionResponse::new(outcome));
+                                        clear_pending_permission_state_if_matches(state, &request_id)
+                                            .await;
+                                        completion_fallback_timer.as_mut().reset(
+                                            tokio::time::Instant::now()
+                                                + std::time::Duration::from_millis(
+                                                    TURN_COMPLETION_FALLBACK_IDLE_MS,
+                                                ),
+                                        );
                                     }
                                 }
                                 Some(ConnectionCommand::SetMode { mode_id }) => {
@@ -2406,14 +2587,13 @@ async fn run_conversation_loop<'a>(
                                     // transitions out of "prompting" and the user can
                                     // send new messages.  Don't wait for the agent --
                                     // it may be slow to respond or not respond at all.
-                                    emit_with_state(
+                                    emit_turn_complete_once(
                                         state,
                                         emitter,
-                                        AcpEvent::TurnComplete {
-                                            session_id: sid.0.to_string(),
-                                            stop_reason: "cancelled".into(),
-                                            agent_type: agent_type.to_string(),
-                                        },
+                                        &sid,
+                                        agent_type,
+                                        "cancelled",
+                                        &mut turn_completed,
                                     )
                                     .await;
                                     // Drain the prompt response in the background so
@@ -2476,6 +2656,7 @@ async fn run_conversation_loop<'a>(
                         SelectedPermissionOutcome::new(option_id),
                     );
                     let _ = responder.respond(RequestPermissionResponse::new(outcome));
+                    clear_pending_permission_state_if_matches(state, &request_id).await;
                 }
             }
             Some(ConnectionCommand::SetMode { mode_id }) => {
@@ -2801,12 +2982,7 @@ async fn emit_conversation_update(
             content: ContentBlock::Text(text),
             ..
         }) => {
-            emit_with_state(
-                state,
-                emitter,
-                AcpEvent::ContentDelta { text: text.text },
-            )
-            .await;
+            emit_with_state(state, emitter, AcpEvent::ContentDelta { text: text.text }).await;
         }
         SessionUpdate::AgentMessageChunk(_) => {
             // Non-text chunks are currently not surfaced in live streaming UI.
@@ -2815,12 +2991,7 @@ async fn emit_conversation_update(
             content: ContentBlock::Text(text),
             ..
         }) => {
-            emit_with_state(
-                state,
-                emitter,
-                AcpEvent::Thinking { text: text.text },
-            )
-            .await;
+            emit_with_state(state, emitter, AcpEvent::Thinking { text: text.text }).await;
         }
         SessionUpdate::AgentThoughtChunk(_) => {
             // Non-text thought chunks are currently ignored.
@@ -2932,13 +3103,8 @@ async fn emit_conversation_update(
             .await;
         }
         SessionUpdate::ConfigOptionUpdate(update) => {
-            emit_session_config_options_values(
-                state,
-                emitter,
-                agent_type,
-                update.config_options,
-            )
-            .await;
+            emit_session_config_options_values(state, emitter, agent_type, update.config_options)
+                .await;
         }
         SessionUpdate::AvailableCommandsUpdate(update) => {
             // Some agents (e.g. Claude Code with overlapping user/project slash
@@ -2962,12 +3128,7 @@ async fn emit_conversation_update(
                     }
                 })
                 .collect();
-            emit_with_state(
-                state,
-                emitter,
-                AcpEvent::AvailableCommands { commands },
-            )
-            .await;
+            emit_with_state(state, emitter, AcpEvent::AvailableCommands { commands }).await;
         }
         SessionUpdate::UsageUpdate(update) => {
             emit_with_state(
@@ -3022,8 +3183,7 @@ mod tests {
         )
         .unwrap();
 
-        let event =
-            map_claude_sdk_ext_notification(&raw).expect("valid sdk payload should map");
+        let event = map_claude_sdk_ext_notification(&raw).expect("valid sdk payload should map");
 
         match event {
             AcpEvent::ClaudeSdkMessage {
@@ -3146,7 +3306,10 @@ mod tests {
         let delta = "Z".repeat(16 * 1024);
         let second = format!("{first}{delta}");
         let (payload, append) = cache.consume("t1", &second).expect("should emit");
-        assert!(append, "extension beyond cached tail must still be detected");
+        assert!(
+            append,
+            "extension beyond cached tail must still be detected"
+        );
         // The emitted payload should carry the delta (or its tail when
         // truncated at MAX_SINGLE_EMIT_BYTES). For a 16 KB delta that's
         // well below the 64 KB cap, we expect it verbatim.
@@ -3288,5 +3451,181 @@ mod tests {
         // panicked at slicing time).
         assert!(out.chars().all(|c| c == '中'));
         assert!(out.len() <= 6); // at most 2 chars (6 bytes)
+    }
+
+    fn prompting_state() -> SessionState {
+        let mut state = SessionState::new(
+            "conn-test".to_string(),
+            AgentType::ClaudeCode,
+            None,
+            "win-test".to_string(),
+            None,
+        );
+        state.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        });
+        state
+    }
+
+    #[test]
+    fn stop_reason_label_maps_extended_reasons() {
+        assert_eq!(stop_reason_label(StopReason::EndTurn), "end_turn");
+        assert_eq!(stop_reason_label(StopReason::Cancelled), "cancelled");
+        assert_eq!(stop_reason_label(StopReason::MaxTokens), "max_tokens");
+        assert_eq!(
+            stop_reason_label(StopReason::MaxTurnRequests),
+            "max_turn_requests"
+        );
+        assert_eq!(stop_reason_label(StopReason::Refusal), "refusal");
+    }
+
+    #[test]
+    fn completion_candidate_requires_final_tool_status() {
+        assert!(!session_update_marks_completion_candidate(&SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("done"))),
+        )));
+        assert!(!session_update_marks_completion_candidate(&SessionUpdate::ToolCall(
+            sacp::schema::ToolCall::new("tc-1", "bash")
+                .status(sacp::schema::ToolCallStatus::InProgress),
+        )));
+        assert!(session_update_marks_completion_candidate(&SessionUpdate::ToolCall(
+            sacp::schema::ToolCall::new("tc-1", "bash")
+                .status(sacp::schema::ToolCallStatus::Completed),
+        )));
+        assert!(session_update_marks_completion_candidate(&SessionUpdate::ToolCallUpdate(
+            sacp::schema::ToolCallUpdate::new(
+                "tc-1",
+                sacp::schema::ToolCallUpdateFields::new()
+                    .status(sacp::schema::ToolCallStatus::Failed),
+            ),
+        )));
+    }
+
+    #[tokio::test]
+    async fn completion_fallback_requires_completion_candidate() {
+        let state = Arc::new(RwLock::new(prompting_state()));
+        state.write().await.apply_event(&AcpEvent::ContentDelta {
+            text: "done".to_string(),
+        });
+
+        assert!(!should_force_complete_turn(&state, &HashMap::new(), false, false).await);
+    }
+
+    #[tokio::test]
+    async fn completion_fallback_allows_finalized_tool_turn_with_candidate() {
+        let state = Arc::new(RwLock::new(prompting_state()));
+        {
+            let mut guard = state.write().await;
+            guard.apply_event(&AcpEvent::ToolCall {
+                tool_call_id: "tc-1".to_string(),
+                title: "bash".to_string(),
+                kind: "execute".to_string(),
+                status: "completed".to_string(),
+                content: None,
+                raw_input: None,
+                raw_output: None,
+                locations: None,
+                meta: None,
+            });
+        }
+
+        assert!(should_force_complete_turn(&state, &HashMap::new(), false, true).await);
+    }
+
+    #[tokio::test]
+    async fn completion_fallback_skips_pending_permission() {
+        let state = Arc::new(RwLock::new(prompting_state()));
+        {
+            let mut guard = state.write().await;
+            guard.apply_event(&AcpEvent::ContentDelta {
+                text: "waiting".to_string(),
+            });
+            guard.apply_event(&AcpEvent::PermissionRequest {
+                request_id: "req-1".to_string(),
+                tool_call: serde_json::json!({"toolCallId": "tc-1"}),
+                options: vec![],
+            });
+        }
+
+        assert!(!should_force_complete_turn(&state, &HashMap::new(), true, true).await);
+    }
+
+    #[tokio::test]
+    async fn completion_fallback_skips_stale_pending_permission_state() {
+        let state = Arc::new(RwLock::new(prompting_state()));
+        {
+            let mut guard = state.write().await;
+            guard.apply_event(&AcpEvent::ContentDelta {
+                text: "waiting".to_string(),
+            });
+            guard.apply_event(&AcpEvent::PermissionRequest {
+                request_id: "req-1".to_string(),
+                tool_call: serde_json::json!({"toolCallId": "tc-1"}),
+                options: vec![],
+            });
+        }
+
+        assert!(!should_force_complete_turn(&state, &HashMap::new(), false, true).await);
+    }
+
+    #[tokio::test]
+    async fn completion_fallback_skips_in_progress_tool_calls() {
+        let state = Arc::new(RwLock::new(prompting_state()));
+        {
+            let mut guard = state.write().await;
+            guard.apply_event(&AcpEvent::ToolCall {
+                tool_call_id: "tc-1".to_string(),
+                title: "bash".to_string(),
+                kind: "execute".to_string(),
+                status: "in_progress".to_string(),
+                content: None,
+                raw_input: None,
+                raw_output: None,
+                locations: None,
+                meta: None,
+            });
+        }
+
+        assert!(!should_force_complete_turn(&state, &HashMap::new(), false, true).await);
+    }
+
+    #[tokio::test]
+    async fn clear_pending_permission_state_if_matches_drops_matching_snapshot_permission() {
+        let state = Arc::new(RwLock::new(prompting_state()));
+        {
+            let mut guard = state.write().await;
+            guard.apply_event(&AcpEvent::PermissionRequest {
+                request_id: "req-1".to_string(),
+                tool_call: serde_json::json!({"toolCallId": "tc-1"}),
+                options: vec![],
+            });
+            assert!(guard.pending_permission.is_some());
+        }
+
+        clear_pending_permission_state_if_matches(&state, "req-1").await;
+
+        let guard = state.read().await;
+        assert!(guard.pending_permission.is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_pending_permission_state_if_matches_preserves_newer_permission() {
+        let state = Arc::new(RwLock::new(prompting_state()));
+        {
+            let mut guard = state.write().await;
+            guard.apply_event(&AcpEvent::PermissionRequest {
+                request_id: "req-2".to_string(),
+                tool_call: serde_json::json!({"toolCallId": "tc-2"}),
+                options: vec![],
+            });
+        }
+
+        clear_pending_permission_state_if_matches(&state, "req-1").await;
+
+        let guard = state.read().await;
+        assert_eq!(
+            guard.pending_permission.as_ref().map(|pending| pending.request_id.as_str()),
+            Some("req-2")
+        );
     }
 }
