@@ -1,12 +1,16 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { X } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { cn } from "@/lib/utils"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -17,7 +21,7 @@ import {
 import { TerminalTabBar } from "./terminal-tab-bar"
 import { TerminalView } from "./terminal-view"
 
-const TERMINAL_PANE_MIN_WIDTH = 480
+const TERMINAL_PANE_MIN_SIZE = 20
 
 export function TerminalPanel() {
   const t = useTranslations("Folder.terminal")
@@ -32,6 +36,7 @@ export function TerminalPanel() {
     closeAllPanes,
     renamePane,
     switchPane,
+    updatePaneSizes,
   } = useTerminalContext()
 
   const activeTab = useMemo(
@@ -105,62 +110,81 @@ export function TerminalPanel() {
       <div className="relative flex-1 min-h-0 overflow-hidden">
         {tabs.length > 0 && (
           <div className="absolute inset-0 flex min-h-0 overflow-hidden">
-            <div className="min-w-0 flex-1 overflow-hidden">
-              <ScrollArea
-                className="h-full"
-                x={multiPane ? "scroll" : "hidden"}
-                y="hidden"
-              >
-                <div className="relative flex h-full min-h-0 min-w-full gap-3 p-2">
-                  {tabs.flatMap((tab) =>
-                    tab.panes.map((pane) => {
-                      const belongsToActiveTab = tab.id === activeVisibleTabId
-                      const isActivePane =
-                        belongsToActiveTab && pane.id === activePaneId
-                      const displayPane =
-                        belongsToActiveTab && activeTab != null
+            <div className="min-w-0 flex-1 overflow-hidden p-2">
+              {tabs.map((tab) => {
+                const isVisibleTab =
+                  tab.id === activeVisibleTabId && activeTab != null
+                const normalizedPaneSizes =
+                  tab.paneSizes.length === tab.panes.length
+                    ? tab.paneSizes
+                    : tab.panes.map(() => 100 / tab.panes.length)
 
-                      return (
-                        <div
-                          key={pane.id}
-                          ref={isActivePane ? activePaneRef : null}
-                          className={cn(
-                            displayPane
-                              ? "relative h-full min-h-0 overflow-hidden rounded-md border bg-background"
-                              : "pointer-events-none absolute inset-0 overflow-hidden opacity-0",
-                            displayPane && "shrink-0",
-                            isActivePane && "ring-1 ring-primary/40"
-                          )}
-                          style={
-                            displayPane
-                              ? {
-                                  width: multiPane
-                                    ? `${TERMINAL_PANE_MIN_WIDTH}px`
-                                    : "100%",
+                return (
+                  <div
+                    key={tab.id}
+                    className={cn(
+                      isVisibleTab
+                        ? "relative h-full min-h-0"
+                        : "pointer-events-none absolute inset-0 opacity-0"
+                    )}
+                    aria-hidden={!isVisibleTab}
+                  >
+                    <ResizablePanelGroup
+                      direction="horizontal"
+                      className="h-full min-h-0 min-w-0"
+                      onLayout={(sizes) => updatePaneSizes(tab.id, sizes)}
+                    >
+                      {tab.panes.map((pane, index) => {
+                        const isActivePane =
+                          isVisibleTab && pane.id === activePaneId
+
+                        return (
+                          <Fragment key={pane.id}>
+                            <ResizablePanel
+                              defaultSize={normalizedPaneSizes[index]}
+                              minSize={
+                                tab.panes.length > 1
+                                  ? TERMINAL_PANE_MIN_SIZE
+                                  : undefined
+                              }
+                              order={index + 1}
+                            >
+                              <div
+                                ref={isActivePane ? activePaneRef : null}
+                                className={cn(
+                                  "relative h-full min-h-0 overflow-hidden rounded-md border bg-background",
+                                  isActivePane && "ring-1 ring-primary/40"
+                                )}
+                                onClick={
+                                  isVisibleTab
+                                    ? () => switchPane(tab.id, pane.id)
+                                    : undefined
                                 }
-                              : undefined
-                          }
-                          onClick={
-                            displayPane
-                              ? () => switchPane(tab.id, pane.id)
-                              : undefined
-                          }
-                        >
-                          <TerminalView
-                            terminalId={pane.id}
-                            workingDir={pane.workingDir}
-                            shell={pane.shell}
-                            initialCommand={pane.initialCommand}
-                            isActive={isActivePane}
-                            isVisible={displayPane && isOpen}
-                            onProcessExited={markTerminalExited}
-                          />
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </ScrollArea>
+                              >
+                                <TerminalView
+                                  terminalId={pane.id}
+                                  workingDir={pane.workingDir}
+                                  shell={pane.shell}
+                                  initialCommand={pane.initialCommand}
+                                  isActive={isActivePane}
+                                  isVisible={isVisibleTab && isOpen}
+                                  onProcessExited={markTerminalExited}
+                                />
+                              </div>
+                            </ResizablePanel>
+                            {index < tab.panes.length - 1 && (
+                              <ResizableHandle
+                                withHandle
+                                className="mx-1 before:bg-transparent data-[resize-handle-state=hover]:before:bg-foreground/15 data-[resize-handle-state=drag]:before:bg-foreground/25"
+                              />
+                            )}
+                          </Fragment>
+                        )
+                      })}
+                    </ResizablePanelGroup>
+                  </div>
+                )
+              })}
             </div>
 
             {multiPane && activeTab && (

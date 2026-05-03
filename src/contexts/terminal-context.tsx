@@ -43,7 +43,9 @@ export interface TerminalTab {
   title: string
   owner: TerminalOwner | null
   panes: TerminalPane[]
+  paneSizes: number[]
   activePaneId: string
+  defaultTitleNumber?: number
 }
 
 const DEFAULT_HEIGHT = 300
@@ -87,6 +89,7 @@ interface TerminalContextValue {
   renamePane: (tabId: string, paneId: string, title: string) => void
   switchTerminal: (id: string) => void
   switchPane: (tabId: string, paneId: string) => void
+  updatePaneSizes: (tabId: string, sizes: number[]) => void
 }
 
 const TerminalContext = createContext<TerminalContextValue | null>(null)
@@ -168,6 +171,35 @@ function createTerminalPane(
   }
 }
 
+function isDefaultTerminalTitle(
+  title: string,
+  defaultTitle: (number: number) => string
+): number | null {
+  const trimmedTitle = title.trim()
+  for (let index = 1; index <= 999; index += 1) {
+    if (trimmedTitle === defaultTitle(index)) return index
+  }
+  return null
+}
+
+function createEqualPaneSizes(count: number): number[] {
+  if (count <= 0) return []
+  return Array.from({ length: count }, () => 100 / count)
+}
+
+function normalizePaneSizes(sizes: number[], count: number): number[] {
+  if (count <= 0) return []
+  if (sizes.length !== count) return createEqualPaneSizes(count)
+
+  const normalized = sizes.map((size) =>
+    Number.isFinite(size) && size > 0 ? size : 0
+  )
+  const total = normalized.reduce((sum, size) => sum + size, 0)
+  if (total <= 0) return createEqualPaneSizes(count)
+
+  return normalized.map((size) => (size / total) * 100)
+}
+
 export function useTerminalContext() {
   const ctx = useContext(TerminalContext)
   if (!ctx) {
@@ -189,7 +221,6 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
   const [height, setHeightState] = useState(DEFAULT_HEIGHT)
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
-  const tabCounterRef = useRef(0)
   const [exitedTerminals, setExitedTerminals] = useState<Set<string>>(new Set())
   const [defaultTerminalShell, setDefaultTerminalShell] = useState<
     string | null
@@ -357,6 +388,39 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     return activeVisibleTab?.activePaneId ?? null
   }, [activeVisibleTabId, visibleTabs])
 
+  const defaultTerminalTitle = useCallback(
+    (number: number) => t("defaultTitle", { number }),
+    [t]
+  )
+
+  const getNextDefaultTitleNumber = useCallback(
+    (owner: TerminalOwner | null, terminalTabs: TerminalTab[]) => {
+      const usedNumbers = new Set<number>()
+      const resolvedOwner = resolveTerminalOwner(owner, conversationIdsByTabId)
+
+      terminalTabs.forEach((tab) => {
+        const tabOwner = resolveTerminalOwner(tab.owner, conversationIdsByTabId)
+        if (!isSameOwner(tabOwner, resolvedOwner)) return
+        if (tab.defaultTitleNumber != null) {
+          usedNumbers.add(tab.defaultTitleNumber)
+          return
+        }
+        const matchedNumber = isDefaultTerminalTitle(
+          tab.title,
+          defaultTerminalTitle
+        )
+        if (matchedNumber != null) {
+          usedNumbers.add(matchedNumber)
+        }
+      })
+
+      let nextNumber = 1
+      while (usedNumbers.has(nextNumber)) nextNumber += 1
+      return nextNumber
+    },
+    [conversationIdsByTabId, defaultTerminalTitle]
+  )
+
   const livePaneIds = useMemo(
     () => new Set(collectPaneIds(resolvedTabs)),
     [resolvedTabs]
@@ -443,12 +507,14 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
       workingDir,
       shell,
       initialCommand,
+      defaultTitleNumber,
     }: {
       folderId: number
       title: string
       workingDir: string
       shell?: string
       initialCommand?: string
+      defaultTitleNumber?: number
     }) => {
       const pane = createTerminalPane(workingDir, shell, initialCommand)
       const tabId = randomUUID()
@@ -462,7 +528,9 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
         title,
         owner,
         panes: [pane],
+        paneSizes: [100],
         activePaneId: pane.id,
+        defaultTitleNumber,
       }
 
       setManualSelection({
@@ -478,44 +546,50 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
   )
 
   const toggle = useCallback(() => {
-    const nextCounter = tabCounterRef.current + 1
-    const defaultTitle = t("defaultTitle", { number: nextCounter })
-    const resolvedShell = resolveTerminalShell()
-    const shouldAutoCreate = tabsRef.current.length === 0 && Boolean(folderPath)
-    const autoPane = shouldAutoCreate
-      ? createTerminalPane(folderPath, resolvedShell)
-      : null
-    const autoTabId = shouldAutoCreate ? randomUUID() : null
+    if (isOpen) {
+      setIsOpen(false)
+      return
+    }
 
-    setIsOpen((wasOpen) => !wasOpen)
+    if (!folderPath) {
+      setIsOpen(true)
+      return
+    }
 
-    setTabs((currentTabs) => {
-      if (
-        !shouldAutoCreate ||
-        !autoPane ||
-        !autoTabId ||
-        currentTabs.length > 0
-      ) {
-        return currentTabs
-      }
+    const owner = getTerminalOwnerFromConversationTab(
+      activeConversationTabRef.current
+    )
+    const currentVisibleTabs = tabsRef.current
+      .map((tab) => ({
+        ...tab,
+        owner: resolveTerminalOwner(tab.owner, conversationIdsByTabId),
+      }))
+      .filter((tab) =>
+        matchesConversationTab(tab, activeConversationTabRef.current)
+      )
 
-      tabCounterRef.current = nextCounter
-      return [
-        {
-          id: autoTabId,
-          folderId: currentFolderId,
-          title: defaultTitle,
-          owner: getTerminalOwnerFromConversationTab(
-            activeConversationTabRef.current
-          ),
-          panes: [autoPane],
-          activePaneId: autoPane.id,
-        },
-      ]
-    })
+    if (currentVisibleTabs.length === 0) {
+      const nextNumber = getNextDefaultTitleNumber(owner, tabsRef.current)
+      createOwnedTerminalTab({
+        folderId: currentFolderId,
+        title: defaultTerminalTitle(nextNumber),
+        workingDir: folderPath,
+        shell: resolveTerminalShell(),
+        defaultTitleNumber: nextNumber,
+      })
+    }
 
-    setActiveTabId((prev) => prev ?? autoTabId)
-  }, [currentFolderId, folderPath, resolveTerminalShell, t])
+    setIsOpen(true)
+  }, [
+    conversationIdsByTabId,
+    createOwnedTerminalTab,
+    currentFolderId,
+    defaultTerminalTitle,
+    folderPath,
+    getNextDefaultTitleNumber,
+    isOpen,
+    resolveTerminalShell,
+  ])
 
   const createTerminalWithCommand = useCallback(
     async (title: string, command: string) => {
@@ -542,20 +616,30 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
 
       setIsOpen(true)
 
-      tabCounterRef.current += 1
-      const defaultTitle = t("defaultTitle", {
-        number: tabCounterRef.current,
-      })
+      const owner = getTerminalOwnerFromConversationTab(
+        activeConversationTabRef.current
+      )
+      const defaultTitleNumber =
+        title == null
+          ? getNextDefaultTitleNumber(owner, tabsRef.current)
+          : undefined
       const paneId = createOwnedTerminalTab({
         folderId: currentFolderId,
-        title: title ?? defaultTitle,
+        title: title ?? defaultTerminalTitle(defaultTitleNumber ?? 1),
         workingDir,
         shell: resolveTerminalShell(shell),
+        defaultTitleNumber,
       })
 
       return paneId
     },
-    [createOwnedTerminalTab, currentFolderId, resolveTerminalShell, t]
+    [
+      createOwnedTerminalTab,
+      currentFolderId,
+      defaultTerminalTitle,
+      getNextDefaultTitleNumber,
+      resolveTerminalShell,
+    ]
   )
 
   const createTerminal = useCallback(async () => {
@@ -597,6 +681,7 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
           ? {
               ...tab,
               panes: [...tab.panes, nextPane],
+              paneSizes: createEqualPaneSizes(tab.panes.length + 1),
               activePaneId: nextPane.id,
             }
           : tab
@@ -625,7 +710,6 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
         removeExitedTerminals(closingPaneIds)
 
         if (next.length === 0) {
-          tabCounterRef.current = 0
           setIsOpen(false)
           setActiveTabId(null)
           return next
@@ -697,7 +781,6 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
       removeExitedTerminals(collectPaneIds(closed))
 
       if (next.length === 0) {
-        tabCounterRef.current = 0
         setActiveTabId(null)
         setIsOpen(false)
       } else if (
@@ -732,9 +815,17 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
               ? (nextPanes[0]?.id ?? tab.activePaneId)
               : tab.activePaneId
 
+          const nextPaneSizes = normalizePaneSizes(
+            normalizePaneSizes(tab.paneSizes, tab.panes.length).filter(
+              (_, index) => tab.panes[index]?.id !== paneId
+            ),
+            nextPanes.length
+          )
+
           return {
             ...tab,
             panes: nextPanes,
+            paneSizes: nextPaneSizes,
             activePaneId: nextActivePaneId,
           }
         })
@@ -766,6 +857,7 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
           return {
             ...tab,
             panes: [remainingPane],
+            paneSizes: [100],
             activePaneId: remainingPane.id,
           }
         })
@@ -793,7 +885,6 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
         removeExitedTerminals(collectPaneIds(closed))
 
         if (next.length === 0) {
-          tabCounterRef.current = 0
           setActiveTabId(null)
           setIsOpen(false)
         } else if (
@@ -809,11 +900,24 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     [killTerminalTabs, removeExitedTerminals]
   )
 
-  const renameTerminal = useCallback((id: string, title: string) => {
-    setTabs((prev) =>
-      prev.map((tab) => (tab.id === id ? { ...tab, title } : tab))
-    )
-  }, [])
+  const renameTerminal = useCallback(
+    (id: string, title: string) => {
+      const normalizedTitle = title.trim()
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== id) return tab
+          return {
+            ...tab,
+            title: normalizedTitle,
+            defaultTitleNumber:
+              isDefaultTerminalTitle(normalizedTitle, defaultTerminalTitle) ??
+              undefined,
+          }
+        })
+      )
+    },
+    [defaultTerminalTitle]
+  )
 
   const renamePane = useCallback(
     (tabId: string, paneId: string, title: string) => {
@@ -866,6 +970,19 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     },
     [activeConversationKey, activeTabActivationSeq]
   )
+
+  const updatePaneSizes = useCallback((tabId: string, sizes: number[]) => {
+    setTabs((prev) =>
+      prev.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              paneSizes: normalizePaneSizes(sizes, tab.panes.length),
+            }
+          : tab
+      )
+    )
+  }, [])
 
   const isInTerminalRegion = useCallback((target: EventTarget | null) => {
     if (!(target instanceof Element)) return false
@@ -988,6 +1105,7 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
       renamePane,
       switchTerminal,
       switchPane,
+      updatePaneSizes,
     }),
     [
       isOpen,
@@ -1016,6 +1134,7 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
       renamePane,
       switchTerminal,
       switchPane,
+      updatePaneSizes,
     ]
   )
 
