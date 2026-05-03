@@ -26,6 +26,15 @@ remote development from any browser — with conversation aggregation, parallel 
 development, MCP/Skills management, chat channel interactions (Telegram, Lark, iLink, etc.),
 and integrated Git/file/terminal workflows.
 
+## Fork / Release Line Note
+
+This repository is a fork of [xintaofei/codeg](https://github.com/xintaofei/codeg). Its `main`
+branch stays close to upstream, while the fork's `release` branch may carry additional
+user-facing work ahead of or beyond upstream. Recent release-line examples include user message
+history navigation plus configurable file-open targets and font preferences across runtimes.
+Other product capabilities in this fork are documented below, including **Chat Channels**,
+**`codeg-server` deployment**, **Docker support**, and **Project Boot**.
+
 ![gallery](./docs/images/gallery.svg)
 
 ## Main Interface

@@ -24,6 +24,10 @@ Codeg（Code Generation）是一个企业级多 Agent 编码工作台。
 OpenClaw、Cline 等）统一到桌面应用、独立服务器或 Docker 容器中——通过浏览器即可远程开发——支持对话聚合、
 并行 `git worktree` 开发、MCP/Skills 管理、消息渠道交互（Telegram、飞书、iLink 等），以及集成的 Git/文件/终端工作流。
 
+## Fork / 发布线说明
+
+本仓库是 [xintaofei/codeg](https://github.com/xintaofei/codeg) 的一个 fork。`main` 分支会尽量保持与上游同步，而本 fork 的 `release` 分支可能会承载一些领先于上游、或不一定回到上游的面向用户功能。近期示例包括用户消息历史导航，以及跨不同运行时可配置的文件打开目标和字体偏好。下文也会介绍这个 fork 提供的其他能力，包括**消息渠道**、**`codeg-server` 部署**、**Docker 支持**和**项目启动器**。
+
 ![gallery](../images/gallery.svg)
 
 ## 主界面

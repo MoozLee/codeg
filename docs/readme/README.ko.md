@@ -24,6 +24,10 @@ Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline 등 로컬 AI 코�
 데스크톱 앱, 독립형 서버 또는 Docker 컨테이너로 통합하여 — 브라우저만으로 어디서든 원격 개발이 가능하며 — 대화 집계, 병렬 `git worktree` 개발, MCP/Skills 관리,
 채팅 채널 연동(Telegram, Lark, iLink 등), Git/파일/터미널 통합 워크플로를 제공합니다.
 
+## 포크 / 릴리스 라인 안내
+
+이 저장소는 [xintaofei/codeg](https://github.com/xintaofei/codeg)의 포크입니다. `main` 브랜치는 upstream에 가깝게 유지하고, 이 포크의 `release` 브랜치는 upstream보다 앞서거나 별도로 제공되는 사용자 기능을 담을 수 있습니다. 최근 예로는 사용자 메시지 기록 탐색과 런타임 전반에서 설정 가능한 파일 열기 대상 및 글꼴 설정이 있습니다. 이 밖에도 이 포크의 기능인 **채팅 채널**, **`codeg-server` 배포**, **Docker 지원**, **프로젝트 부트** 등을 아래에서 소개합니다.
+
 ![gallery](../images/gallery.svg)
 
 ## 메인 인터페이스

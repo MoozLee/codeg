@@ -26,6 +26,10 @@ Docker — permettant le développement à distance depuis n'importe quel naviga
 parallèle via `git worktree`, gestion MCP/Skills, interaction avec les canaux de chat (Telegram, Lark, iLink, etc.)
 et workflows intégrés Git/fichiers/terminal.
 
+## Note sur le fork et la branche de release
+
+Ce dépôt est un fork de [xintaofei/codeg](https://github.com/xintaofei/codeg). La branche `main` reste proche de l’amont, tandis que la branche `release` de ce fork peut embarquer des évolutions orientées utilisateur en avance sur l’amont ou au-delà. Exemples récents : navigation dans l’historique des messages, cibles d’ouverture de fichiers configurables et préférences de police selon les runtimes. D’autres capacités propres à ce fork sont décrites ci-dessous, notamment **les canaux de chat**, le déploiement de **`codeg-server`**, le **support Docker** et le **Lanceur de projet**.
+
 ![gallery](../images/gallery.svg)
 
 ## Interface principale

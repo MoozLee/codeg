@@ -27,6 +27,10 @@ o contenedor Docker — permitiendo el desarrollo remoto desde cualquier navegad
 de conversaciones, desarrollo paralelo con `git worktree`, gestión de MCP/Skills,
 interacción con canales de chat (Telegram, Lark, iLink, etc.) y flujos integrados de Git/archivos/terminal.
 
+## Nota sobre el fork y la línea de lanzamientos
+
+Este repositorio es un fork de [xintaofei/codeg](https://github.com/xintaofei/codeg). La rama `main` se mantiene cercana a upstream, mientras que la rama `release` de este fork puede incluir trabajo orientado al usuario antes de llegar a upstream o más allá de él. Ejemplos recientes son la navegación por el historial de mensajes, además de objetivos de apertura de archivos y preferencias de fuente configurables entre runtimes. Más abajo también se documentan otras capacidades de este fork, como **Canales de Chat**, el despliegue de **`codeg-server`**, el **soporte Docker** y **Inicio de Proyecto**.
+
 ![gallery](../images/gallery.svg)
 
 ## Interfaz principal

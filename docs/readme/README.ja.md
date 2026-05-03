@@ -24,6 +24,10 @@ Claude Code、Codex CLI、OpenCode、Gemini CLI、OpenClaw、Cline などのロ�
 デスクトップアプリ、スタンドアロンサーバー、または Docker コンテナに統合し——ブラウザからどこでもリモート開発が可能——会話集約、並列 `git worktree` 開発、MCP/Skills 管理、
 チャットチャンネル連携（Telegram、Lark、iLink など）、Git/ファイル/ターミナル連携ワークフローを提供します。
 
+## フォーク / リリース系統について
+
+このリポジトリは [xintaofei/codeg](https://github.com/xintaofei/codeg) のフォークです。`main` ブランチは upstream に近い状態を保ちつつ、このフォークの `release` ブランチでは upstream に先行する、または upstream 以外のユーザー向け機能を含む場合があります。最近の例としては、ユーザーメッセージ履歴ナビゲーションや、ランタイム間で設定できるファイルオープン先・フォント設定などがあります。さらにこのフォーク独自の機能として、**チャットチャンネル**、**`codeg-server` デプロイ**、**Docker サポート**、**プロジェクトブート** などを以下で紹介しています。
+
 ![gallery](../images/gallery.svg)
 
 ## メインインターフェース
