@@ -101,6 +101,7 @@ jobs:
             }
 
             const { execFileSync } = require("node:child_process");
+            const { existsSync, readFileSync } = require("node:fs");
 
             const semverTagPattern =
               /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
@@ -304,6 +305,13 @@ jobs:
               : releaseBase
                 ? `No categorized feature or bug fix commits were found since ${releaseBase.tag}.`
                 : `No categorized feature or bug fix commits were found for ${tag}.`;
+            const chineseNotesPath = `.github/release-notes/${tag}.zh.md`;
+            const chineseNotes = existsSync(chineseNotesPath)
+              ? readFileSync(chineseNotesPath, "utf8").trim()
+              : "";
+            const finalReleaseBody = chineseNotes
+              ? `${releaseBody}\n\n## 中文说明\n\n${chineseNotes}`
+              : releaseBody;
             let release;
 
             try {
@@ -324,7 +332,7 @@ jobs:
               if (
                 release.prerelease !== prerelease ||
                 release.name !== releaseName ||
-                (release.body ?? "").trim() !== releaseBody
+                (release.body ?? "").trim() !== finalReleaseBody
               ) {
                 const updated = await github.rest.repos.updateRelease({
                   owner,
@@ -332,7 +340,7 @@ jobs:
                   release_id: release.id,
                   name: releaseName,
                   prerelease,
-                  body: releaseBody,
+                  body: finalReleaseBody,
                 });
                 release = updated.data;
               }
@@ -347,7 +355,7 @@ jobs:
                 repo,
                 tag_name: tag,
                 name: releaseName,
-                body: releaseBody,
+                body: finalReleaseBody,
                 draft: true,
                 prerelease,
               });
@@ -358,7 +366,7 @@ jobs:
 
             core.setOutput("release_id", String(release.id));
             core.setOutput("release_url", release.html_url);
-            core.setOutput("release_body", releaseBody);
+            core.setOutput("release_body", finalReleaseBody);
 
   build-tauri:
     needs: create-draft-release
