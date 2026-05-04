@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, RwLock};
 use crate::acp::error::AcpError;
 use crate::acp::file_system_runtime::{FileSystemRuntime, FileSystemRuntimeError};
 use crate::acp::registry::{self, AgentDistribution};
-use crate::acp::session_state::{LiveContentBlock, SessionState, ToolCallStatus};
+use crate::acp::session_state::SessionState;
 use crate::acp::terminal_runtime::{TerminalRuntime, TerminalRuntimeError};
 use crate::acp::types::{
     AcpEvent, AvailableCommandInfo, ConnectionInfo, ConnectionStatus, PermissionOptionInfo,
@@ -1405,12 +1405,6 @@ async fn set_session_config_option(
 
 const TERMINAL_POLL_INTERVAL_MS: u64 = 200;
 const TERMINAL_POLL_MISSING_LIMIT: u8 = 10;
-/// When a turn has already shown an explicit completion candidate (currently a
-/// tool call reaching a final status) but then goes completely quiet while the
-/// backend SessionState shows no pending permission and no in-flight non-final
-/// tool calls, treat that silence as a completion fallback. This stays narrow on
-/// purpose: plain text/thinking silence alone must not be treated as completion.
-const TURN_COMPLETION_FALLBACK_IDLE_MS: u64 = 15_000;
 
 /// Hard cap on the size of a single ACP event's `raw_output` payload.
 ///
@@ -1649,13 +1643,6 @@ struct TerminalPollResult {
     append: bool,
     any_found: bool,
     all_exited: bool,
-}
-
-fn is_final_tool_call_status(status: Option<&sacp::schema::ToolCallStatus>) -> bool {
-    matches!(
-        status,
-        Some(sacp::schema::ToolCallStatus::Completed | sacp::schema::ToolCallStatus::Failed)
-    )
 }
 
 fn merge_terminal_ids(existing: &mut Vec<String>, incoming: Vec<String>) -> bool {
@@ -1995,16 +1982,6 @@ fn stop_reason_label(reason: StopReason) -> &'static str {
     }
 }
 
-fn session_update_marks_completion_candidate(update: &SessionUpdate) -> bool {
-    match update {
-        SessionUpdate::ToolCall(tc) => is_final_tool_call_status(Some(&tc.status)),
-        SessionUpdate::ToolCallUpdate(tcu) => {
-            is_final_tool_call_status(tcu.fields.status.as_ref())
-        }
-        _ => false,
-    }
-}
-
 async fn emit_turn_complete_once(
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
@@ -2042,60 +2019,6 @@ async fn clear_pending_permission_state_if_matches(
         session_state.pending_permission = None;
         session_state.last_activity_at = chrono::Utc::now();
     }
-}
-
-async fn should_force_complete_turn(
-    state: &Arc<RwLock<SessionState>>,
-    tracked_terminal_tool_calls: &HashMap<String, TrackedTerminalToolCall>,
-    has_pending_permission: bool,
-    saw_completion_candidate: bool,
-) -> bool {
-    if !saw_completion_candidate {
-        return false;
-    }
-
-    let state = state.read().await;
-
-    if has_pending_permission || state.pending_permission.is_some() {
-        return false;
-    }
-
-    if !tracked_terminal_tool_calls.is_empty() {
-        return false;
-    }
-
-    if state.status != ConnectionStatus::Prompting {
-        return false;
-    }
-
-    let Some(live_message) = state.live_message.as_ref() else {
-        return false;
-    };
-
-    let has_meaningful_content = live_message.content.iter().any(|block| match block {
-        LiveContentBlock::Text { text } | LiveContentBlock::Thinking { text } => {
-            !text.trim().is_empty()
-        }
-        LiveContentBlock::ToolCallRef { .. } => true,
-        LiveContentBlock::Plan { entries } => entries
-            .as_array()
-            .map(|arr| !arr.is_empty())
-            .unwrap_or(!entries.is_null()),
-    });
-    if !has_meaningful_content {
-        return false;
-    }
-
-    if state.active_tool_calls.values().any(|tool| {
-        matches!(
-            tool.status,
-            ToolCallStatus::Pending | ToolCallStatus::InProgress
-        )
-    }) {
-        return false;
-    }
-
-    true
 }
 
 /// Result when the conversation loop exits due to a fork request.
@@ -2301,12 +2224,11 @@ async fn run_conversation_loop<'a>(
                 );
                 terminal_poll_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                let completion_fallback_timer = tokio::time::sleep(
-                    std::time::Duration::from_millis(TURN_COMPLETION_FALLBACK_IDLE_MS),
-                );
-                tokio::pin!(completion_fallback_timer);
+                // Do not infer turn completion from idle silence here.
+                // Real sessions can legitimately go quiet between tool phases,
+                // permission handoffs, or external waits; rely on explicit
+                // StopReason / prompt-response / cancel paths instead.
                 let mut turn_completed = false;
-                let mut saw_completion_candidate = false;
                 let mut disconnect_requested = false;
 
                 // Read updates until turn completes.
@@ -2322,12 +2244,6 @@ async fn run_conversation_loop<'a>(
                                     continue;
                                 }
                             };
-                            completion_fallback_timer.as_mut().reset(
-                                tokio::time::Instant::now()
-                                    + std::time::Duration::from_millis(
-                                        TURN_COMPLETION_FALLBACK_IDLE_MS,
-                                    ),
-                            );
                             match update {
                                 SessionMessage::SessionMessage(dispatch) => {
                                     let h = emitter.clone();
@@ -2343,9 +2259,6 @@ async fn run_conversation_loop<'a>(
                                                 untyped_notification.params(),
                                             ) {
                                                 Ok(notif) => {
-                                                    if session_update_marks_completion_candidate(&notif.update) {
-                                                        saw_completion_candidate = true;
-                                                    }
                                                     let should_poll_now = track_terminal_tool_calls(
                                                         &notif.update,
                                                         &mut tracked_terminal_tool_calls,
@@ -2443,53 +2356,6 @@ async fn run_conversation_loop<'a>(
                             )
                             .await;
                         }
-                        _ = &mut completion_fallback_timer => {
-                            if !tracked_terminal_tool_calls.is_empty() {
-                                poll_tracked_terminal_tool_calls(
-                                    terminal_runtime.as_ref(),
-                                    &sid,
-                                    state,
-                                    emitter,
-                                    &mut tracked_terminal_tool_calls,
-                                )
-                                .await;
-                            }
-
-                            let has_pending_permission = !perms.lock().await.is_empty();
-                            if should_force_complete_turn(
-                                state,
-                                &tracked_terminal_tool_calls,
-                                has_pending_permission,
-                                saw_completion_candidate,
-                            )
-                            .await
-                            {
-                                eprintln!(
-                                    "[ACP] forcing turn completion after idle silence; connection_id={conn_id} session_id={}",
-                                    sid.0
-                                );
-                                emit_turn_complete_once(
-                                    state,
-                                    emitter,
-                                    &sid,
-                                    agent_type,
-                                    "end_turn",
-                                    &mut turn_completed,
-                                )
-                                .await;
-                                tokio::spawn(async move {
-                                    let _ = prompt_response.await;
-                                });
-                                break;
-                            }
-
-                            completion_fallback_timer.as_mut().reset(
-                                tokio::time::Instant::now()
-                                    + std::time::Duration::from_millis(
-                                        TURN_COMPLETION_FALLBACK_IDLE_MS,
-                                    ),
-                            );
-                        }
                         cmd = cmd_rx.recv() => {
                             match cmd {
                                 Some(ConnectionCommand::RespondPermission {
@@ -2503,12 +2369,6 @@ async fn run_conversation_loop<'a>(
                                         let _ = responder.respond(RequestPermissionResponse::new(outcome));
                                         clear_pending_permission_state_if_matches(state, &request_id)
                                             .await;
-                                        completion_fallback_timer.as_mut().reset(
-                                            tokio::time::Instant::now()
-                                                + std::time::Duration::from_millis(
-                                                    TURN_COMPLETION_FALLBACK_IDLE_MS,
-                                                ),
-                                        );
                                     }
                                 }
                                 Some(ConnectionCommand::SetMode { mode_id }) => {
@@ -3479,114 +3339,26 @@ mod tests {
         assert_eq!(stop_reason_label(StopReason::Refusal), "refusal");
     }
 
-    #[test]
-    fn completion_candidate_requires_final_tool_status() {
-        assert!(!session_update_marks_completion_candidate(&SessionUpdate::AgentMessageChunk(
-            ContentChunk::new(ContentBlock::Text(TextContent::new("done"))),
-        )));
-        assert!(!session_update_marks_completion_candidate(&SessionUpdate::ToolCall(
-            sacp::schema::ToolCall::new("tc-1", "bash")
-                .status(sacp::schema::ToolCallStatus::InProgress),
-        )));
-        assert!(session_update_marks_completion_candidate(&SessionUpdate::ToolCall(
-            sacp::schema::ToolCall::new("tc-1", "bash")
-                .status(sacp::schema::ToolCallStatus::Completed),
-        )));
-        assert!(session_update_marks_completion_candidate(&SessionUpdate::ToolCallUpdate(
-            sacp::schema::ToolCallUpdate::new(
-                "tc-1",
-                sacp::schema::ToolCallUpdateFields::new()
-                    .status(sacp::schema::ToolCallStatus::Failed),
-            ),
-        )));
-    }
-
     #[tokio::test]
-    async fn completion_fallback_requires_completion_candidate() {
+    async fn permission_response_clear_refreshes_last_activity() {
         let state = Arc::new(RwLock::new(prompting_state()));
-        state.write().await.apply_event(&AcpEvent::ContentDelta {
-            text: "done".to_string(),
-        });
-
-        assert!(!should_force_complete_turn(&state, &HashMap::new(), false, false).await);
-    }
-
-    #[tokio::test]
-    async fn completion_fallback_allows_finalized_tool_turn_with_candidate() {
-        let state = Arc::new(RwLock::new(prompting_state()));
-        {
+        let before_clear = {
             let mut guard = state.write().await;
-            guard.apply_event(&AcpEvent::ToolCall {
-                tool_call_id: "tc-1".to_string(),
-                title: "bash".to_string(),
-                kind: "execute".to_string(),
-                status: "completed".to_string(),
-                content: None,
-                raw_input: None,
-                raw_output: None,
-                locations: None,
-                meta: None,
-            });
-        }
-
-        assert!(should_force_complete_turn(&state, &HashMap::new(), false, true).await);
-    }
-
-    #[tokio::test]
-    async fn completion_fallback_skips_pending_permission() {
-        let state = Arc::new(RwLock::new(prompting_state()));
-        {
-            let mut guard = state.write().await;
-            guard.apply_event(&AcpEvent::ContentDelta {
-                text: "waiting".to_string(),
-            });
             guard.apply_event(&AcpEvent::PermissionRequest {
                 request_id: "req-1".to_string(),
                 tool_call: serde_json::json!({"toolCallId": "tc-1"}),
                 options: vec![],
             });
-        }
+            let before_clear = chrono::Utc::now() - chrono::Duration::seconds(5);
+            guard.last_activity_at = before_clear;
+            before_clear
+        };
 
-        assert!(!should_force_complete_turn(&state, &HashMap::new(), true, true).await);
-    }
+        clear_pending_permission_state_if_matches(&state, "req-1").await;
 
-    #[tokio::test]
-    async fn completion_fallback_skips_stale_pending_permission_state() {
-        let state = Arc::new(RwLock::new(prompting_state()));
-        {
-            let mut guard = state.write().await;
-            guard.apply_event(&AcpEvent::ContentDelta {
-                text: "waiting".to_string(),
-            });
-            guard.apply_event(&AcpEvent::PermissionRequest {
-                request_id: "req-1".to_string(),
-                tool_call: serde_json::json!({"toolCallId": "tc-1"}),
-                options: vec![],
-            });
-        }
-
-        assert!(!should_force_complete_turn(&state, &HashMap::new(), false, true).await);
-    }
-
-    #[tokio::test]
-    async fn completion_fallback_skips_in_progress_tool_calls() {
-        let state = Arc::new(RwLock::new(prompting_state()));
-        {
-            let mut guard = state.write().await;
-            guard.apply_event(&AcpEvent::ToolCall {
-                tool_call_id: "tc-1".to_string(),
-                title: "bash".to_string(),
-                kind: "execute".to_string(),
-                status: "in_progress".to_string(),
-                content: None,
-                raw_input: None,
-                raw_output: None,
-                locations: None,
-                meta: None,
-            });
-        }
-
-        assert!(!should_force_complete_turn(&state, &HashMap::new(), false, true).await);
+        let guard = state.read().await;
+        assert!(guard.pending_permission.is_none());
+        assert!(guard.last_activity_at > before_clear);
     }
 
     #[tokio::test]
