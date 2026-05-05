@@ -314,38 +314,47 @@ export function LiveTurnStats({
         : t("elapsedSeconds", { value: Math.floor(elapsed / 1_000) })
 
   return (
-    <div className="flex h-8 shrink-0 items-center justify-center gap-3 px-4 text-xs leading-none text-muted-foreground">
-      <AgentIcon agentType={agentType} className="h-3.5 w-3.5 animate-pulse" />
-      {isThinking ? (
-        <span>{t("thinking")}</span>
-      ) : (
-        <span>{t("streaming")}</span>
-      )}
-      <span className="text-border leading-none">|</span>
-      <span className="inline-flex items-center gap-1 leading-none">
-        <Timer className="h-3 w-3 shrink-0" />
-        {elapsedLabel}
-      </span>
-      {editStats.files > 0 && (
-        <>
-          <span className="text-border leading-none">|</span>
-          <span className="inline-flex items-center gap-1 leading-none">
-            <FilePenLine className="h-3 w-3 shrink-0" />
-            {editStats.files}F +
-            {formatCompactInt(editStats.additions, compactNumberFormatter)}/-
-            {formatCompactInt(editStats.deletions, compactNumberFormatter)}
-          </span>
-        </>
-      )}
-      {toolCallCount > 0 && (
-        <>
-          <span className="text-border leading-none">|</span>
-          <span className="inline-flex items-center gap-1 leading-none">
-            <Wrench className="h-3 w-3 shrink-0" />
-            {t("toolUseCount", { count: toolCallCount })}
-          </span>
-        </>
-      )}
+    <div className="@container/turnstats shrink-0">
+      <div className="flex min-h-8 flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-1 text-xs leading-none text-muted-foreground">
+        <AgentIcon
+          agentType={agentType}
+          className="h-3.5 w-3.5 animate-pulse"
+        />
+        {isThinking ? (
+          <span>{t("thinking")}</span>
+        ) : (
+          <span>{t("streaming")}</span>
+        )}
+        <span className="text-border leading-none">|</span>
+        <span className="inline-flex items-center gap-1 leading-none">
+          <Timer className="h-3 w-3 shrink-0" />
+          {elapsedLabel}
+        </span>
+        {editStats.files > 0 && (
+          <>
+            <span className="hidden text-border leading-none @[24rem]/turnstats:inline">
+              |
+            </span>
+            <span className="hidden items-center gap-1 leading-none @[24rem]/turnstats:inline-flex">
+              <FilePenLine className="h-3 w-3 shrink-0" />
+              {editStats.files}F +
+              {formatCompactInt(editStats.additions, compactNumberFormatter)}/-
+              {formatCompactInt(editStats.deletions, compactNumberFormatter)}
+            </span>
+          </>
+        )}
+        {toolCallCount > 0 && (
+          <>
+            <span className="hidden text-border leading-none @[30rem]/turnstats:inline">
+              |
+            </span>
+            <span className="hidden items-center gap-1 leading-none @[30rem]/turnstats:inline-flex">
+              <Wrench className="h-3 w-3 shrink-0" />
+              {t("toolUseCount", { count: toolCallCount })}
+            </span>
+          </>
+        )}
+      </div>
     </div>
   )
 }

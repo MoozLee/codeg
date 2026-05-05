@@ -4,7 +4,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useReducer,
   useRef,
@@ -15,11 +14,6 @@ import type {
   ToolCallInfo,
 } from "@/contexts/acp-connections-context"
 import { getFolderConversation } from "@/lib/api"
-import {
-  clearRecoverableOptimisticTurns,
-  loadRecoverableOptimisticTurns,
-  saveRecoverableOptimisticTurns,
-} from "@/lib/conversation-recovery-storage"
 import type {
   AgentExecutionStats,
   DbConversationDetail,
@@ -45,7 +39,6 @@ export interface ConversationTimelineTurn {
 export interface ConversationRuntimeSession {
   conversationId: number
   externalId: string | null
-  recoveryConversationId: number | null
 
   // DB data (cold open only)
   detail: DbConversationDetail | null
@@ -89,7 +82,6 @@ type Action =
       type: "FETCH_DETAIL_SUCCESS"
       conversationId: number
       detail: DbConversationDetail
-      preserveOptimistic?: boolean
     }
   | {
       type: "FETCH_DETAIL_ERROR"
@@ -99,6 +91,17 @@ type Action =
   | {
       type: "COMPLETE_TURN"
       conversationId: number
+      /**
+       * Optional authoritative liveMessage from the caller. Used to avoid a
+       * race where the connections-context batches the final STREAM_BATCH
+       * and STATUS_CHANGED into one render: by the time COMPLETE_TURN runs,
+       * the panel's mirror effect that copies conn.liveMessage into
+       * session.liveMessage has not yet executed for the current render,
+       * so session.liveMessage is one render stale and missing the final
+       * text chunk. When provided, this value is preferred over
+       * session.liveMessage for the snapshot.
+       */
+      liveMessage?: LiveMessage | null
     }
   | {
       type: "APPEND_OPTIMISTIC_TURN"
@@ -129,11 +132,6 @@ type Action =
       externalId: string | null
     }
   | {
-      type: "SET_RECOVERY_CONVERSATION_ID"
-      conversationId: number
-      recoveryConversationId: number | null
-    }
-  | {
       type: "SET_SYNC_STATE"
       conversationId: number
       syncState: ConversationSyncState
@@ -156,7 +154,6 @@ type Action =
         usage?: TurnUsage | null
         duration_ms?: number | null
         model?: string | null
-        anchor_id?: string | null
       }>
       sessionStats?: SessionStats | null
     }
@@ -164,24 +161,15 @@ type Action =
   | { type: "RESET" }
 
 function createEmptySession(
-  conversationId: number,
-  recoveryConversationId: number | null = conversationId > 0
-    ? conversationId
-    : null
+  conversationId: number
 ): ConversationRuntimeSession {
-  const recoveredLocalTurns =
-    recoveryConversationId != null
-      ? loadRecoverableOptimisticTurns(recoveryConversationId)
-      : []
-
   return {
     conversationId,
     externalId: null,
-    recoveryConversationId,
     detail: null,
     detailLoading: false,
     detailError: null,
-    localTurns: recoveredLocalTurns,
+    localTurns: [],
     optimisticTurns: [],
     liveMessage: null,
     syncState: "idle",
@@ -189,109 +177,6 @@ function createEmptySession(
     sessionStats: null,
     pendingCleanup: false,
   }
-}
-
-function getTurnBlocksSignature(turn: MessageTurn): string {
-  try {
-    return JSON.stringify(turn.blocks)
-  } catch {
-    return `blocks:${turn.blocks.length}`
-  }
-}
-
-function getTimestampMs(timestamp: string): number | null {
-  const value = Date.parse(timestamp)
-  return Number.isFinite(value) ? value : null
-}
-
-function looksLikeOptimisticAnchorId(
-  anchorId: string | null | undefined
-): boolean {
-  return typeof anchorId === "string" && anchorId.startsWith("optimistic:")
-}
-
-function countUserTurns(turns: MessageTurn[]): number {
-  return turns.filter((turn) => turn.role === "user").length
-}
-
-function reconcileOptimisticTurns(
-  optimisticTurns: MessageTurn[],
-  knownCompletedTurns: MessageTurn[],
-  persistedTurns: MessageTurn[]
-): MessageTurn[] {
-  if (optimisticTurns.length === 0 || persistedTurns.length === 0) {
-    return optimisticTurns
-  }
-
-  const persistedUsers = persistedTurns
-    .filter((turn) => {
-      return (
-        turn.role === "user" && !looksLikeOptimisticAnchorId(turn.anchor_id)
-      )
-    })
-    .map((turn) => ({
-      signature: getTurnBlocksSignature(turn),
-      timestampMs: getTimestampMs(turn.timestamp),
-    }))
-
-  const baselineKnownUserCount = countUserTurns(knownCompletedTurns)
-  const optimisticUserCount = countUserTurns(optimisticTurns)
-  const appendedPersistedUsers =
-    baselineKnownUserCount === 0 && optimisticUserCount > 0
-      ? persistedUsers.slice(-optimisticUserCount)
-      : persistedUsers.slice(baselineKnownUserCount)
-
-  if (appendedPersistedUsers.length === 0) return optimisticTurns
-
-  let nextCandidateIndex = 0
-
-  return optimisticTurns.filter((turn) => {
-    if (turn.role !== "user") return true
-
-    const candidate = appendedPersistedUsers[nextCandidateIndex]
-    if (!candidate) return true
-
-    const optimisticSignature = getTurnBlocksSignature(turn)
-    if (candidate.signature !== optimisticSignature) {
-      return true
-    }
-
-    const optimisticTimestampMs = getTimestampMs(turn.timestamp)
-    const distance =
-      candidate.timestampMs !== null && optimisticTimestampMs !== null
-        ? Math.abs(candidate.timestampMs - optimisticTimestampMs)
-        : 0
-
-    if (distance > 5 * 60 * 1000) {
-      return true
-    }
-
-    nextCandidateIndex += 1
-    return false
-  })
-}
-
-function isRecoverableUserTurn(turn: MessageTurn): boolean {
-  return turn.role === "user" && looksLikeOptimisticAnchorId(turn.anchor_id)
-}
-
-function dedupeRecoverableTurns(turns: MessageTurn[]): MessageTurn[] {
-  const seen = new Set<string>()
-  return turns.filter((turn) => {
-    const key = `${turn.id}:${turn.timestamp}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-function collectRecoverableUserTurns(
-  session: ConversationRuntimeSession
-): MessageTurn[] {
-  return dedupeRecoverableTurns([
-    ...session.optimisticTurns.filter(isRecoverableUserTurn),
-    ...session.localTurns.filter(isRecoverableUserTurn),
-  ])
 }
 
 function formatLivePlanEntries(
@@ -669,37 +554,10 @@ function reducer(
         createEmptySession(action.conversationId)
       const nextExternalId = action.detail.summary.external_id ?? null
 
-      // DB data is authoritative for persisted turns, but keep localTurns while
-      // they still represent failed/unpersisted user messages that must survive
-      // reload until the parser catches up.
+      // DB data is authoritative for completed turns — always clear localTurns.
+      // Only preserve optimisticTurns + liveMessage if user actively sent
+      // a message and is awaiting agent response.
       const isActivelyInteracting = current.syncState === "awaiting_persist"
-      const preserveOptimistic = action.preserveOptimistic ?? false
-      const nextOptimisticTurns =
-        isActivelyInteracting || preserveOptimistic
-          ? reconcileOptimisticTurns(
-              current.optimisticTurns,
-              [...(current.detail?.turns ?? []), ...current.localTurns],
-              action.detail.turns ?? []
-            )
-          : []
-
-      const recoverableLocalTurns = current.localTurns.filter(
-        isRecoverableUserTurn
-      )
-      const reconciledLocalTurns = reconcileOptimisticTurns(
-        current.localTurns,
-        current.detail?.turns ?? [],
-        action.detail.turns ?? []
-      )
-      const reconciledRecoverableLocalTurns = reconcileOptimisticTurns(
-        recoverableLocalTurns,
-        current.detail?.turns ?? [],
-        action.detail.turns ?? []
-      )
-
-      const nextLocalTurns = isActivelyInteracting
-        ? reconciledLocalTurns
-        : reconciledRecoverableLocalTurns
 
       const nextSession: ConversationRuntimeSession = {
         ...current,
@@ -707,13 +565,11 @@ function reducer(
         detailLoading: false,
         detailError: null,
         externalId: nextExternalId ?? current.externalId,
-        localTurns: nextLocalTurns,
-        optimisticTurns: nextOptimisticTurns,
-        liveMessage:
-          isActivelyInteracting || preserveOptimistic
-            ? current.liveMessage
-            : null,
+        localTurns: [],
         sessionStats: action.detail.session_stats ?? current.sessionStats,
+        ...(isActivelyInteracting
+          ? {}
+          : { optimisticTurns: [], liveMessage: null }),
       }
 
       const nextByConversationId = new Map(state.byConversationId)
@@ -742,11 +598,21 @@ function reducer(
       const current = state.byConversationId.get(action.conversationId)
       if (!current) return state
 
+      // Prefer the caller-provided liveMessage when present. The panel's
+      // mirror effect that syncs conn.liveMessage → session.liveMessage runs
+      // AFTER this effect within the same render, so session.liveMessage
+      // misses the final stream chunk that arrived in the same React batch
+      // as the status transition.
+      const sourceLiveMessage =
+        action.liveMessage !== undefined
+          ? action.liveMessage
+          : current.liveMessage
+
       // Convert liveMessage to completed MessageTurns (split into rounds)
-      const streamingTurns = current.liveMessage
+      const streamingTurns = sourceLiveMessage
         ? buildStreamingTurnsFromLiveMessage(
             current.conversationId,
-            current.liveMessage
+            sourceLiveMessage
           ).turns
         : []
 
@@ -828,24 +694,6 @@ function reducer(
       }
     }
 
-    case "SET_RECOVERY_CONVERSATION_ID":
-      return updateSessionInState(state, action.conversationId, (current) => {
-        if (current.recoveryConversationId === action.recoveryConversationId) {
-          return current
-        }
-
-        const nextLocalTurns =
-          current.localTurns.length > 0 || action.recoveryConversationId == null
-            ? current.localTurns
-            : loadRecoverableOptimisticTurns(action.recoveryConversationId)
-
-        return {
-          ...current,
-          recoveryConversationId: action.recoveryConversationId,
-          localTurns: dedupeRecoverableTurns(nextLocalTurns),
-        }
-      })
-
     case "SET_SYNC_STATE":
       return updateSessionInState(state, action.conversationId, (current) => ({
         ...current,
@@ -866,10 +714,6 @@ function reducer(
         ...to,
         ...from,
         conversationId: action.toConversationId,
-        recoveryConversationId:
-          to.recoveryConversationId ??
-          from.recoveryConversationId ??
-          (action.toConversationId > 0 ? action.toConversationId : null),
         detail: to.detail ?? from.detail,
         detailLoading: to.detailLoading || from.detailLoading,
         detailError: to.detailError ?? from.detailError,
@@ -912,19 +756,16 @@ function reducer(
         const newUsage = turn.usage ?? patch.usage
         const newDuration = turn.duration_ms ?? patch.duration_ms
         const newModel = turn.model ?? patch.model
-        const newAnchorId = patch.anchor_id ?? turn.anchor_id
         if (
           newUsage !== turn.usage ||
           newDuration !== turn.duration_ms ||
-          newModel !== turn.model ||
-          newAnchorId !== turn.anchor_id
+          newModel !== turn.model
         ) {
           patchedTurns[patch.index] = {
             ...turn,
             usage: newUsage,
             duration_ms: newDuration,
             model: newModel,
-            anchor_id: newAnchorId,
           }
           changed = true
         }
@@ -976,8 +817,11 @@ interface ConversationRuntimeContextValue {
   getConversationIdByExternalId: (externalId: string) => number | null
   getTimelineTurns: (conversationId: number) => ConversationTimelineTurn[]
   fetchDetail: (conversationId: number) => void
-  refetchDetail: (conversationId: number, preserveOptimistic?: boolean) => void
-  completeTurn: (conversationId: number) => void
+  refetchDetail: (conversationId: number) => void
+  completeTurn: (
+    conversationId: number,
+    liveMessage?: LiveMessage | null
+  ) => void
   appendOptimisticTurn: (
     conversationId: number,
     turn: MessageTurn,
@@ -989,10 +833,6 @@ interface ConversationRuntimeContextValue {
     isLive?: boolean
   ) => void
   setExternalId: (conversationId: number, externalId: string | null) => void
-  setRecoveryConversationId: (
-    conversationId: number,
-    recoveryConversationId: number | null
-  ) => void
   setSyncState: (
     conversationId: number,
     syncState: ConversationSyncState
@@ -1019,23 +859,6 @@ export function ConversationRuntimeProvider({
   children: ReactNode
 }) {
   const [state, dispatch] = useReducer(reducer, initialState)
-
-  useEffect(() => {
-    for (const session of state.byConversationId.values()) {
-      const recoveryConversationId = session.recoveryConversationId
-      if (recoveryConversationId == null) {
-        continue
-      }
-
-      const recoverableTurns = collectRecoverableUserTurns(session)
-      if (recoverableTurns.length > 0) {
-        saveRecoverableOptimisticTurns(recoveryConversationId, recoverableTurns)
-        continue
-      }
-
-      clearRecoverableOptimisticTurns(recoveryConversationId)
-    }
-  }, [state.byConversationId])
 
   const stateRef = useRef(state)
   // eslint-disable-next-line react-hooks/refs -- stateRef is only read in callbacks, not during render
@@ -1112,12 +935,12 @@ export function ConversationRuntimeProvider({
     const session = stateRef.current.byConversationId.get(conversationId)
     if (session?.detail || session?.detailLoading) return
 
-    // Allow cold detail loads even when the runtime restored recoverable
-    // failed-user turns from localStorage. Only skip when there is truly
-    // in-flight data that would make the fetch immediately stale.
+    // Skip fetch if session has active data (ongoing conversation)
     if (
       session &&
-      (session.optimisticTurns.length > 0 || session.liveMessage)
+      (session.optimisticTurns.length > 0 ||
+        session.liveMessage !== null ||
+        session.localTurns.length > 0)
     ) {
       return
     }
@@ -1125,12 +948,7 @@ export function ConversationRuntimeProvider({
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
     getFolderConversation(conversationId)
       .then((detail) => {
-        dispatch({
-          type: "FETCH_DETAIL_SUCCESS",
-          conversationId,
-          detail,
-          preserveOptimistic: false,
-        })
+        dispatch({ type: "FETCH_DETAIL_SUCCESS", conversationId, detail })
       })
       .catch((error: unknown) => {
         dispatch({
@@ -1141,28 +959,20 @@ export function ConversationRuntimeProvider({
       })
   }, [])
 
-  const refetchDetail = useCallback(
-    (conversationId: number, preserveOptimistic = false) => {
-      dispatch({ type: "FETCH_DETAIL_START", conversationId })
-      getFolderConversation(conversationId)
-        .then((detail) => {
-          dispatch({
-            type: "FETCH_DETAIL_SUCCESS",
-            conversationId,
-            detail,
-            preserveOptimistic,
-          })
+  const refetchDetail = useCallback((conversationId: number) => {
+    dispatch({ type: "FETCH_DETAIL_START", conversationId })
+    getFolderConversation(conversationId)
+      .then((detail) => {
+        dispatch({ type: "FETCH_DETAIL_SUCCESS", conversationId, detail })
+      })
+      .catch((error: unknown) => {
+        dispatch({
+          type: "FETCH_DETAIL_ERROR",
+          conversationId,
+          error: error instanceof Error ? error.message : String(error),
         })
-        .catch((error: unknown) => {
-          dispatch({
-            type: "FETCH_DETAIL_ERROR",
-            conversationId,
-            error: error instanceof Error ? error.message : String(error),
-          })
-        })
-    },
-    []
-  )
+      })
+  }, [])
 
   const syncTurnMetadata = useCallback(
     (
@@ -1189,37 +999,27 @@ export function ConversationRuntimeProvider({
               if (cur.syncState === "awaiting_persist") return
 
               const localAssistantIndices: number[] = []
-              const localUserIndices: number[] = []
               for (let i = 0; i < cur.localTurns.length; i++) {
-                const role = cur.localTurns[i].role
-                if (role === "assistant") {
+                if (cur.localTurns[i].role === "assistant") {
                   localAssistantIndices.push(i)
-                } else if (role === "user") {
-                  localUserIndices.push(i)
                 }
               }
 
               const parsedAssistantTurns = parsed.turns.filter(
                 (t) => t.role === "assistant"
               )
-              const parsedUserTurns = parsed.turns.filter(
-                (t) => t.role === "user"
-              )
 
-              const assistantOffset =
+              const offset =
                 parsedAssistantTurns.length - localAssistantIndices.length
-              const userOffset =
-                parsedUserTurns.length - localUserIndices.length
               const patches: Array<{
                 index: number
                 usage?: TurnUsage | null
                 duration_ms?: number | null
                 model?: string | null
-                anchor_id?: string | null
               }> = []
 
               for (let i = 0; i < localAssistantIndices.length; i++) {
-                const parsedIdx = assistantOffset + i
+                const parsedIdx = offset + i
                 if (parsedIdx < 0 || parsedIdx >= parsedAssistantTurns.length)
                   continue
                 const pt = parsedAssistantTurns[parsedIdx]
@@ -1232,18 +1032,6 @@ export function ConversationRuntimeProvider({
                 })
               }
 
-              for (let i = 0; i < localUserIndices.length; i++) {
-                const parsedIdx = userOffset + i
-                if (parsedIdx < 0 || parsedIdx >= parsedUserTurns.length)
-                  continue
-                const pt = parsedUserTurns[parsedIdx]
-                if (!pt.anchor_id) continue
-                patches.push({
-                  index: localUserIndices[i],
-                  anchor_id: pt.anchor_id,
-                })
-              }
-
               if (patches.length > 0 || parsed.session_stats) {
                 dispatch({
                   type: "PATCH_TURN_METADATA",
@@ -1253,22 +1041,8 @@ export function ConversationRuntimeProvider({
                 })
               }
 
-              const latestAssistantPatch = [...patches]
-                .reverse()
-                .find(
-                  (patch) => patch.usage || patch.duration_ms || patch.model
-                )
-              const missingUserAnchor = localUserIndices.some((index) => {
-                const turn = cur.localTurns[index]
-                return (
-                  !turn?.anchor_id ||
-                  looksLikeOptimisticAnchorId(turn.anchor_id)
-                )
-              })
-              if (
-                (!latestAssistantPatch?.usage || missingUserAnchor) &&
-                attempt < 1
-              ) {
+              const latestPatch = patches[patches.length - 1]
+              if (!latestPatch?.usage && attempt < 1) {
                 trySync(attempt + 1)
               }
             })
@@ -1288,9 +1062,12 @@ export function ConversationRuntimeProvider({
     []
   )
 
-  const completeTurn = useCallback((conversationId: number) => {
-    dispatch({ type: "COMPLETE_TURN", conversationId })
-  }, [])
+  const completeTurn = useCallback(
+    (conversationId: number, liveMessage?: LiveMessage | null) => {
+      dispatch({ type: "COMPLETE_TURN", conversationId, liveMessage })
+    },
+    []
+  )
 
   const appendOptimisticTurn = useCallback(
     (conversationId: number, turn: MessageTurn, turnToken: string) => {
@@ -1327,17 +1104,6 @@ export function ConversationRuntimeProvider({
     []
   )
 
-  const setRecoveryConversationId = useCallback(
-    (conversationId: number, recoveryConversationId: number | null) => {
-      dispatch({
-        type: "SET_RECOVERY_CONVERSATION_ID",
-        conversationId,
-        recoveryConversationId,
-      })
-    },
-    []
-  )
-
   const setSyncState = useCallback(
     (conversationId: number, syncState: ConversationSyncState) => {
       dispatch({ type: "SET_SYNC_STATE", conversationId, syncState })
@@ -1364,21 +1130,10 @@ export function ConversationRuntimeProvider({
   )
 
   const removeConversation = useCallback((conversationId: number) => {
-    const recoveryConversationId =
-      stateRef.current.byConversationId.get(conversationId)
-        ?.recoveryConversationId ?? null
-    if (recoveryConversationId != null) {
-      clearRecoverableOptimisticTurns(recoveryConversationId)
-    }
     dispatch({ type: "REMOVE_CONVERSATION", conversationId })
   }, [])
 
   const reset = useCallback(() => {
-    for (const session of stateRef.current.byConversationId.values()) {
-      if (session.recoveryConversationId != null) {
-        clearRecoverableOptimisticTurns(session.recoveryConversationId)
-      }
-    }
     dispatch({ type: "RESET" })
   }, [])
 
@@ -1394,7 +1149,6 @@ export function ConversationRuntimeProvider({
       appendOptimisticTurn,
       setLiveMessage,
       setExternalId,
-      setRecoveryConversationId,
       setSyncState,
       migrateConversation,
       setPendingCleanup,
@@ -1412,7 +1166,6 @@ export function ConversationRuntimeProvider({
       appendOptimisticTurn,
       setLiveMessage,
       setExternalId,
-      setRecoveryConversationId,
       setSyncState,
       migrateConversation,
       setPendingCleanup,

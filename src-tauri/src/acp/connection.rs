@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sacp::schema::McpServerStdio;
+use sacp::schema::{HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
 use sacp::schema::{
     BlobResourceContents, CancelNotification, ClientCapabilities, ContentBlock, ContentChunk,
     CreateTerminalRequest, CreateTerminalResponse, EmbeddedResource, EmbeddedResourceResource,
@@ -89,7 +89,7 @@ pub enum ConnectionCommand {
         option_id: String,
     },
     Fork {
-        reply: tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkResultInfo, AcpError>>,
+        reply: tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkProtocolResult, AcpError>>,
     },
     Disconnect,
 }
@@ -749,10 +749,17 @@ fn claude_raw_sdk_session_meta(
     Some(meta)
 }
 
-fn build_new_session_request(agent_type: AgentType, cwd: &Path) -> NewSessionRequest {
+fn build_new_session_request(
+    agent_type: AgentType,
+    cwd: &Path,
+    mcp_servers: Vec<McpServer>,
+) -> NewSessionRequest {
     let mut req = NewSessionRequest::new(cwd.to_path_buf());
     if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
         req = req.meta(meta);
+    }
+    if !mcp_servers.is_empty() {
+        req = req.mcp_servers(mcp_servers);
     }
     req
 }
@@ -761,12 +768,142 @@ fn build_load_session_request(
     agent_type: AgentType,
     session_id: SessionId,
     cwd: &Path,
+    mcp_servers: Vec<McpServer>,
 ) -> LoadSessionRequest {
     let mut req = LoadSessionRequest::new(session_id, cwd.to_path_buf());
     if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
         req = req.meta(meta);
     }
+    if !mcp_servers.is_empty() {
+        req = req.mcp_servers(mcp_servers);
+    }
     req
+}
+
+/// Load MCP servers configured for `agent_type` and convert them into the
+/// ACP wire format. Errors and unsupported entries are logged and skipped so
+/// a single malformed entry never blocks a session from starting.
+fn load_mcp_servers_for_agent(agent_type: AgentType) -> Vec<McpServer> {
+    let entries = match crate::commands::mcp::read_servers_for_agent_type(agent_type) {
+        Ok(map) => map,
+        Err(err) => {
+            eprintln!(
+                "[ACP][{}] failed to read MCP servers from local config: {err}",
+                agent_type
+            );
+            return Vec::new();
+        }
+    };
+
+    let mut out = Vec::with_capacity(entries.len());
+    for (name, spec) in entries {
+        match canonical_spec_to_mcp_server(&name, &spec) {
+            Ok(server) => out.push(server),
+            Err(err) => {
+                eprintln!(
+                    "[ACP][{}] skip MCP server '{name}' (cannot map to ACP schema): {err}",
+                    agent_type
+                );
+            }
+        }
+    }
+    out
+}
+
+/// Resolve an MCP server `command` to an absolute path.
+///
+/// The ACP spec requires `McpServerStdio.command` to be an absolute path.
+/// Users typically configure bare names like `npx` / `node` / `bunx`; if we
+/// forwarded those verbatim, agents would fail to spawn the server. We try
+/// `which` first, fall back to the platform-normalized form (which adds
+/// `.exe`/`.cmd` on Windows), and finally to the raw input as last resort.
+fn resolve_mcp_command(command: &str) -> PathBuf {
+    let path = Path::new(command);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    if let Ok(found) = which::which(command) {
+        return found;
+    }
+    PathBuf::from(crate::process::normalized_program(command))
+}
+
+fn canonical_spec_to_mcp_server(name: &str, spec: &serde_json::Value) -> Result<McpServer, String> {
+    let obj = spec
+        .as_object()
+        .ok_or_else(|| "spec must be a JSON object".to_string())?;
+    let typ = obj
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("stdio");
+
+    match typ {
+        "stdio" => {
+            let command = obj
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| "stdio MCP entry missing 'command'".to_string())?;
+            // ACP spec requires an absolute path. If users wrote a bare
+            // command (e.g. "npx"), resolve it via PATH so the agent can
+            // actually spawn the server. Fall back to the raw value when
+            // resolution fails — the agent will surface a clearer error.
+            let command_path = resolve_mcp_command(command);
+            let mut server = McpServerStdio::new(name, command_path);
+            if let Some(args) = obj.get("args").and_then(serde_json::Value::as_array) {
+                let args: Vec<String> = args
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect();
+                if !args.is_empty() {
+                    server = server.args(args);
+                }
+            }
+            if let Some(env_obj) = obj.get("env").and_then(serde_json::Value::as_object) {
+                let env_vars: Vec<sacp::schema::EnvVariable> = env_obj
+                    .iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| sacp::schema::EnvVariable::new(k, s)))
+                    .collect();
+                if !env_vars.is_empty() {
+                    server = server.env(env_vars);
+                }
+            }
+            Ok(McpServer::Stdio(server))
+        }
+        "http" | "sse" => {
+            let url = obj
+                .get("url")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| "remote MCP entry missing 'url'".to_string())?;
+            let headers: Vec<HttpHeader> = obj
+                .get("headers")
+                .and_then(serde_json::Value::as_object)
+                .map(|map| {
+                    map.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| HttpHeader::new(k, s)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if typ == "http" {
+                let mut server = McpServerHttp::new(name, url);
+                if !headers.is_empty() {
+                    server = server.headers(headers);
+                }
+                Ok(McpServer::Http(server))
+            } else {
+                let mut server = McpServerSse::new(name, url);
+                if !headers.is_empty() {
+                    server = server.headers(headers);
+                }
+                Ok(McpServer::Sse(server))
+            }
+        }
+        other => Err(format!("unsupported MCP transport type '{other}'")),
+    }
 }
 
 /// The main ACP connection loop.
@@ -977,6 +1114,40 @@ async fn run_connection(
                 init_resp.agent_capabilities.load_session, supports_fork
             );
 
+            // Load MCP servers configured for this agent and filter by the
+            // capabilities the agent just declared. Stdio is mandatory per
+            // ACP spec; HTTP/SSE are gated on `mcp_capabilities.{http,sse}`.
+            let mcp_caps = &init_resp.agent_capabilities.mcp_capabilities;
+            let mcp_servers: Vec<McpServer> = load_mcp_servers_for_agent(agent_type)
+                .into_iter()
+                .filter(|s| match s {
+                    McpServer::Stdio(_) => true,
+                    McpServer::Http(server) => {
+                        if mcp_caps.http {
+                            true
+                        } else {
+                            eprintln!(
+                                "[ACP][{}] skip HTTP MCP server '{}': agent does not advertise mcpCapabilities.http",
+                                agent_type, server.name
+                            );
+                            false
+                        }
+                    }
+                    McpServer::Sse(server) => {
+                        if mcp_caps.sse {
+                            true
+                        } else {
+                            eprintln!(
+                                "[ACP][{}] skip SSE MCP server '{}': agent does not advertise mcpCapabilities.sse",
+                                agent_type, server.name
+                            );
+                            false
+                        }
+                    }
+                    _ => false,
+                })
+                .collect();
+
             // Emit fork support capability
             emit_with_state(
                 &state,
@@ -1002,8 +1173,12 @@ async fn run_connection(
 
             if let Some(sid) = session_id {
                 // Load existing session via session/load
-                let load_req =
-                    build_load_session_request(agent_type, SessionId::new(sid.clone()), &cwd);
+                let load_req = build_load_session_request(
+                    agent_type,
+                    SessionId::new(sid.clone()),
+                    &cwd,
+                    mcp_servers.clone(),
+                );
                 let load_result = cx.send_request_to(Agent, load_req).block_task().await;
 
                 match load_result {
@@ -1143,7 +1318,14 @@ async fn run_connection(
                             .await;
                         }
                         let new_resp = cx
-                            .send_request_to(Agent, build_new_session_request(agent_type, &cwd))
+                            .send_request_to(
+                                Agent,
+                                build_new_session_request(
+                                    agent_type,
+                                    &cwd,
+                                    mcp_servers.clone(),
+                                ),
+                            )
                             .block_task()
                             .await?;
                         let fallback_sid = new_resp.session_id.0.to_string();
@@ -1202,7 +1384,10 @@ async fn run_connection(
             } else {
                 // Create new session
                 let new_resp = cx
-                    .send_request_to(Agent, build_new_session_request(agent_type, &cwd))
+                    .send_request_to(
+                        Agent,
+                        build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                    )
                     .block_task()
                     .await?;
                 let sid = new_resp.session_id.0.to_string();
@@ -2025,7 +2210,7 @@ async fn clear_pending_permission_state_if_matches(
 struct ForkExitInfo {
     fork_response: sacp::schema::ForkSessionResponse,
     original_session_id: String,
-    reply: tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkResultInfo, AcpError>>,
+    reply: tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkProtocolResult, AcpError>>,
     connection: ConnectionTo<Agent>,
 }
 
@@ -2063,8 +2248,9 @@ async fn handle_fork_or_exit(
         new_sid, fork_info.original_session_id
     );
 
-    // Reply success to the frontend
-    let _ = fork_info.reply.send(Ok(crate::acp::types::ForkResultInfo {
+    // Reply protocol-level result to manager.fork_session, which will combine
+    // it with the freshly-created sibling row id to produce the wire ForkResultInfo.
+    let _ = fork_info.reply.send(Ok(crate::acp::types::ForkProtocolResult {
         forked_session_id: new_sid.clone(),
         original_session_id: fork_info.original_session_id,
     }));
@@ -3088,7 +3274,7 @@ mod tests {
     #[test]
     fn build_new_session_request_sets_claude_raw_meta() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd);
+        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new());
 
         assert_eq!(
             req.meta
@@ -3103,10 +3289,107 @@ mod tests {
     #[test]
     fn build_load_session_request_skips_meta_for_non_claude() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let req =
-            build_load_session_request(AgentType::Codex, SessionId::new("abc".to_string()), &cwd);
+        let req = build_load_session_request(
+            AgentType::Codex,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        );
 
         assert!(req.meta.is_none());
+    }
+
+    #[test]
+    fn canonical_spec_to_mcp_server_stdio() {
+        // Use an absolute path so the test is portable across machines that
+        // may or may not have `npx` on PATH.
+        let spec = serde_json::json!({
+            "type": "stdio",
+            "command": "/usr/local/bin/npx",
+            "args": ["-y", "@mcp_hub_org/cli@latest", "run", "figma-developer-mcp"],
+            "env": {"FIGMA_API_KEY": "secret"},
+        });
+        let server =
+            canonical_spec_to_mcp_server("figma", &spec).expect("stdio spec should map");
+        match server {
+            McpServer::Stdio(s) => {
+                assert_eq!(s.name, "figma");
+                assert_eq!(s.command, std::path::PathBuf::from("/usr/local/bin/npx"));
+                assert_eq!(s.args.len(), 4);
+                assert_eq!(s.env.len(), 1);
+                assert_eq!(s.env[0].name, "FIGMA_API_KEY");
+            }
+            other => panic!("expected Stdio variant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_spec_resolves_bare_command_to_absolute() {
+        // Bare command names get resolved via PATH so the resulting payload
+        // satisfies the ACP "command MUST be absolute" requirement. We use
+        // `cargo` because the test process must have it on PATH.
+        let spec = serde_json::json!({
+            "type": "stdio",
+            "command": "cargo",
+        });
+        let server =
+            canonical_spec_to_mcp_server("x", &spec).expect("bare command should resolve");
+        match server {
+            McpServer::Stdio(s) => assert!(
+                s.command.is_absolute(),
+                "expected absolute path, got {}",
+                s.command.display()
+            ),
+            other => panic!("expected Stdio variant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_spec_to_mcp_server_http_with_headers() {
+        let spec = serde_json::json!({
+            "type": "http",
+            "url": "https://example.com/mcp",
+            "headers": {"Authorization": "Bearer token"},
+        });
+        let server = canonical_spec_to_mcp_server("remote", &spec).expect("http spec should map");
+        match server {
+            McpServer::Http(s) => {
+                assert_eq!(s.url, "https://example.com/mcp");
+                assert_eq!(s.headers.len(), 1);
+                assert_eq!(s.headers[0].name, "Authorization");
+            }
+            other => panic!("expected Http variant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_spec_to_mcp_server_rejects_unknown_type() {
+        let spec = serde_json::json!({"type": "websocket", "url": "wss://x"});
+        assert!(canonical_spec_to_mcp_server("x", &spec).is_err());
+    }
+
+    #[test]
+    fn stdio_server_serializes_to_acp_wire_format() {
+        // Replicates the Figma MCP entry shipped to the agent and asserts the
+        // exact JSON shape claude-agent-acp expects (no `type` tag for stdio,
+        // env as [{name, value}] array, command as a string path).
+        let spec = serde_json::json!({
+            "type": "stdio",
+            "command": "/usr/local/bin/npx",
+            "args": ["-y", "@mcp_hub_org/cli@latest", "run", "figma-developer-mcp"],
+        });
+        let server =
+            canonical_spec_to_mcp_server("figma", &spec).expect("stdio spec should map");
+        let json = serde_json::to_value(&server).expect("server should serialize");
+        assert_eq!(json["name"], "figma");
+        assert_eq!(json["command"], "/usr/local/bin/npx");
+        assert_eq!(json["args"][0], "-y");
+        assert_eq!(json["args"][1], "@mcp_hub_org/cli@latest");
+        assert!(
+            json.get("type").is_none(),
+            "stdio variant must serialize without a `type` tag (claude-agent-acp \
+             treats absence-of-type as stdio); got {json:#?}"
+        );
     }
 
     // ─── ToolCallOutputCache ────────────────────────────────────────────

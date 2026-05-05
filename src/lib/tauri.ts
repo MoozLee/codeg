@@ -136,6 +136,7 @@ export async function acpCancel(connectionId: string): Promise<void> {
 export interface ForkResult {
   forkedSessionId: string
   originalSessionId: string
+  siblingConversationId: number
 }
 
 export async function acpFork(connectionId: string): Promise<ForkResult> {
@@ -948,16 +949,6 @@ export async function updateConversationTitle(
   title: string
 ): Promise<void> {
   return invoke("update_conversation_title", { conversationId, title })
-}
-
-export async function updateConversationExternalId(
-  conversationId: number,
-  externalId: string
-): Promise<void> {
-  return invoke("update_conversation_external_id", {
-    conversationId,
-    externalId,
-  })
 }
 
 export async function deleteConversation(

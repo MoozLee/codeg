@@ -430,7 +430,10 @@
       "saveSuccess": "保存しました",
       "saveFailed": "保存に失敗しました: {message}",
       "installed": "{name} をインストールしました",
-      "installFailed": "インストールに失敗しました: {message}"
+      "installFailed": "インストールに失敗しました: {message}",
+      "serverIdRequired": "Server ID は必須です",
+      "serverIdExists": "Server ID \"{id}\" は既に存在します。既存の項目を編集するか、別の名前を選択してください。",
+      "created": "MCP を作成しました"
     },
     "installDialog": {
       "title": "MCPインストールの確認",
@@ -452,7 +455,11 @@
       "viewDetails": "詳細を見る",
       "save": "保存",
       "saving": "保存中",
-      "install": "インストール"
+      "install": "インストール",
+      "refresh": "更新",
+      "newMcp": "新規 MCP",
+      "create": "作成",
+      "creating": "作成中..."
     },
     "tabs": {
       "local": "ローカル MCP",
@@ -464,7 +471,11 @@
       "empty": "ローカルMCPが見つかりません。",
       "description": "ローカルMCP設定は直接編集して保存できます。",
       "enabledApps": "有効なアプリ",
-      "configJson": "MCP設定 (JSON)"
+      "configJson": "MCP設定 (JSON)",
+      "draftTitle": "新規 MCP",
+      "draftDescription": "Server ID と設定を入力してローカル MCP サーバーを作成します。",
+      "serverIdLabel": "Server ID",
+      "serverIdPlaceholder": "Server ID（例：my-mcp）"
     },
     "market": {
       "selectMarketplace": "マーケットプレイスを選択",

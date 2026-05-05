@@ -430,7 +430,10 @@
       "saveSuccess": "تم الحفظ",
       "saveFailed": "فشل الحفظ: {message}",
       "installed": "تم تثبيت {name}",
-      "installFailed": "فشل التثبيت: {message}"
+      "installFailed": "فشل التثبيت: {message}",
+      "serverIdRequired": "معرّف الخادم مطلوب",
+      "serverIdExists": "معرّف الخادم \"{id}\" موجود بالفعل. عدّل العنصر الحالي أو اختر اسماً آخر.",
+      "created": "تم إنشاء MCP"
     },
     "installDialog": {
       "title": "تأكيد تثبيت MCP",
@@ -452,7 +455,11 @@
       "viewDetails": "عرض التفاصيل",
       "save": "حفظ",
       "saving": "جارٍ الحفظ",
-      "install": "تثبيت"
+      "install": "تثبيت",
+      "refresh": "تحديث",
+      "newMcp": "MCP جديد",
+      "create": "إنشاء",
+      "creating": "جارٍ الإنشاء..."
     },
     "tabs": {
       "local": "MCP المحلي",
@@ -464,7 +471,11 @@
       "empty": "لم يتم اكتشاف MCP محلي.",
       "description": "يمكن تعديل إعداد MCP المحلي وحفظه مباشرة.",
       "enabledApps": "التطبيقات المفعلة",
-      "configJson": "إعداد MCP (JSON)"
+      "configJson": "إعداد MCP (JSON)",
+      "draftTitle": "MCP جديد",
+      "draftDescription": "أدخل معرّف الخادم والإعدادات لإنشاء خادم MCP محلي.",
+      "serverIdLabel": "معرّف الخادم",
+      "serverIdPlaceholder": "معرّف الخادم (مثل: my-mcp)"
     },
     "market": {
       "selectMarketplace": "اختر السوق",

@@ -430,7 +430,10 @@
       "saveSuccess": "儲存成功",
       "saveFailed": "儲存失敗：{message}",
       "installed": "已安裝 {name}",
-      "installFailed": "安裝失敗：{message}"
+      "installFailed": "安裝失敗：{message}",
+      "serverIdRequired": "Server ID 不能為空",
+      "serverIdExists": "Server ID \"{id}\" 已存在，請編輯現有項或更換名稱",
+      "created": "MCP 已建立"
     },
     "installDialog": {
       "title": "確認安裝 MCP",
@@ -452,7 +455,11 @@
       "viewDetails": "查看詳情",
       "save": "儲存",
       "saving": "儲存中",
-      "install": "安裝"
+      "install": "安裝",
+      "refresh": "重新整理",
+      "newMcp": "新建 MCP",
+      "create": "建立",
+      "creating": "建立中..."
     },
     "tabs": {
       "local": "本地 MCP",
@@ -464,7 +471,11 @@
       "empty": "目前未檢測到本地 MCP。",
       "description": "本地 MCP 配置可直接編輯並儲存。",
       "enabledApps": "啟用應用",
-      "configJson": "MCP 配置(JSON)"
+      "configJson": "MCP 配置(JSON)",
+      "draftTitle": "新建 MCP",
+      "draftDescription": "填寫 Server ID 與設定以建立本地 MCP 伺服器。",
+      "serverIdLabel": "Server ID",
+      "serverIdPlaceholder": "Server ID（例如：my-mcp）"
     },
     "market": {
       "selectMarketplace": "選擇市場",

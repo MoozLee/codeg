@@ -356,7 +356,7 @@ pub async fn acp_fork(
 ) -> Result<Json<ForkResultInfo>, AppCommandError> {
     let manager = &state.connection_manager;
     let result = manager
-        .fork_session(&params.connection_id)
+        .fork_session(&state.db, &params.connection_id)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(result))

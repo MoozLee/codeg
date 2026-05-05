@@ -430,7 +430,10 @@
       "saveSuccess": "저장됨",
       "saveFailed": "저장 실패: {message}",
       "installed": "{name} 설치됨",
-      "installFailed": "설치 실패: {message}"
+      "installFailed": "설치 실패: {message}",
+      "serverIdRequired": "Server ID는 필수입니다",
+      "serverIdExists": "Server ID \"{id}\"이(가) 이미 존재합니다. 기존 항목을 편집하거나 다른 이름을 사용하세요.",
+      "created": "MCP가 생성되었습니다"
     },
     "installDialog": {
       "title": "MCP 설치 확인",
@@ -452,7 +455,11 @@
       "viewDetails": "상세 보기",
       "save": "저장",
       "saving": "저장 중",
-      "install": "설치"
+      "install": "설치",
+      "refresh": "새로고침",
+      "newMcp": "새 MCP",
+      "create": "생성",
+      "creating": "생성 중..."
     },
     "tabs": {
       "local": "로컬 MCP",
@@ -464,7 +471,11 @@
       "empty": "감지된 로컬 MCP가 없습니다.",
       "description": "로컬 MCP 구성은 직접 수정하고 저장할 수 있습니다.",
       "enabledApps": "활성화된 앱",
-      "configJson": "MCP 구성 (JSON)"
+      "configJson": "MCP 구성 (JSON)",
+      "draftTitle": "새 MCP",
+      "draftDescription": "Server ID와 설정을 입력하여 로컬 MCP 서버를 생성합니다.",
+      "serverIdLabel": "Server ID",
+      "serverIdPlaceholder": "Server ID (예: my-mcp)"
     },
     "market": {
       "selectMarketplace": "마켓플레이스 선택",

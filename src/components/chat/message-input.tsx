@@ -448,6 +448,24 @@ export function MessageInput({
     textRef.current = text
   }, [text])
 
+  // `field-sizing-content` 触发的尺寸调整发生在浏览器布局阶段，原生 caret-
+  // into-view 滚动赶不上，导致光标停在末尾时新行被裁在可视区外。用 rAF 等
+  // 到本帧所有同步 `setSelectionRange` 调用之后再判断光标位置——程序化插入
+  // 路径（换行快捷键、快捷消息、斜杠命令等）都先 `setText` 再 rAF 设光标，
+  // 这里同样走 rAF 才能保证光标已经落到末尾。
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const id = requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      if ((el.selectionStart ?? 0) >= el.value.length) {
+        el.scrollTop = el.scrollHeight
+      }
+    })
+    return () => cancelAnimationFrame(id)
+  }, [text])
+
   useEffect(() => {
     disabledRef.current = disabled
   }, [disabled])

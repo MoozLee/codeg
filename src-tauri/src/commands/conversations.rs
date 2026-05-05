@@ -471,18 +471,6 @@ pub async fn update_conversation_title(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn update_conversation_external_id(
-    db: tauri::State<'_, AppDatabase>,
-    conversation_id: i32,
-    external_id: String,
-) -> Result<(), AppCommandError> {
-    conversation_service::update_external_id(&db.conn, conversation_id, external_id)
-        .await
-        .map_err(AppCommandError::from)
-}
-
-#[cfg(feature = "tauri-runtime")]
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn delete_conversation(
     db: tauri::State<'_, AppDatabase>,
     conversation_id: i32,

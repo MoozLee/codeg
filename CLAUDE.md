@@ -81,20 +81,6 @@ cargo build
 服务器模式：前端 `fetch()` → Axum HTTP API → 同一业务逻辑 → 返回 JSON
 实时通信：后端事件 → EventEmitter（Tauri 事件 / WebSocket 广播）→ 前端
 
-**事件信封**：所有 ACP 流式事件通过 `EventEnvelope { seq, connection_id, payload: AcpEvent }` 发出。`#[serde(flatten)]` 让 JSON 保持平铺：`{ seq, connection_id, type, ...变体字段 }`。`seq` 是单调递增序号（当前阶段占位 `0`，后续阶段接入 `SessionState` 后严格递增），用于前端做 snapshot 与事件流的去重对账。后端 emit 统一通过 `web/event_bridge.rs::emit_acp` 辅助函数。
-
-**会话状态（后端权威）**：每个 `AgentConnection` 持有 `Arc<RwLock<SessionState>>`，其中累积当前 turn 的 `live_message`、in-flight `active_tool_calls`、待处理 `pending_permission`、协商出的 modes/usage 等。事件发射统一通过 `web/event_bridge.rs::emit_with_state`：先 `apply_event` 写状态、`event_seq += 1`、再 emit envelope，写状态与发事件在同一个 critical section 完成。`SessionState::to_snapshot()` 输出 `LiveSessionSnapshot`——Phase 2 的 snapshot 端点直接消费此结构。
-
-**Snapshot 端点（Phase 2）**：`acp_get_session_snapshot(connection_id)` 与 `acp_get_session_snapshot_by_conversation(conversation_id)` 返回当前 `LiveSessionSnapshot`。前端可在打开会话面板 / 浏览器刷新后调用一次拿到当前 turn 的 in-flight 状态（live_message、active_tool_calls、pending_permission、modes、usage 等），随后用 `seq` 作为锚点对 `acp://event` 流去重——丢弃 `seq <= snapshot.event_seq` 的事件即可与 live 流对齐。`ConnectionManager::get_state` 与 `find_connection_by_conversation_id` 是这两条路径的查找入口。
-
-**前端 Snapshot 消费（Phase 3b）**：连接建立后（`connect` action 在 `dispatch CONNECTION_CREATED` 之后）非阻塞调用 `acpGetSessionSnapshot(connectionId)`，结果通过 `denormalizeSnapshot` 转换为 `SnapshotPatch` 后 dispatch `HYDRATE_FROM_SNAPSHOT`。`ConnectionState.lastAppliedSeq` 跟踪已应用 envelope 的最高 `seq`：HYDRATE 把它推到 `snapshot.event_seq`，主 `acp://event` 监听器以及 buffered-event replay 用 `if (envelope.seq <= lastAppliedSeq) return` 去重，每次成功 apply 后 dispatch `EVENT_APPLIED` 推进 `lastAppliedSeq`。HYDRATE 自身也带 race guard：若 `snapshot.event_seq <= current.lastAppliedSeq`（snapshot 在 in-flight 事件之后到达），跳过合并以免回退状态。`denormalizeSnapshot` 解析 wire 端的 `tool_call_ref` 间接引用为本地 `LiveContentBlock` 的 inline `tool_call` 块；ToolCallOutput 折叠为单个 `raw_output_chunk`（chunk 历史不可恢复，由后续 update 事件补全）。
-
-**Phase 3c-3 保真补强**：后端 `apply_event` 现在会在 `ToolCall` / `ToolCallUpdate` 到达时向 `live_message.content` 插入 `LiveContentBlock::ToolCallRef { tool_call_id }`（按 id 幂等），在 `PlanUpdate` 到达时插入 `LiveContentBlock::Plan { entries }`（末尾 replace-then-append），两条路径都会在 `live_message` 缺失时按 text/thinking 的方式 lazy 创建。`ToolCallState` 同步带上 `locations` 与 `meta` 字段，遵循既有的 partial-update 保留规则（`Some(_)` 覆盖、`None` no-op）。前端 `denormalizeSnapshot` 中 3b 写好的 `tool_call_ref` 解析路径在此阶段才真正起作用，并把 `ToolCallInfo.locations` / `meta` 从 wire 透传而不再强置 `null`；`raw_output_chunks` 仍由 `toolStateToInfo` 折叠为单个 chunk，后续 `TOOL_CALL_UPDATE` 会逐 chunk 补齐——这是已知限制而非回退（后端不存 chunk 历史）。
-
-**ConversationLinked 事件**：`acp_prompt` 首次调用时后端创建 conversation 行并发出 `{ type: "conversation_linked", conversation_id, folder_id }`，前端不需要再轮询 DB 查 conversation_id。Phase 3c-1 起 `send_prompt_linked` 的 backend-creates 分支要求调用方必须传 `folder_id`，未传时直接返回 `AcpError::protocol("folder_id required for new conversation row")`，不再从 `working_dir` 自动 `find-or-create`。链路汇总在 `ConnectionManager::send_prompt_linked`：snapshot 短锁 → 检查 `state.conversation_id` → 若未链接则创建 row + 通过 `emit_with_state` 发出 `ConversationLinked` → 转交 `send_prompt`。chat_channel 路径继续走 `send_prompt`（自行管理 conversation 行），不受此约束影响。
-
-**LifecycleSubscriber**：启动时 spawn 的 Tokio 任务（`acp/lifecycle.rs::lifecycle_subscriber_task`），订阅 `acp://event` 全局 broadcaster，把跨连接的 DB 写动作（目前是 `SessionStarted` → 持久化 `external_id` 到 conversation 行）从 `emit_with_state` 热路径解耦。`lifecycle_subscriber_task` 同步调用 `subscribe()` 后返回 `impl Future`，由调用方决定 spawn 方式：桌面模式（Tauri `setup` 在 tokio 运行时之外）走 `tauri::async_runtime::spawn`，服务器模式走 `tokio::spawn`。subscribe 发生在 future 生成时而非首次 poll，确保事件不丢失。
-
 ### 条件编译约定
 
 - `#[cfg(feature = "tauri-runtime")]` — 仅桌面模式编译（Tauri 窗口、通知、`tauri::State` 参数等）

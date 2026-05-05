@@ -5,12 +5,16 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
+};
+
 use crate::acp::connection::{spawn_agent_connection, AgentConnection, ConnectionCommand};
 use crate::acp::error::AcpError;
 use crate::acp::types::{
     AcpEvent, ConnectionInfo, ConnectionStatus, ForkResultInfo, PromptInputBlock,
 };
-use crate::db::entities::conversation::ConversationStatus;
+use crate::db::entities::conversation::{self, ConversationStatus};
 use crate::db::service::conversation_service;
 use crate::db::AppDatabase;
 use crate::models::agent::AgentType;
@@ -511,6 +515,30 @@ impl ConnectionManager {
                     ));
                 }
             }
+
+            // UI new-conversation path: SessionStarted applied state.external_id
+            // back during acp_connect, but conversation_id was None then so the
+            // lifecycle subscriber's SessionStarted handler skipped the DB write.
+            // Now that we just linked the row in the same prompt_lock critical
+            // section, snapshot external_id and persist it synchronously — no
+            // dependence on broadcaster eventual consistency. The chat_channel
+            // reverse-order path (link before SessionStarted) is unaffected and
+            // continues to be handled by the lifecycle subscriber.
+            let (cid_opt, eid_opt) = {
+                let s = state_arc.read().await;
+                (s.conversation_id, s.external_id.clone())
+            };
+            if let (Some(cid), Some(eid)) = (cid_opt, eid_opt) {
+                conversation_service::update_external_id(&db.conn, cid, eid)
+                    .await
+                    .map_err(|e| AcpError::protocol(e.to_string()))?;
+            } else if cid_opt.is_some() {
+                eprintln!(
+                    "[manager] send_prompt_linked: conversation linked but \
+                     external_id not yet on state (conn={conn_id}); lifecycle \
+                     subscriber will catch up when SessionStarted arrives"
+                );
+            }
         }
 
         // Centralized status transition: every prompt send flips the
@@ -655,22 +683,126 @@ impl ConnectionManager {
             .map_err(|_| AcpError::ProcessExited)
     }
 
-    pub async fn fork_session(&self, conn_id: &str) -> Result<ForkResultInfo, AcpError> {
-        let cmd_tx = {
+    /// Fork the agent's session and persist the resulting two-row layout in
+    /// one backend call: the current row gets re-pointed at S2 (the forked
+    /// session) with a `[Fork]` title prefix, and a freshly-created sibling
+    /// row preserves the pre-fork (S1) history at `PendingReview`. Frontend
+    /// no longer touches `external_id` or fork-related row creation —
+    /// the wire `ForkResultInfo` carries `sibling_conversation_id` for tab/UI
+    /// reconciliation.
+    pub async fn fork_session(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+    ) -> Result<ForkResultInfo, AcpError> {
+        let (state_arc, cmd_tx) = {
             let connections = self.connections.lock().await;
             let conn = connections
                 .get(conn_id)
                 .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
-            conn.cmd_tx.clone()
+            (conn.state.clone(), conn.cmd_tx.clone())
         };
+
+        // Fork requires a linked conversation row — the sibling we're about
+        // to create exists to preserve THIS row's pre-fork history. Without
+        // a current row, fork would either orphan S1 or violate the
+        // no-pre-prompt-row invariant.
+        let conversation_id = state_arc.read().await.conversation_id.ok_or_else(|| {
+            AcpError::protocol("fork_session requires a linked conversation row".to_string())
+        })?;
+
+        // Protocol-only round trip — no DB writes inside the connection loop.
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         cmd_tx
             .send(ConnectionCommand::Fork { reply: reply_tx })
             .await
             .map_err(|_| AcpError::ProcessExited)?;
-        reply_rx
+        let protocol_result = reply_rx
             .await
-            .map_err(|_| AcpError::protocol("Fork reply channel closed".to_string()))?
+            .map_err(|_| AcpError::protocol("Fork reply channel closed".to_string()))??;
+
+        let forked_session_id = protocol_result.forked_session_id;
+        let original_session_id = protocol_result.original_session_id;
+
+        // Persist the fork outcome in one transaction:
+        //   UPDATE current  (title + external_id → S2)
+        //   INSERT sibling  (full row pre-set: external_id=S1, status=PendingReview)
+        // Atomic so a mid-sequence failure can't leak: if INSERT fails we don't
+        // re-point the current row at S2 (it stays bound to S1; the lifecycle
+        // subscriber's eventual SessionStarted{S2} write would still occur, but
+        // the user-visible row layout stays consistent until then). If UPDATE
+        // fails we never insert a sibling — no orphan S1 row.
+        let forked_for_tx = forked_session_id.clone();
+        let original_for_tx = original_session_id.clone();
+        let sibling_id = db
+            .conn
+            .transaction::<_, i32, sea_orm::DbErr>(|txn| {
+                Box::pin(async move {
+                    let current = conversation::Entity::find_by_id(conversation_id)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| {
+                            sea_orm::DbErr::Custom(format!(
+                                "conversation {conversation_id} not found"
+                            ))
+                        })?;
+
+                    // Strip any `[Fork]` prefix tolerantly (matches the prior
+                    // frontend regex `/^\[Fork]\s*/g` behaviour for both spaced
+                    // and no-space variants). None title stays None on both rows.
+                    let clean_title: Option<String> = current.title.as_ref().map(|t| {
+                        t.strip_prefix("[Fork]")
+                            .map(str::trim_start)
+                            .unwrap_or(t.as_str())
+                            .to_string()
+                    });
+
+                    let folder_id = current.folder_id;
+                    let agent_type_str = current.agent_type.clone();
+                    let git_branch = current.git_branch.clone();
+                    let now = chrono::Utc::now();
+
+                    // UPDATE current row → S2. Writing external_id explicitly
+                    // here closes the race against `refreshConversations()`
+                    // after this fn returns; the lifecycle subscriber's later
+                    // SessionStarted{S2} write is an idempotent no-op.
+                    let mut active: conversation::ActiveModel = current.into();
+                    if let Some(ref clean) = clean_title {
+                        active.title = Set(Some(format!("[Fork] {clean}")));
+                    }
+                    active.external_id = Set(Some(forked_for_tx));
+                    active.updated_at = Set(now);
+                    active.update(txn).await?;
+
+                    // INSERT sibling row preserving pre-fork (S1) history.
+                    // PendingReview because no live agent is attached to S1.
+                    let sibling = conversation::ActiveModel {
+                        id: NotSet,
+                        folder_id: Set(folder_id),
+                        title: Set(clean_title),
+                        agent_type: Set(agent_type_str),
+                        status: Set(ConversationStatus::PendingReview),
+                        model: Set(None),
+                        git_branch: Set(git_branch),
+                        external_id: Set(Some(original_for_tx)),
+                        parent_id: Set(None),
+                        message_count: Set(0),
+                        created_at: Set(now),
+                        updated_at: Set(now),
+                        deleted_at: Set(None),
+                    };
+                    let inserted = sibling.insert(txn).await?;
+                    Ok(inserted.id)
+                })
+            })
+            .await
+            .map_err(|e| AcpError::protocol(e.to_string()))?;
+
+        Ok(ForkResultInfo {
+            forked_session_id,
+            original_session_id,
+            sibling_conversation_id: sibling_id,
+        })
     }
 
     pub async fn disconnect(&self, conn_id: &str) -> Result<(), AcpError> {
@@ -1810,5 +1942,196 @@ mod tests {
             .unwrap()
             .expect("conversation row exists");
         assert_eq!(row.status, ConversationStatus::Cancelled);
+    }
+
+    // ---------- fork_session ----------
+
+    /// Build a connection whose cmd_rx is drained by a spawned task that
+    /// fakes the protocol-level fork reply. Returns the manager so the test
+    /// can call `fork_session`. The fake reply task lives until it processes
+    /// one Fork command, then exits.
+    async fn manager_with_fake_fork(
+        conn_id: &str,
+        conversation_id: i32,
+        forked_session_id: &str,
+        original_session_id: &str,
+    ) -> (Arc<ConnectionManager>, tokio::task::JoinHandle<()>) {
+        use crate::acp::connection::ConnectionCommand;
+        let (tx, mut rx) = mpsc::channel::<ConnectionCommand>(4);
+        let mut state = SessionState::new(
+            conn_id.to_string(),
+            crate::models::agent::AgentType::ClaudeCode,
+            None,
+            "test-window".to_string(),
+            None,
+        );
+        state.conversation_id = Some(conversation_id);
+        state.status = ConnectionStatus::Connected;
+        let conn = AgentConnection {
+            id: conn_id.to_string(),
+            agent_type: crate::models::agent::AgentType::ClaudeCode,
+            status: ConnectionStatus::Connected,
+            owner_window_label: "test-window".to_string(),
+            cmd_tx: tx,
+            state: Arc::new(RwLock::new(state)),
+            emitter: EventEmitter::Noop,
+            prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+        };
+        let mgr = Arc::new(ConnectionManager::new());
+        {
+            let mut map = mgr.connections.lock().await;
+            map.insert(conn_id.to_string(), conn);
+        }
+
+        let forked = forked_session_id.to_string();
+        let original = original_session_id.to_string();
+        let join = tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                if let ConnectionCommand::Fork { reply } = cmd {
+                    let _ = reply.send(Ok(crate::acp::types::ForkProtocolResult {
+                        forked_session_id: forked.clone(),
+                        original_session_id: original.clone(),
+                    }));
+                    return;
+                }
+            }
+        });
+        (mgr, join)
+    }
+
+    #[tokio::test]
+    async fn fork_session_writes_atomic_two_row_layout() {
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-happy").await;
+
+        // Pre-existing row: stands in for the conversation about to be forked.
+        // Title gets a `[Fork] ` prefix; sibling row inherits the clean title.
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Original Topic".into()),
+            Some("feature/x".into()),
+        )
+        .await
+        .unwrap();
+        // External_id starts as S1 — manager.fork_session will swap to S2.
+        conversation_service::update_external_id(&db.conn, pre.id, "session-S1".into())
+            .await
+            .unwrap();
+
+        let (mgr, join) = manager_with_fake_fork("c-fork", pre.id, "session-S2", "session-S1").await;
+        let result = mgr
+            .fork_session(&db, "c-fork")
+            .await
+            .expect("fork_session should succeed");
+        let _ = join.await;
+
+        assert_eq!(result.forked_session_id, "session-S2");
+        assert_eq!(result.original_session_id, "session-S1");
+        let sibling_id = result.sibling_conversation_id;
+        assert_ne!(sibling_id, pre.id, "sibling row must be a fresh row");
+
+        // Current row: external_id=S2, title prefixed.
+        let current = conversation_service::get_by_id(&db.conn, pre.id).await.unwrap();
+        assert_eq!(current.external_id.as_deref(), Some("session-S2"));
+        assert_eq!(current.title.as_deref(), Some("[Fork] Original Topic"));
+
+        // Sibling row: external_id=S1, clean title, PendingReview, same folder/git_branch.
+        let sibling = conversation_service::get_by_id(&db.conn, sibling_id).await.unwrap();
+        assert_eq!(sibling.external_id.as_deref(), Some("session-S1"));
+        assert_eq!(sibling.title.as_deref(), Some("Original Topic"));
+        assert_eq!(sibling.status, "pending_review");
+        assert_eq!(sibling.folder_id, folder_id);
+        assert_eq!(sibling.git_branch.as_deref(), Some("feature/x"));
+    }
+
+    #[tokio::test]
+    async fn fork_session_strips_existing_fork_prefix_without_stacking() {
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-restack").await;
+
+        // Title already has `[Fork] ` — re-fork must not produce `[Fork] [Fork] ...`.
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("[Fork] Topic".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        let (mgr, join) =
+            manager_with_fake_fork("c-restack", pre.id, "session-S2", "session-S1").await;
+        let result = mgr.fork_session(&db, "c-restack").await.unwrap();
+        let _ = join.await;
+
+        let current = conversation_service::get_by_id(&db.conn, pre.id).await.unwrap();
+        assert_eq!(
+            current.title.as_deref(),
+            Some("[Fork] Topic"),
+            "should re-stack as single [Fork] prefix, not [Fork] [Fork] ..."
+        );
+        let sibling = conversation_service::get_by_id(&db.conn, result.sibling_conversation_id)
+            .await
+            .unwrap();
+        assert_eq!(sibling.title.as_deref(), Some("Topic"));
+    }
+
+    #[tokio::test]
+    async fn fork_session_strips_no_space_fork_prefix() {
+        // Defensive: a title produced outside the normal flow could lack the
+        // space (e.g. external import). The frontend regex `/^\[Fork]\s*/g`
+        // tolerated this; the backend strip must too, otherwise re-fork would
+        // produce `[Fork] [Fork]xxx`.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-no-space").await;
+
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("[Fork]NoSpaceTitle".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        let (mgr, join) =
+            manager_with_fake_fork("c-nosp", pre.id, "session-S2", "session-S1").await;
+        mgr.fork_session(&db, "c-nosp").await.unwrap();
+        let _ = join.await;
+
+        let current = conversation_service::get_by_id(&db.conn, pre.id).await.unwrap();
+        assert_eq!(
+            current.title.as_deref(),
+            Some("[Fork] NoSpaceTitle"),
+            "no-space prefix must be tolerantly stripped before re-stacking"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_rejects_unbound_connection() {
+        // Without a linked conversation_id the sibling row would orphan S1
+        // history (no row to point at it). fork_session must refuse early —
+        // BEFORE sending the Fork command to the agent, so we don't burn an
+        // ACP round-trip on a request we can't persist.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        {
+            let mut map = mgr.connections.lock().await;
+            map.insert("c-unbound".into(), fake_connection("c-unbound", None));
+        }
+        let err = mgr
+            .fork_session(&db, "c-unbound")
+            .await
+            .expect_err("unbound fork must error");
+        assert!(
+            err.to_string().contains("linked conversation row"),
+            "error should mention missing linkage, got: {err}"
+        );
     }
 }

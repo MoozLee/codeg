@@ -48,7 +48,13 @@ export function SessionConfigSelector({
           {currentLabel}
         </span>
       </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="max-h-[60vh] min-w-72 max-w-xs overflow-y-auto">
+      <DropdownMenuSubContent
+        className="min-w-72 max-w-xs overflow-y-auto"
+        style={{
+          maxHeight:
+            "min(60vh, var(--radix-dropdown-menu-content-available-height))",
+        }}
+      >
         <DropdownMenuRadioGroup
           value={option.kind.current_value}
           onValueChange={(value) => onSelect(option.id, value)}
@@ -116,9 +122,11 @@ export function InlineSessionConfigSelector({
       <DropdownMenuContent
         side="top"
         align="start"
-        className="max-h-[60vh] min-w-72 overflow-y-auto"
+        className="min-w-72 overflow-y-auto"
         style={{
           maxWidth: "min(20rem, calc(100vw - 1rem))",
+          maxHeight:
+            "min(60vh, var(--radix-dropdown-menu-content-available-height))",
         }}
       >
         <DropdownMenuRadioGroup

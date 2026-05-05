@@ -430,7 +430,10 @@
       "saveSuccess": "Guardado",
       "saveFailed": "Error al guardar: {message}",
       "installed": "{name} instalado",
-      "installFailed": "Error al instalar: {message}"
+      "installFailed": "Error al instalar: {message}",
+      "serverIdRequired": "Server ID es obligatorio",
+      "serverIdExists": "El Server ID \"{id}\" ya existe. Edita la entrada existente o usa un nombre diferente.",
+      "created": "MCP creado"
     },
     "installDialog": {
       "title": "Confirmar instalación de MCP",
@@ -452,7 +455,11 @@
       "viewDetails": "Ver detalles",
       "save": "Guardar",
       "saving": "Guardando",
-      "install": "Instalar"
+      "install": "Instalar",
+      "refresh": "Actualizar",
+      "newMcp": "Nuevo MCP",
+      "create": "Crear",
+      "creating": "Creando..."
     },
     "tabs": {
       "local": "MCP local",
@@ -464,7 +471,11 @@
       "empty": "No se detectó MCP local.",
       "description": "La configuración de MCP local se puede editar y guardar directamente.",
       "enabledApps": "Apps habilitadas",
-      "configJson": "Configuración MCP (JSON)"
+      "configJson": "Configuración MCP (JSON)",
+      "draftTitle": "Nuevo MCP",
+      "draftDescription": "Indica un Server ID y la configuración para crear un servidor MCP local.",
+      "serverIdLabel": "Server ID",
+      "serverIdPlaceholder": "Server ID (p. ej. my-mcp)"
     },
     "market": {
       "selectMarketplace": "Seleccionar marketplace",

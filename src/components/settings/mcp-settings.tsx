@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Globe,
   Loader2,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -61,7 +62,18 @@ type LeftTab = "local" | "market"
 type Selection =
   | { kind: "local"; id: string }
   | { kind: "market"; id: string }
+  | { kind: "draft" }
   | null
+
+const DEFAULT_DRAFT_SPEC = JSON.stringify(
+  {
+    type: "stdio",
+    command: "",
+    args: [],
+  },
+  null,
+  2
+)
 
 type McpTranslator = (
   key: string,
@@ -311,6 +323,12 @@ export function McpSettings() {
 
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
   const [installAppsDraft, setInstallAppsDraft] = useState<
+    Record<McpAppType, boolean>
+  >(appsToDraft(APP_OPTIONS.map((x) => x.value)))
+
+  const [draftServerId, setDraftServerId] = useState("")
+  const [draftSpecText, setDraftSpecText] = useState(DEFAULT_DRAFT_SPEC)
+  const [draftAppsDraft, setDraftAppsDraft] = useState<
     Record<McpAppType, boolean>
   >(appsToDraft(APP_OPTIONS.map((x) => x.value)))
 
@@ -571,6 +589,79 @@ export function McpSettings() {
     mcpT,
     refreshLocalServers,
     selectedLocal,
+    t,
+  ])
+
+  const handleCreateDraft = useCallback(() => {
+    setLeftTab("local")
+    setSelection({ kind: "draft" })
+    setDraftServerId("")
+    setDraftSpecText(DEFAULT_DRAFT_SPEC)
+    setDraftAppsDraft(appsToDraft(APP_OPTIONS.map((item) => item.value)))
+  }, [])
+
+  const saveDraft = useCallback(async () => {
+    const trimmedId = draftServerId.trim()
+    if (!trimmedId) {
+      toast.error(t("toasts.serverIdRequired"))
+      return
+    }
+
+    if (installedServers.some((server) => server.id === trimmedId)) {
+      toast.error(t("toasts.serverIdExists", { id: trimmedId }))
+      return
+    }
+
+    let parsedSpec: Record<string, unknown>
+    try {
+      parsedSpec = parseJsonObject(
+        draftSpecText,
+        t("jsonNames.localConfig"),
+        mcpT
+      )
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(message)
+      return
+    }
+
+    const apps = normalizeApps(selectedAppsFromDraft(draftAppsDraft))
+    if (apps.length === 0) {
+      toast.error(t("toasts.selectAtLeastOneApp"))
+      return
+    }
+
+    const action = `create:${trimmedId}`
+    setRunningAction(action)
+
+    try {
+      await mcpUpsertLocalServer({
+        serverId: trimmedId,
+        spec: parsedSpec,
+        apps,
+      })
+      const next = await refreshLocalServers()
+      toast.success(t("toasts.created"))
+
+      const created = next.find((item) => item.id === trimmedId)
+      if (created) {
+        setSelection({ kind: "local", id: created.id })
+      } else {
+        setSelection(null)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(t("toasts.saveFailed", { message }))
+    } finally {
+      setRunningAction(null)
+    }
+  }, [
+    draftAppsDraft,
+    draftServerId,
+    draftSpecText,
+    installedServers,
+    mcpT,
+    refreshLocalServers,
     t,
   ])
 
@@ -909,24 +1000,16 @@ export function McpSettings() {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="local" className="h-full min-h-0 pt-2">
-              <div className="flex items-center gap-2 pb-2">
+            <TabsContent
+              value="local"
+              className="h-full min-h-0 pt-2 flex flex-col"
+            >
+              <div className="pb-2">
                 <Input
                   value={localFilter}
                   onChange={(event) => setLocalFilter(event.target.value)}
                   placeholder={t("local.filterPlaceholder")}
                 />
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={() => {
-                    refreshLocalServers().catch((err) => {
-                      console.error("[Settings] refresh local MCP failed:", err)
-                    })
-                  }}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
               </div>
 
               {loadingError ? (
@@ -935,7 +1018,7 @@ export function McpSettings() {
                 </div>
               ) : null}
 
-              <div className="h-[calc(100%-48px)] overflow-auto space-y-1">
+              <div className="flex-1 min-h-0 overflow-auto space-y-1">
                 {filteredLocalServers.length === 0 ? (
                   <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
                     {t("local.empty")}
@@ -986,6 +1069,30 @@ export function McpSettings() {
                     )
                   })
                 )}
+              </div>
+
+              <div className="border-t pt-2 mt-2 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    refreshLocalServers().catch((err) => {
+                      console.error("[Settings] refresh local MCP failed:", err)
+                    })
+                  }}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {t("actions.refresh")}
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleCreateDraft}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t("actions.newMcp")}
+                </Button>
               </div>
             </TabsContent>
 
@@ -1169,6 +1276,94 @@ export function McpSettings() {
         </section>
 
         <section className="min-h-0 rounded-xl border bg-card p-4 overflow-auto">
+          {selection?.kind === "draft" ? (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-base font-semibold">
+                  {t("local.draftTitle")}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("local.draftDescription")}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  {t("local.serverIdLabel")}
+                </div>
+                <Input
+                  value={draftServerId}
+                  onChange={(event) => setDraftServerId(event.target.value)}
+                  placeholder={t("local.serverIdPlaceholder")}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  {t("local.enabledApps")}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {APP_OPTIONS.map((app) => (
+                    <label
+                      key={app.value}
+                      className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={draftAppsDraft[app.value]}
+                        onChange={(event) => {
+                          setDraftAppsDraft((prev) => ({
+                            ...prev,
+                            [app.value]: event.target.checked,
+                          }))
+                        }}
+                      />
+                      {app.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  {t("local.configJson")}
+                </div>
+                <Textarea
+                  value={draftSpecText}
+                  onChange={(event) => setDraftSpecText(event.target.value)}
+                  className="min-h-[360px] font-mono text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setSelection(null)}
+                  disabled={Boolean(runningAction?.startsWith("create:"))}
+                >
+                  {t("actions.cancel")}
+                </Button>
+                <Button
+                  onClick={() => {
+                    saveDraft().catch((err) => {
+                      console.error("[Settings] create local MCP failed:", err)
+                    })
+                  }}
+                  disabled={Boolean(runningAction?.startsWith("create:"))}
+                >
+                  {runningAction?.startsWith("create:") ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {t("actions.creating")}
+                    </>
+                  ) : (
+                    t("actions.create")
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           {selection?.kind === "local" && selectedLocal ? (
             <div className="space-y-4">
               <div className="flex items-start justify-between gap-3">

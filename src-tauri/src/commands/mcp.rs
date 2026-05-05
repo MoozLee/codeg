@@ -535,6 +535,21 @@ fn claude_config_path() -> PathBuf {
     home_dir_or_default().join(".claude.json")
 }
 
+fn claude_settings_path() -> PathBuf {
+    home_dir_or_default().join(".claude").join("settings.json")
+}
+
+/// The marketplace suffix codeg uses when toggling user-scope Claude Code
+/// MCP servers via `enabledPlugins`. Empirically validated: `figma@local`
+/// activates a user-scope MCP, `figma@user` does not. The suffix is treated
+/// by Claude Code CLI as a free-form tag identifying the source — `local`
+/// is the conventional value for user-managed entries.
+const CLAUDE_LOCAL_PLUGIN_MARKETPLACE: &str = "local";
+
+fn claude_local_plugin_key(id: &str) -> String {
+    format!("{id}@{CLAUDE_LOCAL_PLUGIN_MARKETPLACE}")
+}
+
 fn codex_config_toml_path() -> PathBuf {
     codex_home_dir().join("config.toml")
 }
@@ -543,7 +558,7 @@ fn opencode_config_path() -> PathBuf {
     home_dir_or_default()
         .join(".config")
         .join("opencode")
-        .join("config.json")
+        .join("opencode.json")
 }
 
 fn gemini_config_path() -> PathBuf {
@@ -1016,6 +1031,8 @@ fn canonical_to_opencode_spec(spec: &Value) -> Result<Value, AppCommandError> {
         }
     }
 
+    out.insert("enabled".to_string(), Value::Bool(true));
+
     Ok(Value::Object(out))
 }
 
@@ -1354,20 +1371,27 @@ fn upsert_claude_server(id: &str, spec: &Value) -> Result<(), AppCommandError> {
         })?;
     map.insert(id.to_string(), canonical);
 
-    write_json_file(&path, &root)
+    write_json_file(&path, &root)?;
+    enable_claude_local_plugin(id)
 }
 
 fn remove_claude_server(id: &str) -> Result<bool, AppCommandError> {
     let path = claude_config_path();
     if !path.exists() {
+        // Even if `~/.claude.json` is missing, `enabledPlugins` could still
+        // have a stale entry from a prior session — clean it up regardless
+        // so the user doesn't end up with dangling activation markers.
+        disable_claude_local_plugin(id)?;
         return Ok(false);
     }
 
     let mut root = read_json_file(&path)?;
     let Some(obj) = root.as_object_mut() else {
+        disable_claude_local_plugin(id)?;
         return Ok(false);
     };
     let Some(servers) = obj.get_mut("mcpServers").and_then(Value::as_object_mut) else {
+        disable_claude_local_plugin(id)?;
         return Ok(false);
     };
 
@@ -1375,7 +1399,71 @@ fn remove_claude_server(id: &str) -> Result<bool, AppCommandError> {
     if removed {
         write_json_file(&path, &root)?;
     }
+    disable_claude_local_plugin(id)?;
     Ok(removed)
+}
+
+/// Add `<id>@local: true` to `~/.claude/settings.json.enabledPlugins`. The
+/// Claude Code CLI uses this map as a gate for activating user-scope MCP
+/// servers from `~/.claude.json.mcpServers` (a server can be defined but
+/// will not load until it appears in this list). Existing fields in the
+/// settings file (env, model, other plugin entries) are preserved.
+fn enable_claude_local_plugin(id: &str) -> Result<(), AppCommandError> {
+    let path = claude_settings_path();
+    let mut root = read_json_file(&path)?;
+    if !root.is_object() {
+        root = json!({});
+    }
+    let obj = root.as_object_mut().ok_or_else(|| {
+        mcp_configuration_invalid(format!("invalid JSON root in {}", path.display()))
+    })?;
+    if !obj
+        .get("enabledPlugins")
+        .map(Value::is_object)
+        .unwrap_or(false)
+    {
+        obj.insert("enabledPlugins".to_string(), Value::Object(Map::new()));
+    }
+    let plugins = obj
+        .get_mut("enabledPlugins")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            mcp_configuration_invalid(format!("invalid enabledPlugins in {}", path.display()))
+        })?;
+    let key = claude_local_plugin_key(id);
+    let already_true = matches!(plugins.get(&key), Some(Value::Bool(true)));
+    if already_true {
+        // Avoid an unnecessary disk write that would needlessly trip the
+        // settings-file watcher in claude-agent-acp's SettingsManager.
+        return Ok(());
+    }
+    plugins.insert(key, Value::Bool(true));
+    write_json_file(&path, &root)
+}
+
+/// Remove `<id>@local` from `~/.claude/settings.json.enabledPlugins` if
+/// present. Other entries (including any `<id>@<other-marketplace>` that
+/// the user manages manually) are intentionally left untouched.
+fn disable_claude_local_plugin(id: &str) -> Result<(), AppCommandError> {
+    let path = claude_settings_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = read_json_file(&path)?;
+    let Some(obj) = root.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(plugins) = obj
+        .get_mut("enabledPlugins")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    let key = claude_local_plugin_key(id);
+    if plugins.remove(&key).is_some() {
+        write_json_file(&path, &root)?;
+    }
+    Ok(())
 }
 
 fn read_codex_servers() -> Result<BTreeMap<String, Value>, AppCommandError> {
@@ -1924,6 +2012,20 @@ fn upsert_server_for_app(app: McpAppType, id: &str, spec: &Value) -> Result<(), 
         McpAppType::Gemini => upsert_gemini_server(id, spec),
         McpAppType::OpenClaw => upsert_openclaw_server(id, spec),
         McpAppType::Cline => upsert_cline_server(id, spec),
+    }
+}
+
+pub fn read_servers_for_agent_type(
+    agent_type: crate::models::agent::AgentType,
+) -> Result<BTreeMap<String, Value>, AppCommandError> {
+    use crate::models::agent::AgentType;
+    match agent_type {
+        AgentType::ClaudeCode => read_claude_servers(),
+        AgentType::Codex => read_codex_servers(),
+        AgentType::OpenCode => read_opencode_servers(),
+        AgentType::Gemini => read_gemini_servers(),
+        AgentType::OpenClaw => read_openclaw_servers(),
+        AgentType::Cline => read_cline_servers(),
     }
 }
 

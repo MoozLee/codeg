@@ -81,10 +81,6 @@ pub fn build_router(
             "/delete_conversation",
             post(handlers::conversations::delete_conversation),
         )
-        .route(
-            "/update_conversation_external_id",
-            post(handlers::conversations::update_conversation_external_id),
-        )
         // ─── Folders ───
         .route(
             "/load_folder_history",
