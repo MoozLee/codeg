@@ -67,6 +67,7 @@ interface MessageListViewProps {
   anchorStorageConversationId?: number
   agentType: AgentType
   connStatus?: ConnectionStatus | null
+  showPromptingState?: boolean
   isActive?: boolean
   sendSignal?: number
   sessionStats?: SessionStats | null
@@ -500,6 +501,7 @@ export function MessageListView({
   anchorStorageConversationId,
   agentType,
   connStatus,
+  showPromptingState = connStatus === "prompting",
   isActive = true,
   sendSignal = 0,
   sessionStats = null,
@@ -662,7 +664,7 @@ export function MessageListView({
     const lastPhase = timelineTurns[timelineTurns.length - 1]?.phase ?? null
     if (
       lastPhase === "optimistic" &&
-      (connStatus === "prompting" || sessionSyncState === "awaiting_persist")
+      (showPromptingState || sessionSyncState === "awaiting_persist")
     ) {
       items.push({ key: "pending-typing", kind: "typing" })
     }
@@ -672,7 +674,7 @@ export function MessageListView({
       nonStreamingAdapted: nonStreaming,
       userAnchors: anchors,
     }
-  }, [adapterText, connStatus, sessionSyncState, timelineTurns])
+  }, [adapterText, sessionSyncState, showPromptingState, timelineTurns])
 
   useEffect(
     () => () => {
@@ -786,7 +788,6 @@ export function MessageListView({
     lastPersistedAnchorIdRef.current = savedAnchorId
     if (savedAnchorId) {
       pendingScrollAnchorIdRef.current = savedAnchorId
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate restore suspension after mount-localStorage read
       setAnchorRestoreState({
         conversationId: storageConversationId,
         pending: true,
@@ -943,7 +944,6 @@ export function MessageListView({
         pendingScrollAnchorIdRef.current = null
         persistAnchorSelection(null)
         clearProgrammaticScrollLock()
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- release restore suspension once loaded detail confirms there are no persisted user anchors
         setAnchorRestoreState({
           conversationId: storageConversationId,
           pending: false,
@@ -1174,11 +1174,11 @@ export function MessageListView({
         />
         <MessageThreadScrollButton />
       </MessageThread>
-      {liveMessage && connStatus === "prompting" && (
+      {liveMessage && showPromptingState && (
         <LiveTurnStats
           message={liveMessage}
           agentType={agentType}
-          isStreaming={connStatus === "prompting"}
+          isStreaming={showPromptingState}
         />
       )}
       <AgentPlanOverlay
@@ -1186,8 +1186,9 @@ export function MessageListView({
         message={liveMessage ?? null}
         entries={historicalPlanEntries}
         planKey={historicalPlanKey}
-        defaultExpanded={connStatus === "prompting"}
-        isStreaming={connStatus === "prompting"}
+        visible={showPromptingState}
+        defaultExpanded={showPromptingState}
+        isStreaming={showPromptingState}
       />
     </div>
   )

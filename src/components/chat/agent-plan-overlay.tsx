@@ -121,8 +121,9 @@ export const AgentPlanOverlay = memo(function AgentPlanOverlay({
     [message]
   )
   const resolvedEntries = useMemo(
-    () => (liveEntries.length > 0 ? liveEntries : (entries ?? [])),
-    [liveEntries, entries]
+    () =>
+      isStreaming && liveEntries.length > 0 ? liveEntries : (entries ?? []),
+    [entries, isStreaming, liveEntries]
   )
   const hasPlan = visible && resolvedEntries.length > 0
   const fallbackPlanKey = useMemo(() => {

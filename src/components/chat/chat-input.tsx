@@ -17,6 +17,7 @@ import { MessageQueueDisplay } from "@/components/chat/message-queue-display"
 
 interface ChatInputProps {
   status: ConnectionStatus | null
+  showPromptingState?: boolean
   promptCapabilities: PromptCapabilitiesInfo
   defaultPath?: string
   agentName?: string
@@ -51,6 +52,7 @@ interface ChatInputProps {
 
 export const ChatInput = memo(function ChatInput({
   status,
+  showPromptingState = status === "prompting",
   promptCapabilities,
   defaultPath,
   agentName,
@@ -86,6 +88,7 @@ export const ChatInput = memo(function ChatInput({
   const isConnected = status === "connected"
   const isPrompting = status === "prompting"
   const isConnecting = status === "connecting"
+  const showPrompting = showPromptingState
 
   return (
     <div
@@ -134,7 +137,7 @@ export const ChatInput = memo(function ChatInput({
         placeholder={
           isConnecting
             ? t("connecting")
-            : isPrompting
+            : showPrompting
               ? t("agentResponding", { agent: agentName ?? "Agent" })
               : t("sendMessage")
         }

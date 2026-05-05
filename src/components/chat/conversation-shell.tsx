@@ -22,6 +22,7 @@ import { QuestionDialog } from "@/components/chat/question-dialog"
 
 interface ConversationShellProps {
   status: ConnectionStatus | null
+  showPromptingState?: boolean
   promptCapabilities: PromptCapabilitiesInfo
   defaultPath?: string
   agentName?: string
@@ -64,6 +65,7 @@ interface ConversationShellProps {
 
 export function ConversationShell({
   status,
+  showPromptingState = status === "prompting",
   promptCapabilities,
   defaultPath,
   agentName,
@@ -173,6 +175,7 @@ export function ConversationShell({
       {!hideInput && (
         <ChatInput
           status={status}
+          showPromptingState={showPromptingState}
           promptCapabilities={promptCapabilities}
           defaultPath={defaultPath}
           agentName={agentName}

@@ -21,7 +21,11 @@ import {
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { useAcpActions, useAcpEvent } from "@/contexts/acp-connections-context"
+import {
+  useAcpActions,
+  useAcpEvent,
+  type LiveMessage,
+} from "@/contexts/acp-connections-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
@@ -140,6 +144,34 @@ function buildVirtualConversationId(seed: string): number {
   }
   const normalized = Math.abs(hash) + 1
   return -normalized
+}
+
+const STALE_PROMPTING_UI_GRACE_MS = 10000
+
+function hasImmediatePromptingSignal(
+  liveMessage: LiveMessage | null,
+  pendingPermission: unknown,
+  pendingQuestion: unknown,
+  claudeApiRetry: unknown
+): boolean {
+  if (pendingPermission || pendingQuestion || claudeApiRetry) {
+    return true
+  }
+
+  if (!liveMessage) {
+    return false
+  }
+
+  if (liveMessage.content.length === 0) {
+    return true
+  }
+
+  return liveMessage.content.some(
+    (block) =>
+      block.type === "tool_call" &&
+      block.info.status !== "completed" &&
+      block.info.status !== "failed"
+  )
 }
 
 const ConversationTabView = memo(function ConversationTabView({
@@ -315,6 +347,15 @@ const ConversationTabView = memo(function ConversationTabView({
     connStatusRef.current = connStatus
   }, [connStatus])
   const isConnecting = connStatus === "connecting"
+  const shouldShowPromptingUiRef = useRef(connStatus === "prompting")
+  const [shouldShowPromptingUi, setShouldShowPromptingUi] = useState(
+    connStatus === "prompting"
+  )
+  const stalePromptingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+  const lastPromptingUiActivityAtRef = useRef(Date.now())
+  const lastPromptingLiveMessageRef = useRef(conn.liveMessage)
   const connectionModes = useMemo(
     () => conn.modes?.available_modes ?? [],
     [conn.modes?.available_modes]
@@ -327,6 +368,118 @@ const ConversationTabView = memo(function ConversationTabView({
     () => conn.availableCommands ?? [],
     [conn.availableCommands]
   )
+  const showPromptingUi = connStatus === "prompting" && shouldShowPromptingUi
+
+  useEffect(() => {
+    shouldShowPromptingUiRef.current = shouldShowPromptingUi
+  }, [shouldShowPromptingUi])
+
+  useEffect(() => {
+    if (connStatus === "prompting" && conn.liveMessage) {
+      lastPromptingLiveMessageRef.current = conn.liveMessage
+      lastPromptingUiActivityAtRef.current = Date.now()
+      if (!shouldShowPromptingUiRef.current) {
+        shouldShowPromptingUiRef.current = true
+        setShouldShowPromptingUi(true)
+      }
+    }
+  }, [conn.liveMessage, connStatus])
+
+  useEffect(() => {
+    if (
+      connStatus === "prompting" &&
+      (conn.pendingPermission || conn.pendingQuestion || conn.claudeApiRetry)
+    ) {
+      lastPromptingUiActivityAtRef.current = Date.now()
+      if (!shouldShowPromptingUiRef.current) {
+        shouldShowPromptingUiRef.current = true
+        setShouldShowPromptingUi(true)
+      }
+    }
+  }, [
+    conn.claudeApiRetry,
+    conn.pendingPermission,
+    conn.pendingQuestion,
+    connStatus,
+  ])
+
+  useEffect(() => {
+    const effectiveLiveMessage =
+      conn.liveMessage ??
+      (connStatus === "prompting" ? lastPromptingLiveMessageRef.current : null)
+    const hasImmediateSignal = hasImmediatePromptingSignal(
+      effectiveLiveMessage,
+      conn.pendingPermission,
+      conn.pendingQuestion,
+      conn.claudeApiRetry
+    )
+
+    if (stalePromptingTimerRef.current) {
+      clearTimeout(stalePromptingTimerRef.current)
+      stalePromptingTimerRef.current = null
+    }
+
+    if (connStatus !== "prompting") {
+      lastPromptingLiveMessageRef.current = conn.liveMessage
+      lastPromptingUiActivityAtRef.current = Date.now()
+      if (shouldShowPromptingUiRef.current) {
+        shouldShowPromptingUiRef.current = false
+        setShouldShowPromptingUi(false)
+      }
+      return
+    }
+
+    if (hasImmediateSignal) {
+      lastPromptingUiActivityAtRef.current = Date.now()
+      if (!shouldShowPromptingUiRef.current) {
+        shouldShowPromptingUiRef.current = true
+        setShouldShowPromptingUi(true)
+      }
+      return
+    }
+
+    if (!effectiveLiveMessage) {
+      if (shouldShowPromptingUiRef.current) {
+        shouldShowPromptingUiRef.current = false
+        setShouldShowPromptingUi(false)
+      }
+      return
+    }
+
+    const remainingMs = Math.max(
+      0,
+      STALE_PROMPTING_UI_GRACE_MS -
+        (Date.now() - lastPromptingUiActivityAtRef.current)
+    )
+
+    if (remainingMs === 0) {
+      if (shouldShowPromptingUiRef.current) {
+        shouldShowPromptingUiRef.current = false
+        setShouldShowPromptingUi(false)
+      }
+      return
+    }
+
+    stalePromptingTimerRef.current = setTimeout(() => {
+      shouldShowPromptingUiRef.current = false
+      setShouldShowPromptingUi(false)
+      stalePromptingTimerRef.current = null
+    }, remainingMs)
+
+    return () => {
+      if (stalePromptingTimerRef.current) {
+        clearTimeout(stalePromptingTimerRef.current)
+        stalePromptingTimerRef.current = null
+      }
+    }
+  }, [
+    conn.claudeApiRetry,
+    conn.liveMessage,
+    conn.pendingPermission,
+    conn.pendingQuestion,
+    connStatus,
+  ])
+
   const selectedModeId = useMemo(() => {
     if (connectionModes.length === 0) return null
     if (modeId && connectionModes.some((mode) => mode.id === modeId)) {
@@ -780,6 +933,7 @@ const ConversationTabView = memo(function ConversationTabView({
       conversationId={effectiveConversationId}
       agentType={selectedAgent}
       connStatus={connStatus}
+      showPromptingState={showPromptingUi}
       isActive={isActive}
       sendSignal={sendSignal}
       sessionStats={effectiveSessionStats}
@@ -792,6 +946,7 @@ const ConversationTabView = memo(function ConversationTabView({
   return (
     <ConversationShell
       status={connStatus}
+      showPromptingState={showPromptingUi}
       promptCapabilities={conn.promptCapabilities}
       defaultPath={workingDirForConnection}
       agentName={AGENT_LABELS[selectedAgent]}
@@ -870,6 +1025,7 @@ const ConversationTabView = memo(function ConversationTabView({
             ) : null}
             <ChatInput
               status={connStatus}
+              showPromptingState={showPromptingUi}
               promptCapabilities={conn.promptCapabilities}
               defaultPath={workingDirForConnection}
               agentName={AGENT_LABELS[selectedAgent]}
