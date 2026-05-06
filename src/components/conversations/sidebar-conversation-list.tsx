@@ -33,6 +33,7 @@ import { useTabContext } from "@/contexts/tab-context"
 import { useTaskContext } from "@/contexts/task-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { useZoomLevel } from "@/hooks/use-appearance"
+import { useOpenConversation } from "@/hooks/use-open-conversation"
 import {
   importLocalConversations,
   openProjectBootWindow,
@@ -500,6 +501,7 @@ function FolderGroupItem({
                 onRename={onRename}
                 onDelete={onDelete}
                 onStatusChange={onStatusChange}
+                onOpenInWindow={onDoubleClick}
                 onNewConversation={onNewConversation}
               />
             ))
@@ -548,7 +550,6 @@ export function SidebarConversationList({
   const { activeFolder } = useActiveFolder()
 
   const {
-    openTab,
     closeConversationTab,
     closeTabsByFolder,
     openNewConversationTab,
@@ -557,6 +558,7 @@ export function SidebarConversationList({
   } = useTabContext()
   const { closeTerminalsByFolder } = useTerminalContext()
   const { addTask, updateTask } = useTaskContext()
+  const openConversation = useOpenConversation()
 
   const folderIndex = useMemo(() => {
     const map = new Map<number, { name: string; path: string; color: string }>()
@@ -793,14 +795,14 @@ export function SidebarConversationList({
         (c) => c.id === id && c.agent_type === agentType
       )
       if (!conv) return
-      openTab(
-        conv.folder_id,
-        id,
-        agentType as Parameters<typeof openTab>[2],
-        false
-      )
+      void openConversation({
+        folderId: conv.folder_id,
+        conversationId: id,
+        agentType: agentType as DbConversationSummary["agent_type"],
+        pin: false,
+      })
     },
-    [openTab, conversations]
+    [conversations, openConversation]
   )
 
   const handleDoubleClick = useCallback(
@@ -809,14 +811,15 @@ export function SidebarConversationList({
         (c) => c.id === id && c.agent_type === agentType
       )
       if (!conv) return
-      openTab(
-        conv.folder_id,
-        id,
-        agentType as Parameters<typeof openTab>[2],
-        true
-      )
+      void openConversation({
+        folderId: conv.folder_id,
+        conversationId: id,
+        agentType: agentType as DbConversationSummary["agent_type"],
+        pin: true,
+        explicitWindow: true,
+      })
     },
-    [openTab, conversations]
+    [conversations, openConversation]
   )
 
   const handleRename = useCallback(
@@ -837,7 +840,7 @@ export function SidebarConversationList({
         closeConversationTab(
           conv.folder_id,
           id,
-          agentType as Parameters<typeof openTab>[2]
+          agentType as DbConversationSummary["agent_type"]
         )
       }
       refreshConversations()

@@ -138,11 +138,22 @@
     "openTargetTitle": "Ouverture de fichiers",
     "defaultOpenTarget": "Cible d’ouverture par défaut",
     "defaultOpenTargetDescription": "Emplacement par défaut pour ouvrir les fichiers et dossiers",
-    "openTargetDesktopOnly": "L’ouverture dans un éditeur natif est disponible uniquement dans l’app de bureau.",
+    "openTargetDesktopOnly": "Les cibles d’ouverture réservées au bureau ne sont disponibles que dans l’app de bureau.",
     "openTargetSaveFailed": "Échec de l’enregistrement de la cible d’ouverture : {message}",
     "webFileOpenMethod": "Ouverture des fichiers web",
     "webFileOpenMethodDescription": "Méthode par défaut pour ouvrir les fichiers HTML et autres fichiers web",
     "webFileOpenMethodSaveFailed": "Échec de l’enregistrement de l’ouverture des fichiers web : {message}",
+    "conversationOpenTarget": "Ouverture des conversations",
+    "conversationOpenTargetDescription": "Emplacement par défaut pour ouvrir les conversations existantes.",
+    "conversationOpenTargetSaveFailed": "Échec de l’enregistrement du mode d’ouverture des conversations : {message}",
+    "conversationWindowThreshold": "Ouvrir dans une nouvelle fenêtre après un certain nombre d’onglets",
+    "conversationWindowThresholdPlaceholder": "Laisser vide pour désactiver",
+    "conversationWindowThresholdDescription": "Ne compte que les onglets de conversation de l’espace de travail principal. Les fenêtres de conversation dédiées ne sont pas incluses.",
+    "conversationWindowThresholdSaveFailed": "Échec de l’enregistrement du seuil d’ouverture en fenêtre : {message}",
+    "conversationOpenTargets": {
+      "tab": "Ouvrir dans un onglet",
+      "window": "Ouvrir dans une fenêtre"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "Gestionnaire de fichiers",
@@ -769,6 +780,13 @@
     "title": "Valider",
     "invalidFolderId": "ID de dossier invalide",
     "loadingRepo": "Chargement du dépôt..."
+  },
+  "ConversationPage": {
+    "title": "Conversation",
+    "invalidConversationId": "ID de conversation invalide",
+    "loadingConversation": "Chargement de la conversation...",
+    "linkedFolderOpenFailed": "Impossible d’ouvrir le dossier lié",
+    "linkedConversationNotFound": "Conversation liée introuvable"
   },
   "MergePage": {
     "title": "Résoudre les conflits",

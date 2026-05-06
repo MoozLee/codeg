@@ -138,11 +138,22 @@
     "openTargetTitle": "File opening",
     "defaultOpenTarget": "Default open target",
     "defaultOpenTargetDescription": "Default location for opening files and folders",
-    "openTargetDesktopOnly": "Opening files in a native editor is available in the desktop app.",
+    "openTargetDesktopOnly": "Desktop-only opening targets are only available in the desktop app.",
     "openTargetSaveFailed": "Failed to save open target settings: {message}",
     "webFileOpenMethod": "Web file opening",
     "webFileOpenMethodDescription": "Default method for opening HTML and other web files",
     "webFileOpenMethodSaveFailed": "Failed to save web file opening settings: {message}",
+    "conversationOpenTarget": "Conversation opening",
+    "conversationOpenTargetDescription": "Default location for opening existing conversations.",
+    "conversationOpenTargetSaveFailed": "Failed to save conversation opening settings: {message}",
+    "conversationWindowThreshold": "Open in new window after tab count",
+    "conversationWindowThresholdPlaceholder": "Leave blank to disable",
+    "conversationWindowThresholdDescription": "Counts only conversation tabs in the main workspace. Dedicated conversation windows are not included.",
+    "conversationWindowThresholdSaveFailed": "Failed to save the conversation window threshold: {message}",
+    "conversationOpenTargets": {
+      "tab": "Open in tab",
+      "window": "Open in window"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "File manager",
@@ -769,6 +780,13 @@
     "title": "Commit",
     "invalidFolderId": "Invalid folder ID",
     "loadingRepo": "Loading repository..."
+  },
+  "ConversationPage": {
+    "title": "Conversation",
+    "invalidConversationId": "Invalid conversation ID",
+    "loadingConversation": "Loading conversation...",
+    "linkedFolderOpenFailed": "Unable to open linked folder",
+    "linkedConversationNotFound": "Linked conversation not found"
   },
   "MergePage": {
     "title": "Resolve Conflicts",

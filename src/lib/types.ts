@@ -758,9 +758,13 @@ export type SystemOpenTarget = "vscode" | "file_manager" | "terminal"
 
 export type SystemWebFileOpenMethod = "browser" | "editor"
 
+export type ConversationOpenTarget = "tab" | "window"
+
 export interface SystemOpenTargetSettings {
   target: SystemOpenTarget
   web_file_open_method: SystemWebFileOpenMethod
+  conversation_open_target: ConversationOpenTarget
+  conversation_window_threshold: number | null
 }
 
 export interface SystemTerminalSettings {

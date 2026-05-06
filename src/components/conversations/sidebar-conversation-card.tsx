@@ -1,7 +1,7 @@
 "use client"
 
 import { memo, useState, useCallback } from "react"
-import { Pencil, Trash2, Circle, Plus } from "lucide-react"
+import { Pencil, Trash2, Circle, Plus, ExternalLink } from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { DbConversationSummary, ConversationStatus } from "@/lib/types"
 import { STATUS_ICON_COLORS, STATUS_ORDER } from "@/lib/types"
@@ -48,6 +48,7 @@ interface SidebarConversationCardProps {
   onRename: (id: number, newTitle: string) => Promise<void>
   onDelete: (id: number, agentType: string) => Promise<void>
   onStatusChange: (id: number, status: ConversationStatus) => Promise<void>
+  onOpenInWindow?: (id: number, agentType: string) => void
   onNewConversation?: () => void
 }
 
@@ -61,11 +62,13 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   onRename,
   onDelete,
   onStatusChange,
+  onOpenInWindow,
   onNewConversation,
 }: SidebarConversationCardProps) {
   const t = useTranslations("Folder.conversationCard")
   const tSidebar = useTranslations("Folder.sidebar")
   const tStatus = useTranslations("Folder.statusLabels")
+  const tActions = useTranslations("SkillsSettings.actions")
   const [renameOpen, setRenameOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [renameValue, setRenameValue] = useState("")
@@ -192,6 +195,19 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
               <ContextMenuItem onSelect={onNewConversation}>
                 <Plus className="h-4 w-4" />
                 {t("newConversation")}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
+          {onOpenInWindow && (
+            <>
+              <ContextMenuItem
+                onSelect={() =>
+                  onOpenInWindow(conversation.id, conversation.agent_type)
+                }
+              >
+                <ExternalLink className="h-4 w-4" />
+                {tActions("openInWindow")}
               </ContextMenuItem>
               <ContextMenuSeparator />
             </>

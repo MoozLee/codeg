@@ -1140,7 +1140,13 @@ const ConversationTabView = memo(function ConversationTabView({
   )
 })
 
-export function ConversationDetailPanel() {
+interface ConversationDetailPanelProps {
+  allowNewConversation?: boolean
+}
+
+export function ConversationDetailPanel({
+  allowNewConversation = true,
+}: ConversationDetailPanelProps) {
   const t = useTranslations("Folder.conversation")
   const tStatus = useTranslations("Folder.statusLabels")
   const tExport = useTranslations("Folder.conversation.exportLabels")
@@ -1350,9 +1356,9 @@ export function ConversationDetailPanel() {
   }, [contextMenuSelectedText, t])
 
   const handleNewConversation = useCallback(() => {
-    if (!folder) return
+    if (!allowNewConversation || !folder) return
     openNewConversationTab(folder.id, folder.path)
-  }, [folder, openNewConversationTab])
+  }, [allowNewConversation, folder, openNewConversationTab])
 
   const handleCloseActiveTab = useCallback(() => {
     if (!activeTabId) return
@@ -1532,7 +1538,7 @@ export function ConversationDetailPanel() {
           {t("reload")}
         </ContextMenuItem>
         <ContextMenuItem
-          disabled={!folder?.path}
+          disabled={!allowNewConversation || !folder?.path}
           onSelect={handleNewConversation}
         >
           <Plus className="h-4 w-4" />

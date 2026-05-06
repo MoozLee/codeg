@@ -138,11 +138,22 @@
     "openTargetTitle": "فتح الملفات",
     "defaultOpenTarget": "هدف الفتح الافتراضي",
     "defaultOpenTargetDescription": "الموقع الافتراضي لفتح الملفات والمجلدات",
-    "openTargetDesktopOnly": "فتح الملفات في محرر أصلي متاح فقط في تطبيق سطح المكتب.",
+    "openTargetDesktopOnly": "أهداف الفتح الخاصة بسطح المكتب متاحة فقط في تطبيق سطح المكتب.",
     "openTargetSaveFailed": "فشل حفظ هدف الفتح: {message}",
     "webFileOpenMethod": "طريقة فتح ملفات الويب",
     "webFileOpenMethodDescription": "الطريقة الافتراضية لفتح ملفات HTML وملفات الويب الأخرى",
     "webFileOpenMethodSaveFailed": "فشل حفظ إعدادات فتح ملفات الويب: {message}",
+    "conversationOpenTarget": "فتح المحادثات",
+    "conversationOpenTargetDescription": "الموقع الافتراضي لفتح المحادثات الموجودة.",
+    "conversationOpenTargetSaveFailed": "فشل حفظ إعدادات فتح المحادثات: {message}",
+    "conversationWindowThreshold": "الفتح في نافذة جديدة بعد عدد من الألسنة",
+    "conversationWindowThresholdPlaceholder": "اتركه فارغًا للتعطيل",
+    "conversationWindowThresholdDescription": "يُحتسب فقط عدد ألسنة المحادثات في مساحة العمل الرئيسية. لا تُحتسب نوافذ المحادثات المستقلة.",
+    "conversationWindowThresholdSaveFailed": "فشل حفظ حد فتح المحادثات في نافذة جديدة: {message}",
+    "conversationOpenTargets": {
+      "tab": "فتح في لسان",
+      "window": "فتح في نافذة"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "مدير الملفات",
@@ -769,6 +780,13 @@
     "title": "التزام",
     "invalidFolderId": "معرّف المجلد غير صالح",
     "loadingRepo": "جارٍ تحميل المستودع..."
+  },
+  "ConversationPage": {
+    "title": "المحادثة",
+    "invalidConversationId": "معرّف المحادثة غير صالح",
+    "loadingConversation": "جارٍ تحميل المحادثة...",
+    "linkedFolderOpenFailed": "تعذّر فتح المجلد المرتبط",
+    "linkedConversationNotFound": "تعذّر العثور على المحادثة المرتبطة"
   },
   "MergePage": {
     "title": "حل التعارضات",

@@ -138,11 +138,22 @@
     "openTargetTitle": "ファイルを開く",
     "defaultOpenTarget": "デフォルトの開き先",
     "defaultOpenTargetDescription": "ファイルとフォルダーを開くデフォルトの場所",
-    "openTargetDesktopOnly": "ネイティブエディターでファイルを開く機能はデスクトップアプリでのみ利用できます。",
+    "openTargetDesktopOnly": "デスクトップ専用の開き先はデスクトップアプリでのみ利用できます。",
     "openTargetSaveFailed": "開き先設定の保存に失敗しました: {message}",
     "webFileOpenMethod": "Web ファイルの開き方",
     "webFileOpenMethodDescription": "HTML などのファイルを開く既定の方法",
     "webFileOpenMethodSaveFailed": "Web ファイルの開き方設定の保存に失敗しました: {message}",
+    "conversationOpenTarget": "会話の開き方",
+    "conversationOpenTargetDescription": "既存の会話を開く既定の場所です。",
+    "conversationOpenTargetSaveFailed": "会話の開き方設定の保存に失敗しました: {message}",
+    "conversationWindowThreshold": "タブ数に達したら新しいウィンドウで開く",
+    "conversationWindowThresholdPlaceholder": "無効にするには空欄のままにします",
+    "conversationWindowThresholdDescription": "メインワークスペース内の会話タブだけを数えます。独立した会話ウィンドウは含まれません。",
+    "conversationWindowThresholdSaveFailed": "会話ウィンドウのしきい値設定の保存に失敗しました: {message}",
+    "conversationOpenTargets": {
+      "tab": "タブで開く",
+      "window": "ウィンドウで開く"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "ファイルマネージャー",
@@ -769,6 +780,13 @@
     "title": "コミット",
     "invalidFolderId": "無効なフォルダID",
     "loadingRepo": "リポジトリを読み込み中..."
+  },
+  "ConversationPage": {
+    "title": "会話",
+    "invalidConversationId": "無効な会話 ID",
+    "loadingConversation": "会話を読み込み中...",
+    "linkedFolderOpenFailed": "リンク先のフォルダを開けませんでした",
+    "linkedConversationNotFound": "リンク先の会話が見つかりませんでした"
   },
   "MergePage": {
     "title": "コンフリクトの解決",

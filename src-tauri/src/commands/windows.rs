@@ -8,7 +8,7 @@ use sea_orm::DatabaseConnection;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::app_error::AppCommandError;
-use crate::db::service::app_metadata_service;
+use crate::db::service::{app_metadata_service, conversation_service};
 use crate::db::AppDatabase;
 use crate::models::FolderDetail;
 
@@ -83,6 +83,10 @@ pub struct SettingsWindowState {
 
 pub struct CommitWindowState {
     owner_by_commit_label: Mutex<HashMap<String, String>>,
+}
+
+pub struct ConversationWindowState {
+    conversation_by_label: Mutex<HashMap<String, i32>>,
 }
 
 /// Detect macOS system dark mode via `defaults read`.
@@ -299,6 +303,32 @@ impl Default for CommitWindowState {
     }
 }
 
+impl ConversationWindowState {
+    pub fn new() -> Self {
+        Self {
+            conversation_by_label: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn set_open(&self, label: String, conversation_id: i32) {
+        if let Ok(mut conversations) = self.conversation_by_label.lock() {
+            conversations.insert(label, conversation_id);
+        }
+    }
+
+    fn clear_by_label(&self, label: &str) {
+        if let Ok(mut conversations) = self.conversation_by_label.lock() {
+            conversations.remove(label);
+        }
+    }
+}
+
+impl Default for ConversationWindowState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn resolve_settings_route(section: Option<&str>) -> &'static str {
     match section {
         Some("appearance") => "settings/appearance",
@@ -365,6 +395,54 @@ pub async fn open_folder_window(
     }
 
     Ok(folder)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn open_conversation_window(
+    app: AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    state: tauri::State<'_, ConversationWindowState>,
+    conversation_id: i32,
+) -> Result<serde_json::Value, AppCommandError> {
+    let label = format!("conversation-{conversation_id}");
+
+    if let Some(existing) = app.get_webview_window(&label) {
+        post_window_setup(&existing);
+        let _ = existing.unminimize();
+        existing.set_focus().map_err(|e| {
+            AppCommandError::window("Failed to focus conversation window", e.to_string())
+        })?;
+        state.set_open(label, conversation_id);
+        return Ok(serde_json::json!({ "focusedExisting": true }));
+    }
+
+    let summary = conversation_service::get_by_id(&db.conn, conversation_id)
+        .await
+        .map_err(AppCommandError::from)?;
+
+    let title = summary
+        .title
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("Conversation {}", summary.id));
+
+    let url = WebviewUrl::App(format!("conversation?conversationId={conversation_id}").into());
+    let builder = WebviewWindowBuilder::new(&app, &label, url)
+        .title(format!("{title} - codeg"))
+        .inner_size(980.0, 760.0)
+        .min_inner_size(760.0, 520.0)
+        .center();
+    let conversation_window = apply_platform_window_style(builder)
+        .build()
+        .map_err(|e| AppCommandError::window("Failed to open conversation window", e.to_string()))?;
+    post_window_setup(&conversation_window);
+    state.set_open(label, conversation_id);
+    conversation_window.set_focus().map_err(|e| {
+        AppCommandError::window("Failed to focus conversation window", e.to_string())
+    })?;
+
+    Ok(serde_json::json!({ "focusedExisting": false }))
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -496,6 +574,10 @@ pub fn restore_window_after_commit(
             let _ = window.set_focus();
         }
     }
+}
+
+pub fn cleanup_conversation_window(state: &ConversationWindowState, window_label: &str) {
+    state.clear_by_label(window_label);
 }
 
 pub struct MergeWindowState {

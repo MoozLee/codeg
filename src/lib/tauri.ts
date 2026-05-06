@@ -44,7 +44,9 @@ import type {
   WorkspaceSnapshotResponse,
   GitLogResult,
   AvailableTerminalShells,
+  ConversationOpenTarget,
   SystemLanguageSettings,
+  SystemOpenTargetSettings,
   SystemProxySettings,
   SystemRenderingSettings,
   SystemTerminalSettings,
@@ -899,6 +901,51 @@ export async function openFolder(path: string): Promise<FolderDetail> {
 
 export async function openCommitWindow(folderId: number): Promise<void> {
   return invoke("open_commit_window", { folderId })
+}
+
+export async function openConversationWindow(
+  conversationId: number
+): Promise<{ focusedExisting: boolean }> {
+  return invoke("open_conversation_window", { conversationId })
+}
+
+export async function getSystemConversationOpenSettings(): Promise<{
+  defaultTarget: ConversationOpenTarget
+  threshold: number | null
+}> {
+  const settings = await invoke<SystemOpenTargetSettings>(
+    "get_system_open_target_settings"
+  )
+  return {
+    defaultTarget: settings.conversation_open_target,
+    threshold: settings.conversation_window_threshold,
+  }
+}
+
+export async function updateSystemConversationOpenSettings(params: {
+  defaultTarget: ConversationOpenTarget
+  threshold: number | null
+}): Promise<{
+  defaultTarget: ConversationOpenTarget
+  threshold: number | null
+}> {
+  const current = await invoke<SystemOpenTargetSettings>(
+    "get_system_open_target_settings"
+  )
+  const next = await invoke<SystemOpenTargetSettings>(
+    "update_system_open_target_settings",
+    {
+      settings: {
+        ...current,
+        conversation_open_target: params.defaultTarget,
+        conversation_window_threshold: params.threshold,
+      },
+    }
+  )
+  return {
+    defaultTarget: next.conversation_open_target,
+    threshold: next.conversation_window_threshold,
+  }
 }
 
 export type SettingsSection =

@@ -8,9 +8,9 @@ import { useLocale, useTranslations } from "next-intl"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
-import { useTabContext } from "@/contexts/tab-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
 import { listAllConversations } from "@/lib/api"
+import { useOpenConversation } from "@/hooks/use-open-conversation"
 import type {
   AgentType,
   ConversationStatus,
@@ -55,7 +55,7 @@ export function SearchCommandDialog({
         : allConversations.filter((c) => c.folder_id === activeFolderId),
     [allConversations, activeFolderId]
   )
-  const { openTab } = useTabContext()
+  const openConversation = useOpenConversation()
   const { openFilePreview } = useWorkspaceContext()
   const { revealInFileTree } = useAuxPanelContext()
 
@@ -147,10 +147,15 @@ export function SearchCommandDialog({
 
   const handleSelectConversation = useCallback(
     (conv: DbConversationSummary) => {
-      openTab(conv.folder_id, conv.id, conv.agent_type, true)
+      void openConversation({
+        folderId: conv.folder_id,
+        conversationId: conv.id,
+        agentType: conv.agent_type,
+        pin: true,
+      })
       onOpenChange(false)
     },
-    [openTab, onOpenChange]
+    [onOpenChange, openConversation]
   )
 
   const handleSelectFile = useCallback(

@@ -138,11 +138,22 @@
     "openTargetTitle": "Apertura de archivos",
     "defaultOpenTarget": "Destino predeterminado de apertura",
     "defaultOpenTargetDescription": "Ubicación predeterminada para abrir archivos y carpetas",
-    "openTargetDesktopOnly": "Abrir archivos en un editor nativo solo está disponible en la app de escritorio.",
+    "openTargetDesktopOnly": "Los destinos de apertura exclusivos del escritorio solo están disponibles en la app de escritorio.",
     "openTargetSaveFailed": "No se pudo guardar el destino de apertura: {message}",
     "webFileOpenMethod": "Apertura de archivos web",
     "webFileOpenMethodDescription": "Método predeterminado para abrir HTML y otros archivos web",
     "webFileOpenMethodSaveFailed": "No se pudo guardar la configuración de apertura de archivos web: {message}",
+    "conversationOpenTarget": "Apertura de conversaciones",
+    "conversationOpenTargetDescription": "Ubicación predeterminada para abrir conversaciones existentes.",
+    "conversationOpenTargetSaveFailed": "No se pudo guardar la configuración de apertura de conversaciones: {message}",
+    "conversationWindowThreshold": "Abrir en nueva ventana después de cierto número de pestañas",
+    "conversationWindowThresholdPlaceholder": "Déjalo en blanco para desactivar",
+    "conversationWindowThresholdDescription": "Solo cuenta las pestañas de conversación del espacio de trabajo principal. Las ventanas de conversación dedicadas no se incluyen.",
+    "conversationWindowThresholdSaveFailed": "No se pudo guardar el umbral para abrir conversaciones en una nueva ventana: {message}",
+    "conversationOpenTargets": {
+      "tab": "Abrir en pestaña",
+      "window": "Abrir en ventana"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "Gestor de archivos",
@@ -769,6 +780,13 @@
     "title": "Confirmación",
     "invalidFolderId": "ID de carpeta no válido",
     "loadingRepo": "Cargando repositorio..."
+  },
+  "ConversationPage": {
+    "title": "Conversación",
+    "invalidConversationId": "ID de conversación no válido",
+    "loadingConversation": "Cargando conversación...",
+    "linkedFolderOpenFailed": "No se pudo abrir la carpeta vinculada",
+    "linkedConversationNotFound": "No se encontró la conversación vinculada"
   },
   "MergePage": {
     "title": "Resolver conflictos",
