@@ -753,6 +753,18 @@
   "SettingsPages": {
     "agentsLoading": "جارٍ تحميل إعدادات الوكلاء..."
   },
+  "LoginPage": {
+    "documentTitle": "تسجيل الدخول - codeg",
+    "brand": "Codeg",
+    "subtitle": "أدخل رمز الوصول للاتصال بتطبيق سطح المكتب",
+    "tokenPlaceholder": "رمز الوصول",
+    "connect": "اتصال",
+    "connecting": "جارٍ الاتصال...",
+    "helpText": "يمكنك الحصول على الرمز من تطبيق سطح المكتب عبر الإعدادات → خدمة الويب",
+    "invalidToken": "رمز غير صالح. يرجى التحقق والمحاولة مرة أخرى.",
+    "connectionFailed": "فشل الاتصال (HTTP {status})",
+    "networkError": "تعذر الاتصال بالخادم"
+  },
   "CommitPage": {
     "title": "التزام",
     "invalidFolderId": "معرّف المجلد غير صالح",
@@ -1621,7 +1633,13 @@
           "initializeTimeout": "انتهت مهلة مصافحة اتصال {agent} (لا استجابة بعد 60 ثانية). افتح الإعدادات للتحقق من إعدادات الوكيل والشبكة.",
           "processExited": "انتهت عملية {agent} بشكل غير متوقع.",
           "spawnFailed": "تعذر بدء تشغيل {agent}: {message}",
-          "downloadFailed": "فشل تنزيل {agent}: {message}"
+          "downloadFailed": "فشل تنزيل {agent}: {message}",
+          "sessionLoadResourceNotFound": "فشل تحميل جلسة {agent}. أعد التحميل لإعادة المحاولة، أو ابدأ محادثة جديدة.",
+          "turnFailedRefusal": "رفض {agent} متابعة هذه الجولة. يدل ذلك غالبًا على خطأ في الخلفية أو البوابة. يرجى مراجعة سجلات الوكيل.",
+          "turnFailedMaxTokens": "بلغ {agent} الحد الأقصى للرموز المسموح بها في هذه الجولة.",
+          "turnFailedMaxTurnRequests": "بلغ {agent} الحد الأقصى لعدد الطلبات المسموح بها في هذه الجولة.",
+          "turnFailedUnknown": "أنهى {agent} الجولة بسبب توقف غير معروف.",
+          "turnFailedEmpty": "أنهى {agent} الجولة دون إنتاج أي رد. يرجى التحقق من إعدادات الوكيل."
         },
         "unableReadAgentConfig": "تعذر قراءة إعدادات الوكيل: {message}",
         "connectFailedTitle": "فشل اتصال {agent}",
@@ -1775,10 +1793,15 @@
         "attachedResources": "الموارد المرفقة",
         "loading": "جارٍ التحميل...",
         "error": "خطأ: {message}",
+        "errorTitle": "فشل تحميل الجلسة",
+        "errorActionReload": "إعادة تحميل",
+        "errorActionNewSession": "محادثة جديدة",
         "emptyConversation": "لا توجد رسائل في هذه المحادثة.",
         "systemMessage": "رسالة النظام",
         "copyMessage": "نسخ",
-        "copied": "تم النسخ"
+        "copied": "تم النسخ",
+        "downloadImage": "تنزيل الصورة",
+        "downloadFailed": "فشل التنزيل: {message}"
       },
       "liveTurnStats": {
         "thinking": "جارٍ التفكير...",

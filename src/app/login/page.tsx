@@ -2,17 +2,19 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { isDesktop } from "@/lib/platform"
 
 export default function LoginPage() {
   const router = useRouter()
+  const t = useTranslations("LoginPage")
   const [token, setToken] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    document.title = "Login - codeg"
-  }, [])
+    document.title = t("documentTitle")
+  }, [t])
 
   // Desktop users skip login entirely
   if (isDesktop()) {
@@ -40,12 +42,12 @@ export default function LoginPage() {
         localStorage.setItem("codeg_token", token)
         router.replace("/workspace")
       } else if (res.status === 401) {
-        setError("Token 无效，请检查后重试")
+        setError(t("invalidToken"))
       } else {
-        setError(`连接失败 (HTTP ${res.status})`)
+        setError(t("connectionFailed", { status: res.status }))
       }
     } catch {
-      setError("无法连接到服务器")
+      setError(t("networkError"))
     } finally {
       setLoading(false)
     }
@@ -55,10 +57,8 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="w-full max-w-sm space-y-6 px-4">
         <div className="space-y-2 text-center">
-          <h1 className="text-2xl font-bold tracking-tight">Codeg</h1>
-          <p className="text-sm text-muted-foreground">
-            输入访问 Token 以连接到桌面端
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight">{t("brand")}</h1>
+          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -67,7 +67,7 @@ export default function LoginPage() {
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Access Token"
+              placeholder={t("tokenPlaceholder")}
               autoFocus
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
@@ -80,12 +80,12 @@ export default function LoginPage() {
             disabled={!token || loading}
             className="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
           >
-            {loading ? "连接中..." : "连接"}
+            {loading ? t("connecting") : t("connect")}
           </button>
         </form>
 
         <p className="text-center text-xs text-muted-foreground">
-          Token 可在桌面端 设置 → Web 服务 中获取
+          {t("helpText")}
         </p>
       </div>
     </div>

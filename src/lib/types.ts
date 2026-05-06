@@ -490,6 +490,13 @@ export type AcpEvent =
       code: string | null
     }
   | {
+      type: "session_load_failed"
+      session_id: string
+      message: string
+      /** Stable backend identifier — currently `"resource_not_found"`. */
+      code: string
+    }
+  | {
       type: "available_commands"
       commands: AvailableCommandInfo[]
     }

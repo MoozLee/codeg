@@ -382,7 +382,9 @@ impl SessionState {
                 // already done — the event fires only once per connection.
                 self.selectors_ready = true;
             }
-            AcpEvent::ClaudeSdkMessage { .. } | AcpEvent::Error { .. } => {
+            AcpEvent::ClaudeSdkMessage { .. }
+            | AcpEvent::Error { .. }
+            | AcpEvent::SessionLoadFailed { .. } => {
                 // 这些事件不直接修改 SessionState 的可见字段。
             }
         }

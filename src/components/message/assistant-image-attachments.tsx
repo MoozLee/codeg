@@ -8,15 +8,26 @@ import type { UserImageDisplay } from "@/lib/adapters/ai-elements-adapter"
 import { ImagePreviewDialog } from "@/components/ui/image-preview-dialog"
 import { downloadImage } from "@/lib/image-download"
 
-interface UserImageAttachmentsProps {
+interface AssistantImageAttachmentsProps {
   images: UserImageDisplay[]
   className?: string
 }
 
-export function UserImageAttachments({
+/**
+ * Renders inline images produced by the assistant (e.g. Codex `imagegen`
+ * skill). Distinct from `UserImageAttachments` because:
+ *   - aligned `self-start` (assistant bubble side)
+ *   - each thumbnail has a hover-revealed download button
+ *   - the full-size preview dialog also exposes a download action
+ *
+ * Download behavior is platform-aware (`@/lib/image-download`):
+ *   - desktop: native "Save As" dialog → file write via Tauri command
+ *   - web: blob `<a download>` triggering the browser's download manager
+ */
+export function AssistantImageAttachments({
   images,
   className,
-}: UserImageAttachmentsProps) {
+}: AssistantImageAttachmentsProps) {
   const t = useTranslations("Folder.chat.messageList")
   const [previewIndex, setPreviewIndex] = useState<number | null>(null)
 

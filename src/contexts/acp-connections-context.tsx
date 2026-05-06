@@ -131,6 +131,15 @@ export interface ConnectionState {
   claudeApiRetry: ClaudeApiRetryState | null
   error: string | null
   /**
+   * Set when the agent rejected `session/load` non-recoverably (currently
+   * only `Resource not found` for an expired/missing historical session).
+   * Distinct from `error` because the UI surfaces it inline in the message
+   * list with reload / new-conversation actions, instead of as a toast.
+   * Cleared on the next CONNECTION_CREATED for the same key, or by
+   * CLEAR_ACP_LOAD_ERROR (Reload button).
+   */
+  loadError: string | null
+  /**
    * Highest envelope.seq applied to this connection. Used to dedup the
    * live `acp://event` stream against the snapshot endpoint: a
    * HYDRATE_FROM_SNAPSHOT sets this to snapshot.event_seq, and incoming
@@ -271,6 +280,8 @@ type Action =
       retry: ClaudeApiRetryState | null
     }
   | { type: "ERROR"; contextKey: string; message: string }
+  | { type: "ACP_LOAD_ERROR"; contextKey: string; message: string }
+  | { type: "CLEAR_ACP_LOAD_ERROR"; contextKey: string }
   | {
       type: "AVAILABLE_COMMANDS"
       contextKey: string
@@ -687,6 +698,7 @@ function connectionsReducer(
         pendingQuestion: null,
         claudeApiRetry: null,
         error: null,
+        loadError: null,
         lastAppliedSeq: 0,
       })
       return next
@@ -1316,6 +1328,28 @@ function connectionsReducer(
       return next
     }
 
+    case "ACP_LOAD_ERROR": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        loadError: action.message,
+      })
+      return next
+    }
+
+    case "CLEAR_ACP_LOAD_ERROR": {
+      const conn = state.get(action.contextKey)
+      if (!conn || conn.loadError === null) return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        loadError: null,
+      })
+      return next
+    }
+
     case "AVAILABLE_COMMANDS": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
@@ -1418,6 +1452,12 @@ export interface AcpActionsValue {
   setActiveKey(key: string | null): void
   touchActivity(contextKey: string): void
   registerOpenTabKeys(keys: Set<string>): void
+  /**
+   * Clear `loadError` set by a `session/load` failure so the next auto-connect
+   * attempt isn't gated by stale failure state. Wired to the Reload button in
+   * the conversation detail panel.
+   */
+  clearAcpLoadError(contextKey: string): void
 }
 
 const AcpActionsContext = createContext<AcpActionsValue | null>(null)
@@ -1720,6 +1760,13 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const registerOpenTabKeys = useCallback((keys: Set<string>) => {
     openTabKeysRef.current = keys
   }, [])
+
+  const clearAcpLoadError = useCallback(
+    (contextKey: string) => {
+      dispatch({ type: "CLEAR_ACP_LOAD_ERROR", contextKey })
+    },
+    [dispatch]
+  )
 
   const flushStreamingQueue = useCallback(() => {
     flushTimerRef.current = null
@@ -2178,6 +2225,26 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                   agent: agentLabel,
                   message: e.message,
                 })
+              case "turn_failed_refusal":
+                return t("backendErrors.turnFailedRefusal", {
+                  agent: agentLabel,
+                })
+              case "turn_failed_max_tokens":
+                return t("backendErrors.turnFailedMaxTokens", {
+                  agent: agentLabel,
+                })
+              case "turn_failed_max_turn_requests":
+                return t("backendErrors.turnFailedMaxTurnRequests", {
+                  agent: agentLabel,
+                })
+              case "turn_failed_unknown":
+                return t("backendErrors.turnFailedUnknown", {
+                  agent: agentLabel,
+                })
+              case "turn_failed_empty":
+                return t("backendErrors.turnFailedEmpty", {
+                  agent: agentLabel,
+                })
               default:
                 return e.message
             }
@@ -2197,6 +2264,31 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               })
             ).catch(() => {})
           }
+          break
+        }
+        case "session_load_failed": {
+          flushStreamingQueue()
+          // Localize via the stable `code` field (currently only
+          // "resource_not_found" — JSON-RPC -32002). Fall back to the raw
+          // agent message so an unknown future code still surfaces something
+          // intelligible rather than getting swallowed.
+          const nc = storeRef.current.connections.get(contextKey)
+          const agentLabel = nc ? AGENT_LABELS[nc.agentType] : ""
+          const localizedMessage = (() => {
+            switch (e.code) {
+              case "resource_not_found":
+                return t("backendErrors.sessionLoadResourceNotFound", {
+                  agent: agentLabel,
+                })
+              default:
+                return e.message
+            }
+          })()
+          dispatch({
+            type: "ACP_LOAD_ERROR",
+            contextKey,
+            message: localizedMessage,
+          })
           break
         }
         case "available_commands":
@@ -2774,6 +2866,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       setActiveKey,
       touchActivity,
       registerOpenTabKeys,
+      clearAcpLoadError,
     }),
     [
       connect,
@@ -2787,6 +2880,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       setActiveKey,
       touchActivity,
       registerOpenTabKeys,
+      clearAcpLoadError,
     ]
   )
 

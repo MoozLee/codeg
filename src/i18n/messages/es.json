@@ -753,6 +753,18 @@
   "SettingsPages": {
     "agentsLoading": "Cargando configuración de agentes..."
   },
+  "LoginPage": {
+    "documentTitle": "Iniciar sesión - codeg",
+    "brand": "Codeg",
+    "subtitle": "Introduce tu token de acceso para conectarte a la aplicación de escritorio",
+    "tokenPlaceholder": "Token de acceso",
+    "connect": "Conectar",
+    "connecting": "Conectando...",
+    "helpText": "Encuentra tu token en la aplicación de escritorio en Configuración → Servicio web",
+    "invalidToken": "Token no válido. Por favor, comprueba e inténtalo de nuevo.",
+    "connectionFailed": "Error de conexión (HTTP {status})",
+    "networkError": "No se puede conectar al servidor"
+  },
   "CommitPage": {
     "title": "Confirmación",
     "invalidFolderId": "ID de carpeta no válido",
@@ -1621,7 +1633,13 @@
           "initializeTimeout": "Se agotó el tiempo del handshake de conexión de {agent} (sin respuesta tras 60 segundos). Abre Ajustes para revisar la configuración del agente y de la red.",
           "processExited": "El proceso de {agent} terminó inesperadamente.",
           "spawnFailed": "No se pudo iniciar {agent}: {message}",
-          "downloadFailed": "La descarga de {agent} falló: {message}"
+          "downloadFailed": "La descarga de {agent} falló: {message}",
+          "sessionLoadResourceNotFound": "Error al cargar la sesión de {agent}. Recarga para reintentar o inicia una nueva conversación.",
+          "turnFailedRefusal": "{agent} rechazó continuar este turno. Suele indicar un error de backend o pasarela. Revisa los registros del agente.",
+          "turnFailedMaxTokens": "{agent} alcanzó el límite máximo de tokens para este turno.",
+          "turnFailedMaxTurnRequests": "{agent} alcanzó el número máximo de solicitudes permitidas para este turno.",
+          "turnFailedUnknown": "{agent} finalizó el turno con un motivo de parada no reconocido.",
+          "turnFailedEmpty": "{agent} finalizó el turno sin producir ninguna respuesta. Revisa la configuración del agente."
         },
         "unableReadAgentConfig": "No se puede leer la configuración del agente: {message}",
         "connectFailedTitle": "Falló la conexión de {agent}",
@@ -1775,10 +1793,15 @@
         "attachedResources": "Recursos adjuntos",
         "loading": "Cargando...",
         "error": "Error del chat: {message}",
+        "errorTitle": "Error al cargar la sesión",
+        "errorActionReload": "Recargar",
+        "errorActionNewSession": "Nueva conversación",
         "emptyConversation": "No hay mensajes en esta conversación.",
         "systemMessage": "Mensaje del sistema",
         "copyMessage": "Copiar",
-        "copied": "Copiado"
+        "copied": "Copiado",
+        "downloadImage": "Descargar imagen",
+        "downloadFailed": "Descarga fallida: {message}"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",

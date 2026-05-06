@@ -753,6 +753,18 @@
   "SettingsPages": {
     "agentsLoading": "エージェント設定を読み込み中..."
   },
+  "LoginPage": {
+    "documentTitle": "ログイン - codeg",
+    "brand": "Codeg",
+    "subtitle": "デスクトップアプリに接続するためのアクセストークンを入力してください",
+    "tokenPlaceholder": "アクセストークン",
+    "connect": "接続",
+    "connecting": "接続中...",
+    "helpText": "トークンはデスクトップアプリの 設定 → Web サービス で取得できます",
+    "invalidToken": "トークンが無効です。確認して再度お試しください",
+    "connectionFailed": "接続失敗 (HTTP {status})",
+    "networkError": "サーバーに接続できません"
+  },
   "CommitPage": {
     "title": "コミット",
     "invalidFolderId": "無効なフォルダID",
@@ -1621,7 +1633,13 @@
           "initializeTimeout": "{agent} の接続ハンドシェイクがタイムアウトしました（60 秒以内に応答なし）。設定を開いてエージェントとネットワーク設定を確認してください。",
           "processExited": "{agent} プロセスが予期せず終了しました。",
           "spawnFailed": "{agent} の起動に失敗しました: {message}",
-          "downloadFailed": "{agent} のダウンロードに失敗しました: {message}"
+          "downloadFailed": "{agent} のダウンロードに失敗しました: {message}",
+          "sessionLoadResourceNotFound": "{agent} セッションの読み込みに失敗しました。再読み込みして再試行するか、新しい会話を開始してください。",
+          "turnFailedRefusal": "{agent} がこのターンの続行を拒否しました。バックエンドまたはゲートウェイのエラーが原因の可能性があります。エージェントのログを確認してください。",
+          "turnFailedMaxTokens": "{agent} がこのターンの最大トークン数に達しました。",
+          "turnFailedMaxTurnRequests": "{agent} がこのターンで許可された最大リクエスト数に達しました。",
+          "turnFailedUnknown": "{agent} が不明な停止理由でターンを終了しました。",
+          "turnFailedEmpty": "{agent} は応答を生成せずにターンを終了しました。エージェントの設定を確認してください。"
         },
         "unableReadAgentConfig": "エージェント設定を読み取れません: {message}",
         "connectFailedTitle": "{agent} の接続に失敗しました",
@@ -1775,10 +1793,15 @@
         "attachedResources": "添付リソース",
         "loading": "読み込み中...",
         "error": "エラー: {message}",
+        "errorTitle": "セッションの読み込みに失敗しました",
+        "errorActionReload": "再読み込み",
+        "errorActionNewSession": "新規会話",
         "emptyConversation": "この会話にはメッセージがありません。",
         "systemMessage": "システムメッセージ",
         "copyMessage": "コピー",
-        "copied": "コピー済み"
+        "copied": "コピー済み",
+        "downloadImage": "画像をダウンロード",
+        "downloadFailed": "ダウンロードに失敗しました: {message}"
       },
       "liveTurnStats": {
         "thinking": "考え中...",

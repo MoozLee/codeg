@@ -753,6 +753,18 @@
   "SettingsPages": {
     "agentsLoading": "Agent-Einstellungen werden geladen..."
   },
+  "LoginPage": {
+    "documentTitle": "Anmelden - codeg",
+    "brand": "Codeg",
+    "subtitle": "Gib dein Zugriffstoken ein, um dich mit der Desktop-App zu verbinden",
+    "tokenPlaceholder": "Zugriffstoken",
+    "connect": "Verbinden",
+    "connecting": "Verbinde...",
+    "helpText": "Das Token findest du in der Desktop-App unter Einstellungen → Webdienst",
+    "invalidToken": "Ungültiges Token. Bitte überprüfe es und versuche es erneut.",
+    "connectionFailed": "Verbindung fehlgeschlagen (HTTP {status})",
+    "networkError": "Verbindung zum Server nicht möglich"
+  },
   "CommitPage": {
     "title": "Einchecken",
     "invalidFolderId": "Ungültige Ordner-ID",
@@ -1621,7 +1633,13 @@
           "initializeTimeout": "Der Verbindungs-Handshake von {agent} hat nach 60 Sekunden das Zeitlimit überschritten. Öffnen Sie die Einstellungen, um Agenten- und Netzwerkkonfiguration zu prüfen.",
           "processExited": "{agent}-Prozess wurde unerwartet beendet.",
           "spawnFailed": "{agent} konnte nicht gestartet werden: {message}",
-          "downloadFailed": "{agent}-Download fehlgeschlagen: {message}"
+          "downloadFailed": "{agent}-Download fehlgeschlagen: {message}",
+          "sessionLoadResourceNotFound": "{agent}-Sitzung konnte nicht geladen werden. Neu laden, um es erneut zu versuchen, oder eine neue Konversation starten.",
+          "turnFailedRefusal": "{agent} hat die Fortsetzung dieser Runde abgelehnt. Häufig deutet das auf einen Backend- oder Gateway-Fehler hin. Bitte prüfen Sie die Agent-Logs.",
+          "turnFailedMaxTokens": "{agent} hat das Token-Limit für diese Runde erreicht.",
+          "turnFailedMaxTurnRequests": "{agent} hat die maximale Anzahl zulässiger Anfragen für diese Runde erreicht.",
+          "turnFailedUnknown": "{agent} hat die Runde mit einem unbekannten Stoppgrund beendet.",
+          "turnFailedEmpty": "{agent} hat die Runde ohne jegliche Antwort beendet. Bitte prüfen Sie die Agent-Konfiguration."
         },
         "unableReadAgentConfig": "Agenten-Konfiguration kann nicht gelesen werden: {message}",
         "connectFailedTitle": "{agent} Verbindung fehlgeschlagen",
@@ -1775,10 +1793,15 @@
         "attachedResources": "Angehängte Ressourcen",
         "loading": "Lädt...",
         "error": "Fehler: {message}",
+        "errorTitle": "Sitzung konnte nicht geladen werden",
+        "errorActionReload": "Neu laden",
+        "errorActionNewSession": "Neue Konversation",
         "emptyConversation": "Keine Nachrichten in dieser Unterhaltung.",
         "systemMessage": "Systemnachricht",
         "copyMessage": "Kopieren",
-        "copied": "Kopiert"
+        "copied": "Kopiert",
+        "downloadImage": "Bild herunterladen",
+        "downloadFailed": "Download fehlgeschlagen: {message}"
       },
       "liveTurnStats": {
         "thinking": "Denkt nach...",

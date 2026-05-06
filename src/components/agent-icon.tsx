@@ -4,13 +4,7 @@ import type { AgentType } from "@/lib/types"
 import { AGENT_COLORS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import {
-  ClaudeCode,
-  Cline,
-  GeminiCLI,
-  OpenClaw,
-  OpenCode,
-} from "@lobehub/icons"
+import { Cline, GeminiCLI, OpenClaw, OpenCode } from "@lobehub/icons"
 
 interface AgentIconProps {
   agentType: AgentType
@@ -57,11 +51,38 @@ const CodexColorIcon = memo(function CodexColorIcon({
   )
 })
 
+// @lobehub/icons mislabels ClaudeCode's <title> as "Antigravity", which leaks
+// out as a browser tooltip on hover. Render the same artwork locally so we
+// control the title.
+const ClaudeCodeColorIcon = memo(function ClaudeCodeColorIcon({
+  size = "1em",
+}: {
+  size?: string | number
+}) {
+  return (
+    <svg
+      height={size}
+      style={{ flex: "none", lineHeight: 1 }}
+      viewBox="0 0 24 24"
+      width={size}
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <title>Claude Code</title>
+      <path
+        clipRule="evenodd"
+        d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
+        fill="#D97757"
+        fillRule="evenodd"
+      />
+    </svg>
+  )
+})
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyIcon = React.ComponentType<any>
 
 const COLOR_ICONS: Partial<Record<AgentType, AnyIcon>> = {
-  claude_code: ClaudeCode.Color,
+  claude_code: ClaudeCodeColorIcon,
   codex: CodexColorIcon,
   gemini: GeminiCLI.Color,
   open_claw: OpenClaw.Color,

@@ -34,7 +34,7 @@ mod tauri_app {
     use crate::chat_channel::manager::ChatChannelManager;
     use crate::commands::{
         acp as acp_commands, chat_channel as chat_channel_commands, conversations,
-        experts as experts_commands, folder_commands, folders, mcp as mcp_commands,
+        experts as experts_commands, file_io, folder_commands, folders, mcp as mcp_commands,
         model_provider as model_provider_commands, notification, project_boot,
         quick_messages as quick_messages_commands, system_settings, terminal as terminal_commands,
         version_control, windows, workspace_state as workspace_state_commands,
@@ -483,6 +483,7 @@ mod tauri_app {
                 mcp_commands::mcp_set_server_apps,
                 mcp_commands::mcp_remove_server,
                 notification::send_notification,
+                file_io::save_binary_file,
                 chat_channel_commands::list_chat_channels,
                 chat_channel_commands::create_chat_channel,
                 chat_channel_commands::update_chat_channel,

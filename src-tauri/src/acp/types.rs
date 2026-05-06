@@ -154,6 +154,17 @@ pub enum AcpEvent {
         /// this code; otherwise it falls back to `message`.
         code: Option<String>,
     },
+    /// `session/load` failed in a non-recoverable way (e.g. the agent has no
+    /// record of this `session_id`). Emitted instead of silently falling back
+    /// to `session/new`, so the frontend can surface the failure with reload
+    /// / new-conversation actions.
+    SessionLoadFailed {
+        session_id: String,
+        message: String,
+        /// Stable machine-readable identifier — currently
+        /// `"resource_not_found"` for JSON-RPC -32002.
+        code: String,
+    },
     /// Available slash commands updated
     AvailableCommands {
         commands: Vec<AvailableCommandInfo>,

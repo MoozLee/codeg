@@ -43,6 +43,7 @@ export interface UseConnectionReturn {
   pendingQuestion: PendingQuestion | null
   claudeApiRetry: ClaudeApiRetryState | null
   error: string | null
+  loadError: string | null
   connect: (
     agentType: AgentType,
     workingDir?: string,
@@ -98,6 +99,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const pendingQuestion = connection?.pendingQuestion ?? null
   const claudeApiRetry = connection?.claudeApiRetry ?? null
   const error = connection?.error ?? null
+  const loadError = connection?.loadError ?? null
 
   const connect = useCallback(
     (agentType: AgentType, workingDir?: string, sessionId?: string) =>
@@ -157,6 +159,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingQuestion,
       claudeApiRetry,
       error,
+      loadError,
       connect,
       disconnect,
       sendPrompt,
@@ -181,6 +184,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingQuestion,
       claudeApiRetry,
       error,
+      loadError,
       connect,
       disconnect,
       sendPrompt,

@@ -1,7 +1,7 @@
 "use client"
 
 import { Dialog as DialogPrimitive } from "radix-ui"
-import { X } from "lucide-react"
+import { Download, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface ImagePreviewDialogProps {
@@ -9,6 +9,13 @@ interface ImagePreviewDialogProps {
   alt: string
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * When provided, render a download icon button next to the close button.
+   * The handler is invoked on click; the dialog stays open so the caller
+   * can show its own progress/toast feedback.
+   */
+  onDownload?: () => void
+  downloadLabel?: string
 }
 
 function ImagePreviewDialog({
@@ -16,6 +23,8 @@ function ImagePreviewDialog({
   alt,
   open,
   onOpenChange,
+  onDownload,
+  downloadLabel,
 }: ImagePreviewDialogProps) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -34,14 +43,30 @@ function ImagePreviewDialog({
           <DialogPrimitive.Title className="sr-only">
             {alt}
           </DialogPrimitive.Title>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="absolute right-4 top-4 z-10 rounded-full bg-background/60 p-1.5 text-foreground/80 hover:bg-background/80 hover:text-foreground"
-            aria-label="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
+            {onDownload && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDownload()
+                }}
+                className="rounded-full bg-background/60 p-1.5 text-foreground/80 hover:bg-background/80 hover:text-foreground"
+                aria-label={downloadLabel ?? "Download"}
+                title={downloadLabel ?? "Download"}
+              >
+                <Download className="h-5 w-5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="rounded-full bg-background/60 p-1.5 text-foreground/80 hover:bg-background/80 hover:text-foreground"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
           {src && (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img

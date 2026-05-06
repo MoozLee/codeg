@@ -12,6 +12,7 @@ export function useConversationDetail(conversationId: number): {
   detail: DbConversationDetail | null
   loading: boolean
   error: string | null
+  acpLoadError: string | null
 } {
   const { getSession, fetchDetail } = useConversationRuntime()
   const session = getSession(conversationId)
@@ -33,5 +34,6 @@ export function useConversationDetail(conversationId: number): {
     detail: session?.detail ?? null,
     loading: session ? session.detailLoading : !isVirtual,
     error: session?.detailError ?? null,
+    acpLoadError: session?.acpLoadError ?? null,
   }
 }

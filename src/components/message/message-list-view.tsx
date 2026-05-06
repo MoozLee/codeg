@@ -22,6 +22,7 @@ import { TurnStats } from "./turn-stats"
 import { LiveTurnStats } from "./live-turn-stats"
 import { UserResourceLinks } from "./user-resource-links"
 import { UserImageAttachments } from "./user-image-attachments"
+import { AssistantImageAttachments } from "./assistant-image-attachments"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { AgentPlanOverlay } from "@/components/chat/agent-plan-overlay"
 import {
@@ -34,13 +35,17 @@ import {
   MessageAction,
 } from "@/components/ai-elements/message"
 import {
+  AlertCircle,
   CheckIcon,
   ChevronDown,
   ChevronRight,
   CopyIcon,
   Info,
   Loader2,
+  Plus,
+  RefreshCw,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { useTranslations } from "next-intl"
 import {
   buildPlanKey,
@@ -73,7 +78,17 @@ interface MessageListViewProps {
   sessionStats?: SessionStats | null
   detailLoading?: boolean
   detailError?: string | null
+  /**
+   * Set when the agent rejected `session/load` non-recoverably (e.g. the
+   * historical session_id was deleted). Takes precedence over `detailError`
+   * AND the renderable-content gate: even when the local DB has the full
+   * message history, the user must explicitly choose Reload or start a new
+   * conversation since the agent can't continue this thread.
+   */
+  acpLoadError?: string | null
   hideEmptyState?: boolean
+  onReload?: () => void
+  onNewSession?: () => void
 }
 
 interface UserAnchorItem {
@@ -97,6 +112,7 @@ interface ResolvedMessageGroup {
   parts: AdaptedContentPart[]
   resources: UserResourceDisplay[]
   images: UserImageDisplay[]
+  assistantImages: UserImageDisplay[]
   usage?: import("@/lib/types").TurnUsage | null
   duration_ms?: number | null
   model?: string | null
@@ -315,6 +331,12 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
         {group.role === "user" && group.images.length > 0 ? (
           <UserImageAttachments images={group.images} className="self-end" />
         ) : null}
+        {group.role === "assistant" && group.assistantImages.length > 0 ? (
+          <AssistantImageAttachments
+            images={group.assistantImages}
+            className="self-start"
+          />
+        ) : null}
         {group.role === "user" ? (
           <div className="group/user-msg flex w-fit ml-auto max-w-full items-start gap-1">
             <UserMessageCopyButton parts={group.parts} />
@@ -507,7 +529,10 @@ export function MessageListView({
   sessionStats = null,
   detailLoading = false,
   detailError = null,
+  acpLoadError = null,
   hideEmptyState = false,
+  onReload,
+  onNewSession,
 }: MessageListViewProps) {
   const t = useTranslations("Folder.chat.messageList")
   const sharedT = useTranslations("Folder.chat.shared")
@@ -628,6 +653,7 @@ export function MessageListView({
           parts: msg.content,
           resources: msg.userResources ?? [],
           images: msg.userImages ?? [],
+          assistantImages: msg.assistantImages ?? [],
           usage: msg.usage,
           duration_ms: msg.duration_ms,
           model: msg.model,
@@ -1136,13 +1162,58 @@ export function MessageListView({
     )
   }
 
-  if (detailError && !hasRenderableContent) {
+  // ACP load failures always replace content: even when the local DB has
+  // the conversation, the agent can't resume it, so silently rendering
+  // the history would mislead the user into thinking a follow-up message
+  // would extend the same thread.
+  const blockingLoadError = acpLoadError ?? null
+  const fallbackLoadError =
+    detailError && !hasRenderableContent ? detailError : null
+  const renderedLoadError = blockingLoadError ?? fallbackLoadError
+  if (renderedLoadError) {
+    const showActions = Boolean(onReload || onNewSession)
+    const reloading = detailLoading
     return (
-      <div className="p-6">
-        <div className="text-center py-12">
-          <p className="text-destructive text-sm">
-            {t("error", { message: detailError })}
-          </p>
+      <div role="alert" className="flex h-full items-center justify-center p-6">
+        <div className="flex max-w-md flex-col items-center gap-4 text-center">
+          <AlertCircle
+            aria-hidden="true"
+            className="h-8 w-8 text-destructive"
+          />
+          <div className="space-y-1">
+            <h3 className="text-sm font-medium">{t("errorTitle")}</h3>
+            <p className="text-sm text-muted-foreground break-words">
+              {renderedLoadError}
+            </p>
+          </div>
+          {showActions && (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {onReload && (
+                <Button
+                  size="sm"
+                  onClick={onReload}
+                  disabled={reloading}
+                  aria-busy={reloading}
+                >
+                  {reloading ? (
+                    <Loader2
+                      aria-hidden="true"
+                      className="me-1.5 h-4 w-4 animate-spin"
+                    />
+                  ) : (
+                    <RefreshCw aria-hidden="true" className="me-1.5 h-4 w-4" />
+                  )}
+                  {t("errorActionReload")}
+                </Button>
+              )}
+              {onNewSession && (
+                <Button size="sm" variant="outline" onClick={onNewSession}>
+                  <Plus aria-hidden="true" className="me-1.5 h-4 w-4" />
+                  {t("errorActionNewSession")}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     )

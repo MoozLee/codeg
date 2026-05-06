@@ -753,6 +753,18 @@
   "SettingsPages": {
     "agentsLoading": "Chargement des paramètres des agents..."
   },
+  "LoginPage": {
+    "documentTitle": "Connexion - codeg",
+    "brand": "Codeg",
+    "subtitle": "Saisissez votre jeton d'accès pour vous connecter à l'application de bureau",
+    "tokenPlaceholder": "Jeton d'accès",
+    "connect": "Se connecter",
+    "connecting": "Connexion...",
+    "helpText": "Vous trouverez votre jeton dans l'application de bureau sous Paramètres → Service Web",
+    "invalidToken": "Jeton invalide. Veuillez vérifier et réessayer.",
+    "connectionFailed": "Échec de la connexion (HTTP {status})",
+    "networkError": "Impossible de se connecter au serveur"
+  },
   "CommitPage": {
     "title": "Valider",
     "invalidFolderId": "ID de dossier invalide",
@@ -1621,7 +1633,13 @@
           "initializeTimeout": "Le handshake de connexion de {agent} a expiré (aucune réponse après 60 secondes). Ouvrez Paramètres pour vérifier la configuration de l'agent et du réseau.",
           "processExited": "Le processus {agent} s'est arrêté de manière inattendue.",
           "spawnFailed": "Impossible de démarrer {agent} : {message}",
-          "downloadFailed": "Échec du téléchargement de {agent} : {message}"
+          "downloadFailed": "Échec du téléchargement de {agent} : {message}",
+          "sessionLoadResourceNotFound": "Échec du chargement de la session de {agent}. Rechargez pour réessayer ou démarrez une nouvelle conversation.",
+          "turnFailedRefusal": "{agent} a refusé de poursuivre ce tour. Cela indique souvent une erreur de backend ou de passerelle. Vérifiez les journaux de l'agent.",
+          "turnFailedMaxTokens": "{agent} a atteint la limite maximale de jetons pour ce tour.",
+          "turnFailedMaxTurnRequests": "{agent} a atteint le nombre maximal de requêtes autorisées pour ce tour.",
+          "turnFailedUnknown": "{agent} a terminé le tour avec une raison d'arrêt inconnue.",
+          "turnFailedEmpty": "{agent} a terminé le tour sans produire de réponse. Vérifiez la configuration de l'agent."
         },
         "unableReadAgentConfig": "Impossible de lire la configuration de l'agent : {message}",
         "connectFailedTitle": "Échec de la connexion de {agent}",
@@ -1775,10 +1793,15 @@
         "attachedResources": "Ressources jointes",
         "loading": "Chargement...",
         "error": "Erreur : {message}",
+        "errorTitle": "Échec du chargement de la session",
+        "errorActionReload": "Recharger",
+        "errorActionNewSession": "Nouvelle conversation",
         "emptyConversation": "Aucun message dans cette conversation.",
         "systemMessage": "Message système",
         "copyMessage": "Copier",
-        "copied": "Copié"
+        "copied": "Copié",
+        "downloadImage": "Télécharger l'image",
+        "downloadFailed": "Échec du téléchargement : {message}"
       },
       "liveTurnStats": {
         "thinking": "Réflexion...",

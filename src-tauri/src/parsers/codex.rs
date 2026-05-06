@@ -854,6 +854,33 @@ impl CodexParser {
                                     }
                                 }
                             }
+                            "image_generation_end" => {
+                                if active_agent_count == 0 {
+                                    let result = payload
+                                        .get("result")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    if !result.is_empty() {
+                                        let uri = payload
+                                            .get("saved_path")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string());
+                                        messages.push(UnifiedMessage {
+                                            id: format!("assistant-image-{}", messages.len()),
+                                            role: MessageRole::Assistant,
+                                            content: vec![ContentBlock::Image {
+                                                data: result.to_string(),
+                                                mime_type: "image/png".to_string(),
+                                                uri,
+                                            }],
+                                            timestamp,
+                                            usage: None,
+                                            duration_ms: None,
+                                            model: None,
+                                        });
+                                    }
+                                }
+                            }
                             "token_count" => {
                                 if let Some(info) = payload.get("info") {
                                     if let Some(total_usage_payload) = info.get("total_token_usage")

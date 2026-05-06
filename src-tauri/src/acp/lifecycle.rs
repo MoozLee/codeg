@@ -106,16 +106,35 @@ pub(crate) async fn handle_event(
             }
             Ok(())
         }
-        AcpEvent::TurnComplete { .. } => {
+        AcpEvent::TurnComplete { stop_reason, .. } => {
             // Centralized status transition: when the agent reports the turn
-            // is done, flip the conversation row to PendingReview and
-            // re-broadcast the change as `ConversationStatusChanged`. This
-            // lives in the lifecycle subscriber (rather than at the original
-            // emit site in `acp/connection.rs`) so the write is decoupled from
-            // the protocol-event hot path AND survives a frontend refresh
+            // is done, flip the conversation row and re-broadcast the change
+            // as `ConversationStatusChanged`. This lives in the lifecycle
+            // subscriber (rather than at the original emit site in
+            // `acp/connection.rs`) so the write is decoupled from the
+            // protocol-event hot path AND survives a frontend refresh
             // mid-turn — the row gets the correct status even if no
             // browser is connected to react to TurnComplete itself.
-            // `completed` / `cancelled` transitions remain frontend-driven.
+            //
+            // The target status depends on the stop reason: `end_turn` is the
+            // only success case and goes to `PendingReview`. `refusal`,
+            // `max_tokens`, `max_turn_requests`, `unknown`, and `empty`
+            // indicate the turn failed (often a backend/gateway error
+            // masquerading as `Refusal` per the ACP spec gap, or — common
+            // with OpenCode — a silent EndTurn that produced no output), so
+            // we flip to `Cancelled` and pair the transition with an
+            // `AcpEvent::Error` toast emitted upstream by `connection.rs`.
+            // `cancelled` is already handled by the user-cancel path, so we
+            // leave it alone here. `completed` transitions remain
+            // frontend-driven.
+            let target_status = match stop_reason.as_str() {
+                "end_turn" => ConversationStatus::PendingReview,
+                "refusal" | "max_tokens" | "max_turn_requests" | "unknown" | "empty" => {
+                    ConversationStatus::Cancelled
+                }
+                // `cancelled` and any future reason: don't write here.
+                _ => return Ok(()),
+            };
             let Some((state_arc, emitter)) = manager
                 .get_state_and_emitter(&envelope.connection_id)
                 .await
@@ -131,15 +150,14 @@ pub(crate) async fn handle_event(
             };
             // DB write before emit so any downstream subscriber that observes
             // the ConversationStatusChanged event can assume the row is
-            // already at PendingReview.
-            conversation_service::update_status(db_conn, cid, ConversationStatus::PendingReview)
-                .await?;
+            // already at the target status.
+            conversation_service::update_status(db_conn, cid, target_status.clone()).await?;
             emit_with_state(
                 &state_arc,
                 &emitter,
                 AcpEvent::ConversationStatusChanged {
                     conversation_id: cid,
-                    status: ConversationStatus::PendingReview,
+                    status: target_status,
                 },
             )
             .await;
@@ -492,6 +510,90 @@ mod tests {
         assert_eq!(
             read_row_status(&db, conv.id).await,
             ConversationStatus::PendingReview
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_event_writes_cancelled_on_turn_failure_stop_reasons() {
+        // OpenCode (and similar agents) maps backend errors to `Refusal`.
+        // The lifecycle subscriber must flip the conversation to Cancelled
+        // for refusal/max_tokens/max_turn_requests/unknown so the user sees
+        // a terminal state instead of a misleading PendingReview ("待审查").
+        let cases = ["refusal", "max_tokens", "max_turn_requests", "unknown", "empty"];
+        for stop_reason in cases {
+            let db = test_helpers::fresh_in_memory_db().await;
+            let folder_id =
+                test_helpers::seed_folder(&db, &format!("/tmp/turn-fail-{stop_reason}")).await;
+            let conv = conversation_service::create(
+                &db.conn,
+                folder_id,
+                AgentType::OpenCode,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+            let mgr = ConnectionManager::new();
+            {
+                let mut map = mgr.connections.lock().await;
+                map.insert(
+                    "c1".to_string(),
+                    fake_connection_with_state("c1", Some(conv.id)),
+                );
+            }
+            let env = EventEnvelope {
+                seq: 1,
+                connection_id: "c1".to_string(),
+                payload: AcpEvent::TurnComplete {
+                    session_id: "ext-1".into(),
+                    stop_reason: stop_reason.into(),
+                    agent_type: "open_code".into(),
+                },
+            };
+            handle_event(&db.conn, &mgr, &env).await.unwrap();
+            assert_eq!(
+                read_row_status(&db, conv.id).await,
+                ConversationStatus::Cancelled,
+                "stop_reason={stop_reason} must flip the row to Cancelled"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_event_skips_write_on_cancelled_stop_reason() {
+        // `cancelled` is already handled by the user-cancel path
+        // (handle_terminal_event sets Cancelled via CAS), so the TurnComplete
+        // arm must not double-write.
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/turn-cancelled").await;
+        let conv =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+
+        let mgr = ConnectionManager::new();
+        {
+            let mut map = mgr.connections.lock().await;
+            map.insert(
+                "c1".to_string(),
+                fake_connection_with_state("c1", Some(conv.id)),
+            );
+        }
+        let env = EventEnvelope {
+            seq: 1,
+            connection_id: "c1".to_string(),
+            payload: AcpEvent::TurnComplete {
+                session_id: "ext-1".into(),
+                stop_reason: "cancelled".into(),
+                agent_type: "claude_code".into(),
+            },
+        };
+        handle_event(&db.conn, &mgr, &env).await.unwrap();
+        assert_eq!(
+            read_row_status(&db, conv.id).await,
+            ConversationStatus::InProgress,
+            "TurnComplete{{cancelled}} must not overwrite the row — user-cancel path owns it"
         );
     }
 

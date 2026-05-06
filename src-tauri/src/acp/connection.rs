@@ -1292,10 +1292,46 @@ async fn run_connection(
                         // or ephemeral forked session).
                         // Fall back to session/new so the tab still works.
                         let err_str = e.to_string();
-                        eprintln!(
-                            "[ACP] session/load failed ({}), falling back to session/new",
-                            err_str
+                        let is_resource_not_found = matches!(
+                            e.code,
+                            sacp::schema::ErrorCode::ResourceNotFound
                         );
+                        eprintln!(
+                            "[ACP] session/load failed ({}){}",
+                            err_str,
+                            if is_resource_not_found {
+                                ", surfacing as session_load_failed"
+                            } else {
+                                ", falling back to session/new"
+                            }
+                        );
+                        // ResourceNotFound (-32002): the agent has no record of
+                        // this session_id (deleted/expired/never existed).
+                        // Don't auto-fallback to session/new — that would
+                        // silently orphan the historical context. Surface to
+                        // the frontend so the user can choose between Reload
+                        // (transient agent restart) and New conversation.
+                        if is_resource_not_found {
+                            emit_with_state(
+                                &state,
+                                &emitter_clone,
+                                AcpEvent::SessionLoadFailed {
+                                    session_id: sid.clone(),
+                                    message: err_str,
+                                    code: "resource_not_found".to_string(),
+                                },
+                            )
+                            .await;
+                            emit_with_state(
+                                &state,
+                                &emitter_clone,
+                                AcpEvent::StatusChanged {
+                                    status: ConnectionStatus::Error,
+                                },
+                            )
+                            .await;
+                            return Ok(());
+                        }
                         // Only emit a visible error for unexpected failures;
                         // "Method not found" is expected for agents that don't
                         // support session resume (e.g. Cline).
@@ -2310,6 +2346,87 @@ async fn handle_fork_or_exit(
 
 /// Main conversation command loop: wait for frontend commands and process them.
 ///
+/// Map ACP `StopReason` to a stable lowercase string carried in the
+/// `TurnComplete` event. Covers all 5 spec variants so non-success reasons
+/// (`Refusal`/`MaxTokens`/`MaxTurnRequests`) keep their semantics instead of
+/// collapsing to `"unknown"` — the lifecycle subscriber and frontend rely on
+/// this distinction. The wildcard arm exists because the upstream enum is
+/// `#[non_exhaustive]`.
+fn stop_reason_to_str(reason: StopReason) -> &'static str {
+    match reason {
+        StopReason::EndTurn => "end_turn",
+        StopReason::Cancelled => "cancelled",
+        StopReason::Refusal => "refusal",
+        StopReason::MaxTokens => "max_tokens",
+        StopReason::MaxTurnRequests => "max_turn_requests",
+        _ => "unknown",
+    }
+}
+
+/// True when a `SessionUpdate` represents actual agent-produced output for
+/// the current turn. Used to detect "silent EndTurn" cases where an agent
+/// (notably OpenCode) reports the turn ended successfully but never emitted
+/// any reply or tool call — in practice this means the model-side request
+/// was swallowed and the user would otherwise see a blank conversation
+/// transition silently to `PendingReview`. Metadata-only updates
+/// (`UserMessageChunk`, `Plan`, `*ModeUpdate`, `ConfigOptionUpdate`,
+/// `SessionInfoUpdate`, `AvailableCommandsUpdate`, `UsageUpdate`) do not
+/// count.
+fn is_agent_output_update(update: &SessionUpdate) -> bool {
+    matches!(
+        update,
+        SessionUpdate::AgentMessageChunk(_)
+            | SessionUpdate::AgentThoughtChunk(_)
+            | SessionUpdate::ToolCall(_)
+            | SessionUpdate::ToolCallUpdate(_)
+    )
+}
+
+/// Build an `AcpEvent::Error` for a non-success stop reason so the user gets a
+/// toast instead of a silent transition to `PendingReview`. Returns `None` for
+/// `end_turn` (success) and `cancelled` (already user-driven).
+///
+/// `Refusal` is included because OpenCode (and similar agents) map backend /
+/// gateway errors to `Refusal` per the ACP spec gap — see
+/// <https://shashikantjagtap.net/openclaw-acp-what-coding-agent-users-need-to-know-about-protocol-gaps/>.
+/// `empty` is a synthesized reason emitted by `run_conversation_loop` when
+/// the agent reports `EndTurn` without producing any agent output.
+fn turn_failure_error_event(reason_str: &str, agent_type: AgentType) -> Option<AcpEvent> {
+    let (code, message) = match reason_str {
+        "refusal" => (
+            "turn_failed_refusal",
+            format!("{agent_type} refused to continue this turn."),
+        ),
+        "max_tokens" => (
+            "turn_failed_max_tokens",
+            format!("{agent_type} reached the maximum token limit for this turn."),
+        ),
+        "max_turn_requests" => (
+            "turn_failed_max_turn_requests",
+            format!(
+                "{agent_type} reached the maximum number of allowed requests for this turn."
+            ),
+        ),
+        "unknown" => (
+            "turn_failed_unknown",
+            format!("{agent_type} ended the turn with an unrecognized stop reason."),
+        ),
+        "empty" => (
+            "turn_failed_empty",
+            format!(
+                "{agent_type} ended the turn without producing any response. \
+                 Please check the agent's configuration."
+            ),
+        ),
+        _ => return None,
+    };
+    Some(AcpEvent::Error {
+        message,
+        agent_type: agent_type.to_string(),
+        code: Some(code.to_string()),
+    })
+}
+
 /// Returns `Ok(None)` on normal exit (disconnect / channel closed) or
 /// `Ok(Some(ForkExitInfo))` when the loop should be restarted on a forked session.
 #[allow(clippy::too_many_arguments)]
@@ -2416,6 +2533,13 @@ async fn run_conversation_loop<'a>(
                 // StopReason / prompt-response / cancel paths instead.
                 let mut turn_completed = false;
                 let mut disconnect_requested = false;
+                // Tracks whether the agent produced any real output during
+                // this turn (text reply, thinking chunk, or tool call). When
+                // an agent reports `EndTurn` with this still false, we treat
+                // it as a silent failure and synthesize an `"empty"` stop
+                // reason so the user gets an error toast instead of a
+                // confusing `PendingReview` on a blank conversation.
+                let mut turn_had_agent_output = false;
 
                 // Read updates until turn completes.
                 // We must also listen for commands (e.g. RespondPermission)
@@ -2438,50 +2562,45 @@ async fn run_conversation_loop<'a>(
                                     let session_id = sid.clone();
                                     let cwd_opt = Some(cwd);
                                     let dispatch = fix_usage_update_nulls(dispatch);
-                                    match dispatch {
-                                        Dispatch::Notification(untyped_notification) => {
-                                            match SessionNotification::parse_message(
-                                                untyped_notification.method(),
-                                                untyped_notification.params(),
-                                            ) {
-                                                Ok(notif) => {
-                                                    let should_poll_now = track_terminal_tool_calls(
-                                                        &notif.update,
-                                                        &mut tracked_terminal_tool_calls,
-                                                    );
-                                                    emit_conversation_update(
-                                                        &st,
-                                                        &h,
-                                                        agent_type,
-                                                        notif.update,
-                                                        cwd_opt,
-                                                        &mut raw_output_cache,
-                                                    )
-                                                    .await;
-                                                    if should_poll_now {
-                                                        poll_tracked_terminal_tool_calls(
-                                                            runtime.as_ref(),
-                                                            &session_id,
-                                                            &st,
-                                                            &h,
-                                                            &mut tracked_terminal_tool_calls,
-                                                        )
-                                                        .await;
-                                                    }
-                                                }
-                                                Err(_) => {
-                                                    maybe_emit_claude_sdk_ext_notification(
-                                                        &st,
-                                                        &h,
-                                                        Dispatch::Notification(untyped_notification),
-                                                    )
-                                                    .await;
-                                                }
+                                    if let Err(e) = MatchDispatch::new(dispatch)
+                                        .if_notification(async |notif: SessionNotification| {
+                                            let should_poll_now = track_terminal_tool_calls(
+                                                &notif.update,
+                                                &mut tracked_terminal_tool_calls,
+                                            );
+                                            if is_agent_output_update(&notif.update) {
+                                                turn_had_agent_output = true;
                                             }
-                                        }
-                                        other => {
-                                            maybe_emit_claude_sdk_ext_notification(&st, &h, other).await;
-                                        }
+                                            emit_conversation_update(
+                                                &st,
+                                                &h,
+                                                agent_type,
+                                                notif.update,
+                                                cwd_opt,
+                                                &mut raw_output_cache,
+                                            )
+                                            .await;
+                                            if should_poll_now {
+                                                poll_tracked_terminal_tool_calls(
+                                                    runtime.as_ref(),
+                                                    &session_id,
+                                                    &st,
+                                                    &h,
+                                                    &mut tracked_terminal_tool_calls,
+                                                )
+                                                .await;
+                                            }
+                                            Ok(())
+                                        })
+                                        .await
+                                        .otherwise(async |other| {
+                                            maybe_emit_claude_sdk_ext_notification(&st, &h, other)
+                                                .await;
+                                            Ok(())
+                                        })
+                                        .await
+                                    {
+                                        eprintln!("[ACP] Ignoring dispatch parse error: {e}");
                                     }
                                 }
                                 SessionMessage::StopReason(reason) => {
@@ -2495,12 +2614,25 @@ async fn run_conversation_loop<'a>(
                                         )
                                         .await;
                                     }
+                                    let raw_reason_str = stop_reason_to_str(reason);
+                                    let reason_str = if raw_reason_str == "end_turn"
+                                        && !turn_had_agent_output
+                                    {
+                                        "empty"
+                                    } else {
+                                        raw_reason_str
+                                    };
+                                    if let Some(err_event) =
+                                        turn_failure_error_event(reason_str, agent_type)
+                                    {
+                                        emit_with_state(state, emitter, err_event).await;
+                                    }
                                     emit_turn_complete_once(
                                         state,
                                         emitter,
                                         &sid,
                                         agent_type,
-                                        stop_reason_label(reason),
+                                        reason_str,
                                         &mut turn_completed,
                                     )
                                     .await;
@@ -2521,12 +2653,25 @@ async fn run_conversation_loop<'a>(
                                 )
                                 .await;
                             }
+                            let raw_reason_str = stop_reason_to_str(reason);
+                            let reason_str = if raw_reason_str == "end_turn"
+                                && !turn_had_agent_output
+                            {
+                                "empty"
+                            } else {
+                                raw_reason_str
+                            };
+                            if let Some(err_event) =
+                                turn_failure_error_event(reason_str, agent_type)
+                            {
+                                emit_with_state(state, emitter, err_event).await;
+                            }
                             emit_turn_complete_once(
                                 state,
                                 emitter,
                                 &sid,
                                 agent_type,
-                                stop_reason_label(reason),
+                                reason_str,
                                 &mut turn_completed,
                             )
                             .await;

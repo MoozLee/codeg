@@ -62,6 +62,13 @@ export interface AdaptedMessage {
   content: AdaptedContentPart[]
   userResources?: UserResourceDisplay[]
   userImages?: UserImageDisplay[]
+  /**
+   * Inline images produced by the assistant (e.g. Codex image_generation
+   * skill). Reuses UserImageDisplay shape; kept on a separate field from
+   * userImages because user-uploaded vs assistant-generated images render
+   * with different components / alignments / actions (download, etc.).
+   */
+  assistantImages?: UserImageDisplay[]
   timestamp: string
   usage?: TurnUsage | null
   duration_ms?: number | null
@@ -737,6 +744,8 @@ export function adaptMessageTurn(
       : { parts: adaptedContent, resources: [] as UserResourceDisplay[] }
   const userImages =
     turn.role === "user" ? extractUserImagesFromBlocks(turn.blocks) : []
+  const assistantImages =
+    turn.role === "assistant" ? extractUserImagesFromBlocks(turn.blocks) : []
 
   return {
     id: turn.id,
@@ -745,6 +754,7 @@ export function adaptMessageTurn(
     userResources:
       userSplit.resources.length > 0 ? userSplit.resources : undefined,
     userImages: userImages.length > 0 ? userImages : undefined,
+    assistantImages: assistantImages.length > 0 ? assistantImages : undefined,
     timestamp: turn.timestamp,
     usage: turn.usage,
     duration_ms: turn.duration_ms,

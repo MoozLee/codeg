@@ -200,7 +200,23 @@ function pointWithinElement(
   position: { x: number; y: number },
   element: HTMLElement
 ): boolean {
+  // Inactive conversation tabs are kept mounted at `absolute inset-0` with
+  // `visibility: hidden` (see ConversationDetailPanel), so their bounding rect
+  // overlaps the active tab's. Without this guard every tab's Tauri drag
+  // listener would treat the same OS drop as falling inside its own input,
+  // and dropped files would silently fan out across every open conversation.
+  const style = element.ownerDocument?.defaultView?.getComputedStyle(element)
+  if (style) {
+    if (
+      style.visibility === "hidden" ||
+      style.display === "none" ||
+      style.pointerEvents === "none"
+    ) {
+      return false
+    }
+  }
   const rect = element.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) return false
   const dpr = window.devicePixelRatio || 1
   const candidates = [
     { x: position.x, y: position.y },
