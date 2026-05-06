@@ -436,6 +436,7 @@ export type AcpEvent =
       type: "turn_complete"
       session_id: string
       stop_reason: string
+      agent_type: string
     }
   | {
       type: "session_started"

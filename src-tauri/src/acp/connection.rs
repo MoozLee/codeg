@@ -21,8 +21,8 @@ use sacp::schema::{
 };
 use sacp::util::MatchDispatch;
 use sacp::{
-    on_receive_request, Agent, Client, ConnectionTo, Dispatch, JsonRpcMessage, Responder,
-    SessionMessage, UntypedMessage,
+    on_receive_request, Agent, Client, ConnectionTo, Dispatch, Responder, SessionMessage,
+    UntypedMessage,
 };
 use sacp_tokio::AcpAgent;
 use tokio::sync::{mpsc, RwLock};
@@ -2192,17 +2192,6 @@ fn map_prompt_blocks(blocks: Vec<PromptInputBlock>) -> Vec<ContentBlock> {
         .collect()
 }
 
-fn stop_reason_label(reason: StopReason) -> &'static str {
-    match reason {
-        StopReason::EndTurn => "end_turn",
-        StopReason::Cancelled => "cancelled",
-        StopReason::MaxTokens => "max_tokens",
-        StopReason::MaxTurnRequests => "max_turn_requests",
-        StopReason::Refusal => "refusal",
-        _ => "unknown",
-    }
-}
-
 async fn emit_turn_complete_once(
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
@@ -3756,15 +3745,15 @@ mod tests {
     }
 
     #[test]
-    fn stop_reason_label_maps_extended_reasons() {
-        assert_eq!(stop_reason_label(StopReason::EndTurn), "end_turn");
-        assert_eq!(stop_reason_label(StopReason::Cancelled), "cancelled");
-        assert_eq!(stop_reason_label(StopReason::MaxTokens), "max_tokens");
+    fn stop_reason_to_str_maps_extended_reasons() {
+        assert_eq!(stop_reason_to_str(StopReason::EndTurn), "end_turn");
+        assert_eq!(stop_reason_to_str(StopReason::Cancelled), "cancelled");
+        assert_eq!(stop_reason_to_str(StopReason::MaxTokens), "max_tokens");
         assert_eq!(
-            stop_reason_label(StopReason::MaxTurnRequests),
+            stop_reason_to_str(StopReason::MaxTurnRequests),
             "max_turn_requests"
         );
-        assert_eq!(stop_reason_label(StopReason::Refusal), "refusal");
+        assert_eq!(stop_reason_to_str(StopReason::Refusal), "refusal");
     }
 
     #[tokio::test]
