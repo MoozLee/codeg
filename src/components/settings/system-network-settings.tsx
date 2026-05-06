@@ -32,11 +32,13 @@ import {
 } from "@/components/ui/select"
 import {
   getAvailableTerminalShells,
+  getSystemConversationOpenSettings,
   getSystemOpenTargetSettings,
   getSystemProxySettings,
   getSystemRenderingSettings,
   getSystemTerminalSettings,
   probeTerminalShellPath,
+  updateSystemConversationOpenSettings,
   updateSystemLanguageSettings,
   updateSystemOpenTargetSettings,
   updateSystemProxySettings,
@@ -49,6 +51,7 @@ import { isDesktop, openUrl } from "@/lib/platform"
 import type {
   AppLocale,
   AvailableTerminalShells,
+  ConversationOpenTarget,
   SystemOpenTarget,
   SystemWebFileOpenMethod,
   TerminalShellOption,
@@ -104,6 +107,22 @@ function isSystemWebFileOpenMethod(
   return value === "browser" || value === "editor"
 }
 
+function isConversationOpenTarget(
+  value: string
+): value is ConversationOpenTarget {
+  return value === "tab" || value === "window"
+}
+
+function normalizeConversationWindowThreshold(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed)) return null
+  const integer = Math.trunc(parsed)
+  if (integer < 1) return 1
+  return integer
+}
+
 type UpdateAction = "check" | "install"
 
 // Captured the first time settings page loads: represents the value that the
@@ -134,6 +153,10 @@ export function SystemNetworkSettings() {
   const [openTarget, setOpenTarget] = useState<SystemOpenTarget>("file_manager")
   const [webFileOpenMethod, setWebFileOpenMethod] =
     useState<SystemWebFileOpenMethod>("browser")
+  const [conversationOpenTarget, setConversationOpenTarget] =
+    useState<ConversationOpenTarget>("tab")
+  const [conversationWindowThreshold, setConversationWindowThreshold] =
+    useState("")
   const [openTargetLoadError, setOpenTargetLoadError] = useState<string | null>(
     null
   )
@@ -232,10 +255,19 @@ export function SystemNetworkSettings() {
     setLoadError(null)
 
     const tasks: Promise<void>[] = [
-      getSystemOpenTargetSettings()
-        .then((settings) => {
+      Promise.all([
+        getSystemOpenTargetSettings(),
+        getSystemConversationOpenSettings(),
+      ])
+        .then(([settings, conversationSettings]) => {
           setOpenTarget(settings.target)
           setWebFileOpenMethod(settings.web_file_open_method ?? "browser")
+          setConversationOpenTarget(conversationSettings.defaultTarget)
+          setConversationWindowThreshold(
+            conversationSettings.threshold != null
+              ? String(conversationSettings.threshold)
+              : ""
+          )
         })
         .catch((err) => {
           setOpenTargetLoadError(toErrorMessage(err))
@@ -394,6 +426,10 @@ export function SystemNetworkSettings() {
         const next = await updateSystemOpenTargetSettings({
           target,
           web_file_open_method: webFileOpenMethod,
+          conversation_open_target: conversationOpenTarget,
+          conversation_window_threshold: normalizeConversationWindowThreshold(
+            conversationWindowThreshold
+          ),
         })
         setOpenTarget(next.target)
         setWebFileOpenMethod(next.web_file_open_method)
@@ -405,7 +441,7 @@ export function SystemNetworkSettings() {
         setSavingOpenTarget(false)
       }
     },
-    [t, webFileOpenMethod]
+    [conversationOpenTarget, conversationWindowThreshold, t, webFileOpenMethod]
   )
 
   const saveWebFileOpenMethod = useCallback(
@@ -419,6 +455,10 @@ export function SystemNetworkSettings() {
         const next = await updateSystemOpenTargetSettings({
           target: openTarget,
           web_file_open_method: method,
+          conversation_open_target: conversationOpenTarget,
+          conversation_window_threshold: normalizeConversationWindowThreshold(
+            conversationWindowThreshold
+          ),
         })
         setOpenTarget(next.target)
         setWebFileOpenMethod(next.web_file_open_method)
@@ -430,8 +470,59 @@ export function SystemNetworkSettings() {
         setSavingWebFileOpenMethod(false)
       }
     },
-    [openTarget, t]
+    [conversationOpenTarget, conversationWindowThreshold, openTarget, t]
   )
+
+  const saveConversationOpenTarget = useCallback(
+    async (
+      target: ConversationOpenTarget,
+      previous: ConversationOpenTarget
+    ) => {
+      setSavingOpenTarget(true)
+      try {
+        const next = await updateSystemConversationOpenSettings({
+          defaultTarget: target,
+          threshold: normalizeConversationWindowThreshold(
+            conversationWindowThreshold
+          ),
+        })
+        setConversationOpenTarget(next.defaultTarget)
+        setConversationWindowThreshold(
+          next.threshold != null ? String(next.threshold) : ""
+        )
+      } catch (err) {
+        setConversationOpenTarget(previous)
+        const message = toErrorMessage(err)
+        toast.error(t("conversationOpenTargetSaveFailed", { message }))
+      } finally {
+        setSavingOpenTarget(false)
+      }
+    },
+    [conversationWindowThreshold, t]
+  )
+
+  const saveConversationWindowThreshold = useCallback(async () => {
+    setSavingOpenTarget(true)
+    const normalized = normalizeConversationWindowThreshold(
+      conversationWindowThreshold
+    )
+    try {
+      const next = await updateSystemConversationOpenSettings({
+        defaultTarget: conversationOpenTarget,
+        threshold: normalized,
+      })
+      setConversationOpenTarget(next.defaultTarget)
+      setConversationWindowThreshold(
+        next.threshold != null ? String(next.threshold) : ""
+      )
+    } catch (err) {
+      const message = toErrorMessage(err)
+      toast.error(t("conversationWindowThresholdSaveFailed", { message }))
+    } finally {
+      setSavingOpenTarget(false)
+    }
+  }, [conversationOpenTarget, conversationWindowThreshold, t])
+
   const saveProxySettings = useCallback(
     async (nextEnabled: boolean, nextProxyUrl: string) => {
       if (nextEnabled && !nextProxyUrl.trim()) return
@@ -858,6 +949,61 @@ export function SystemNetworkSettings() {
                 </SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">
+                {t("conversationOpenTarget")}
+              </p>
+              <p className="text-xs text-muted-foreground leading-5">
+                {t("conversationOpenTargetDescription")}
+              </p>
+            </div>
+            <Select
+              value={conversationOpenTarget}
+              onValueChange={(value) => {
+                if (!isConversationOpenTarget(value)) return
+                const previous = conversationOpenTarget
+                setConversationOpenTarget(value)
+                void saveConversationOpenTarget(value, previous)
+              }}
+              disabled={savingOpenSettings}
+            >
+              <SelectTrigger className="w-full sm:w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start">
+                <SelectItem value="tab">
+                  {t("conversationOpenTargets.tab")}
+                </SelectItem>
+                <SelectItem value="window">
+                  {t("conversationOpenTargets.window")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">
+              {t("conversationWindowThreshold")}
+            </label>
+            <Input
+              value={conversationWindowThreshold}
+              onChange={(event) =>
+                setConversationWindowThreshold(event.target.value)
+              }
+              onBlur={() => {
+                void saveConversationWindowThreshold()
+              }}
+              placeholder={t("conversationWindowThresholdPlaceholder")}
+              disabled={savingOpenSettings}
+              inputMode="numeric"
+              className="w-full sm:w-56"
+            />
+            <p className="text-xs text-muted-foreground leading-5">
+              {t("conversationWindowThresholdDescription")}
+            </p>
           </div>
 
           {!isDesktop() && (

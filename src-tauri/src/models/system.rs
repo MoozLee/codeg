@@ -80,11 +80,21 @@ pub enum SystemWebFileOpenMethod {
     Editor,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationOpenTarget {
+    #[default]
+    Tab,
+    Window,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SystemOpenTargetSettings {
     pub target: SystemOpenTarget,
     pub web_file_open_method: SystemWebFileOpenMethod,
+    pub conversation_open_target: ConversationOpenTarget,
+    pub conversation_window_threshold: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

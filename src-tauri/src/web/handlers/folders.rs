@@ -306,6 +306,20 @@ pub async fn open_push_window(
     }))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenConversationWindowParams {
+    pub conversation_id: i32,
+}
+
+pub async fn open_conversation_window(
+    Json(params): Json<OpenConversationWindowParams>,
+) -> Result<Json<SettingsNavigationResult>, AppCommandError> {
+    Ok(Json(SettingsNavigationResult {
+        path: format!("/conversation?conversationId={}", params.conversation_id),
+    }))
+}
+
 pub async fn add_folder_to_history(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AddFolderParams>,

@@ -138,11 +138,22 @@
     "openTargetTitle": "檔案開啟",
     "defaultOpenTarget": "預設開啟目標",
     "defaultOpenTargetDescription": "開啟檔案和資料夾的預設位置",
-    "openTargetDesktopOnly": "在原生編輯器中開啟檔案僅桌面應用程式可用。",
+    "openTargetDesktopOnly": "桌面專屬開啟目標僅在桌面應用程式中可用。",
     "openTargetSaveFailed": "開啟目標設定儲存失敗：{message}",
     "webFileOpenMethod": "網頁檔案開啟方式",
     "webFileOpenMethodDescription": "HTML 等檔案的預設開啟方式",
     "webFileOpenMethodSaveFailed": "網頁檔案開啟方式儲存失敗：{message}",
+    "conversationOpenTarget": "會話開啟方式",
+    "conversationOpenTargetDescription": "既有會話的預設開啟位置。",
+    "conversationOpenTargetSaveFailed": "儲存會話開啟設定失敗：{message}",
+    "conversationWindowThreshold": "達到標籤頁數量後在新視窗開啟",
+    "conversationWindowThresholdPlaceholder": "留空表示停用",
+    "conversationWindowThresholdDescription": "只統計主工作區中的會話標籤頁，不統計獨立會話視窗。",
+    "conversationWindowThresholdSaveFailed": "儲存會話視窗門檻失敗：{message}",
+    "conversationOpenTargets": {
+      "tab": "在標籤頁開啟",
+      "window": "在新視窗開啟"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "檔案管理器",
@@ -757,6 +768,13 @@
     "title": "提交程式碼",
     "invalidFolderId": "無效的 folderId",
     "loadingRepo": "正在載入倉庫..."
+  },
+  "ConversationPage": {
+    "title": "會話",
+    "invalidConversationId": "無效的會話 ID",
+    "loadingConversation": "正在載入會話...",
+    "linkedFolderOpenFailed": "無法打開連結中的資料夾",
+    "linkedConversationNotFound": "找不到連結中的會話"
   },
   "MergePage": {
     "title": "解決衝突",

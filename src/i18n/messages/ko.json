@@ -138,11 +138,22 @@
     "openTargetTitle": "파일 열기",
     "defaultOpenTarget": "기본 열기 대상",
     "defaultOpenTargetDescription": "파일과 폴더를 열 기본 위치",
-    "openTargetDesktopOnly": "네이티브 편집기에서 파일 열기는 데스크톱 앱에서만 사용할 수 있습니다.",
+    "openTargetDesktopOnly": "데스크톱 전용 열기 대상은 데스크톱 앱에서만 사용할 수 있습니다.",
     "openTargetSaveFailed": "열기 대상 설정 저장 실패: {message}",
     "webFileOpenMethod": "웹 파일 열기 방식",
     "webFileOpenMethodDescription": "HTML 등 파일의 기본 열기 방식",
     "webFileOpenMethodSaveFailed": "웹 파일 열기 설정 저장 실패: {message}",
+    "conversationOpenTarget": "대화 열기 방식",
+    "conversationOpenTargetDescription": "기존 대화를 열 기본 위치입니다.",
+    "conversationOpenTargetSaveFailed": "대화 열기 설정 저장 실패: {message}",
+    "conversationWindowThreshold": "탭 수 도달 후 새 창에서 열기",
+    "conversationWindowThresholdPlaceholder": "비활성화하려면 비워 두세요",
+    "conversationWindowThresholdDescription": "메인 작업공간의 대화 탭만 계산합니다. 독립 대화 창은 포함되지 않습니다.",
+    "conversationWindowThresholdSaveFailed": "대화 창 임계값 저장 실패: {message}",
+    "conversationOpenTargets": {
+      "tab": "탭에서 열기",
+      "window": "창에서 열기"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "파일 관리자",
@@ -757,6 +768,13 @@
     "title": "커밋",
     "invalidFolderId": "유효하지 않은 폴더 ID",
     "loadingRepo": "저장소를 불러오는 중..."
+  },
+  "ConversationPage": {
+    "title": "대화",
+    "invalidConversationId": "유효하지 않은 대화 ID",
+    "loadingConversation": "대화를 불러오는 중...",
+    "linkedFolderOpenFailed": "링크된 폴더를 열 수 없습니다",
+    "linkedConversationNotFound": "링크된 대화를 찾을 수 없습니다"
   },
   "MergePage": {
     "title": "충돌 해결",

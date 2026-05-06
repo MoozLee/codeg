@@ -8,6 +8,7 @@
   "windows": [
     "main",
     "commit-*",
+    "conversation-*",
     "merge-*",
     "stash-*",
     "push-*",

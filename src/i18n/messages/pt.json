@@ -138,11 +138,22 @@
     "openTargetTitle": "Abertura de arquivos",
     "defaultOpenTarget": "Destino padrão de abertura",
     "defaultOpenTargetDescription": "Local padrão para abrir arquivos e pastas",
-    "openTargetDesktopOnly": "Abrir arquivos em um editor nativo está disponível apenas no app desktop.",
+    "openTargetDesktopOnly": "Os destinos de abertura exclusivos do desktop só estão disponíveis no app de desktop.",
     "openTargetSaveFailed": "Falha ao salvar o destino de abertura: {message}",
     "webFileOpenMethod": "Abertura de arquivos web",
     "webFileOpenMethodDescription": "Método padrão para abrir HTML e outros arquivos web",
     "webFileOpenMethodSaveFailed": "Falha ao salvar as configurações de abertura de arquivos web: {message}",
+    "conversationOpenTarget": "Abertura de conversas",
+    "conversationOpenTargetDescription": "Local padrão para abrir conversas existentes.",
+    "conversationOpenTargetSaveFailed": "Falha ao salvar as configurações de abertura de conversas: {message}",
+    "conversationWindowThreshold": "Abrir em nova janela após certo número de abas",
+    "conversationWindowThresholdPlaceholder": "Deixe em branco para desativar",
+    "conversationWindowThresholdDescription": "Conta apenas as abas de conversa no espaço de trabalho principal. Janelas de conversa dedicadas não são incluídas.",
+    "conversationWindowThresholdSaveFailed": "Falha ao salvar o limite para abrir conversas em nova janela: {message}",
+    "conversationOpenTargets": {
+      "tab": "Abrir em aba",
+      "window": "Abrir em janela"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "Gerenciador de arquivos",
@@ -757,6 +768,13 @@
     "title": "Confirmar",
     "invalidFolderId": "ID de pasta inválido",
     "loadingRepo": "Carregando repositório..."
+  },
+  "ConversationPage": {
+    "title": "Conversa",
+    "invalidConversationId": "ID de conversa inválido",
+    "loadingConversation": "Carregando conversa...",
+    "linkedFolderOpenFailed": "Não foi possível abrir a pasta vinculada",
+    "linkedConversationNotFound": "Conversa vinculada não encontrada"
   },
   "MergePage": {
     "title": "Resolver conflitos",

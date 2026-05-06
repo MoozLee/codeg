@@ -49,6 +49,7 @@ import type {
   SystemFontFamilyList,
   SystemFontSettings,
   AvailableTerminalShells,
+  ConversationOpenTarget,
   SystemLanguageSettings,
   SystemOpenTarget,
   SystemOpenTargetSettings,
@@ -1190,6 +1191,54 @@ export async function openCommitWindow(folderId: number): Promise<void> {
     { folderId }
   )
   window.open(result.path, `commit-${folderId}`)
+}
+
+export interface OpenConversationWindowResult {
+  focusedExisting: boolean
+}
+
+export async function openConversationWindow(
+  conversationId: number
+): Promise<OpenConversationWindowResult> {
+  if (getTransport().isDesktop()) {
+    return getTransport().call("open_conversation_window", { conversationId })
+  }
+  const result = await getTransport().call<{ path: string }>(
+    "open_conversation_window",
+    { conversationId }
+  )
+  window.open(result.path, `conversation-${conversationId}`)
+  return { focusedExisting: false }
+}
+
+export async function getSystemConversationOpenSettings(): Promise<{
+  defaultTarget: ConversationOpenTarget
+  threshold: number | null
+}> {
+  const settings = await getSystemOpenTargetSettings()
+  return {
+    defaultTarget: settings.conversation_open_target,
+    threshold: settings.conversation_window_threshold,
+  }
+}
+
+export async function updateSystemConversationOpenSettings(params: {
+  defaultTarget: ConversationOpenTarget
+  threshold: number | null
+}): Promise<{
+  defaultTarget: ConversationOpenTarget
+  threshold: number | null
+}> {
+  const current = await getSystemOpenTargetSettings()
+  const next = await updateSystemOpenTargetSettings({
+    ...current,
+    conversation_open_target: params.defaultTarget,
+    conversation_window_threshold: params.threshold,
+  })
+  return {
+    defaultTarget: next.conversation_open_target,
+    threshold: next.conversation_window_threshold,
+  }
 }
 
 export type SettingsSection =

@@ -106,6 +106,7 @@ mod tauri_app {
             .manage(ChatChannelManager::new())
             .manage(windows::SettingsWindowState::new())
             .manage(windows::CommitWindowState::new())
+            .manage(windows::ConversationWindowState::new())
             .manage(windows::MergeWindowState::new())
             .manage(web::WebServerState::new())
             .manage(std::sync::Arc::new(
@@ -277,6 +278,35 @@ mod tauri_app {
                     });
                 }
 
+                if label.starts_with("conversation-")
+                    && matches!(
+                        event,
+                        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+                    )
+                {
+                    let app = window.app_handle();
+                    if let Some(state) = app.try_state::<windows::ConversationWindowState>() {
+                        windows::cleanup_conversation_window(&state, &label);
+                    }
+                    if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                        if let Some(cm) = app.try_state::<ConnectionManager>() {
+                            let disconnected =
+                                tauri::async_runtime::block_on(cm.disconnect_by_owner_window(&label));
+                            eprintln!(
+                                "[ACP] conversation window closing disconnected_connections={}",
+                                disconnected
+                            );
+                        }
+                        if let Some(tm) = app.try_state::<TerminalManager>() {
+                            let killed = tm.kill_by_owner_window(&label);
+                            eprintln!(
+                                "[TERM] conversation window closing killed_terminals={}",
+                                killed
+                            );
+                        }
+                    }
+                }
+
                 if label == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                     let app = window.app_handle();
                     if let Some(cm) = app.try_state::<ConnectionManager>() {
@@ -383,6 +413,7 @@ mod tauri_app {
                 folders::git_commit_branches,
                 windows::open_folder_window,
                 windows::open_commit_window,
+                windows::open_conversation_window,
                 windows::open_settings_window,
                 windows::open_merge_window,
                 windows::open_stash_window,

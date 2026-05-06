@@ -138,11 +138,22 @@
     "openTargetTitle": "Dateien öffnen",
     "defaultOpenTarget": "Standardziel zum Öffnen",
     "defaultOpenTargetDescription": "Standardort zum Öffnen von Dateien und Ordnern",
-    "openTargetDesktopOnly": "Das Öffnen in einem nativen Editor ist nur in der Desktop-App verfügbar.",
+    "openTargetDesktopOnly": "Desktop-spezifische Öffnungsziele sind nur in der Desktop-App verfügbar.",
     "openTargetSaveFailed": "Öffnungsziel konnte nicht gespeichert werden: {message}",
     "webFileOpenMethod": "Webdateien öffnen",
     "webFileOpenMethodDescription": "Standardmethode zum Öffnen von HTML- und anderen Webdateien",
     "webFileOpenMethodSaveFailed": "Einstellungen zum Öffnen von Webdateien konnten nicht gespeichert werden: {message}",
+    "conversationOpenTarget": "Konversationsöffnung",
+    "conversationOpenTargetDescription": "Standardort zum Öffnen vorhandener Konversationen.",
+    "conversationOpenTargetSaveFailed": "Konversations-Öffnungseinstellungen konnten nicht gespeichert werden: {message}",
+    "conversationWindowThreshold": "In neuem Fenster öffnen ab Tab-Anzahl",
+    "conversationWindowThresholdPlaceholder": "Leer lassen zum Deaktivieren",
+    "conversationWindowThresholdDescription": "Es werden nur Konversations-Tabs im Hauptarbeitsbereich gezählt. Eigenständige Konversationsfenster werden nicht mitgezählt.",
+    "conversationWindowThresholdSaveFailed": "Der Schwellenwert für das Öffnen im neuen Fenster konnte nicht gespeichert werden: {message}",
+    "conversationOpenTargets": {
+      "tab": "Im Tab öffnen",
+      "window": "Im Fenster öffnen"
+    },
     "openTargets": {
       "vscode": "VS Code",
       "file_manager": "Dateimanager",
@@ -757,6 +768,13 @@
     "title": "Einchecken",
     "invalidFolderId": "Ungültige Ordner-ID",
     "loadingRepo": "Repository wird geladen..."
+  },
+  "ConversationPage": {
+    "title": "Unterhaltung",
+    "invalidConversationId": "Ungültige Unterhaltungs-ID",
+    "loadingConversation": "Unterhaltung wird geladen...",
+    "linkedFolderOpenFailed": "Verknüpfter Ordner konnte nicht geöffnet werden",
+    "linkedConversationNotFound": "Verknüpfte Unterhaltung nicht gefunden"
   },
   "MergePage": {
     "title": "Konflikte lösen",

@@ -1,9 +1,11 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
+import { useOpenConversation } from "@/hooks/use-open-conversation"
 import type { AgentType } from "@/lib/types"
 
 /**
@@ -11,9 +13,11 @@ import type { AgentType } from "@/lib/types"
  * Runs once after both folders and tabs have hydrated.
  */
 export function DeepLinkBootstrap() {
+  const t = useTranslations("ConversationPage")
   const { foldersHydrated, folders, addFolderToWorkspaceById, conversations } =
     useAppWorkspace()
-  const { tabsHydrated, openTab } = useTabContext()
+  const { tabsHydrated } = useTabContext()
+  const openConversation = useOpenConversation()
   const ranRef = useRef(false)
 
   useEffect(() => {
@@ -55,7 +59,7 @@ export function DeepLinkBootstrap() {
             folder = await addFolderToWorkspaceById(folderId)
           } catch (err) {
             console.error("[DeepLinkBootstrap] open folder failed:", err)
-            toast.error("Unable to open linked folder")
+            toast.error(t("linkedFolderOpenFailed"))
             return
           }
         }
@@ -67,11 +71,16 @@ export function DeepLinkBootstrap() {
             c.agent_type === rawAgent
         )
         if (!hasConv) {
-          toast.error("Linked conversation not found")
+          toast.error(t("linkedConversationNotFound"))
           return
         }
 
-        openTab(folderId, conversationId, rawAgent, true)
+        await openConversation({
+          folderId,
+          conversationId,
+          agentType: rawAgent,
+          pin: true,
+        })
       } finally {
         clearUrl()
       }
@@ -82,7 +91,8 @@ export function DeepLinkBootstrap() {
     folders,
     conversations,
     addFolderToWorkspaceById,
-    openTab,
+    openConversation,
+    t,
   ])
 
   return null
