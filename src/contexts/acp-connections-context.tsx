@@ -631,9 +631,13 @@ function applyStreamingAction(
   conn: ConnectionState,
   action: StreamingAction
 ): ConnectionState | null {
-  if (action.text.length === 0) return null
-  const prev = ensureLiveMessage(conn.liveMessage)
+  // CONTENT_DELTA with empty text is a true no-op. THINKING with empty text
+  // is allowed to create the initial placeholder block so the UI can show
+  // a "Thinking..." indicator immediately (and for newer Claude models that
+  // redact thinking text entirely, keeping the empty block as the signal).
+  if (action.type === "CONTENT_DELTA" && action.text.length === 0) return null
 
+  const prev = ensureLiveMessage(conn.liveMessage)
   const lastBlock = prev.content[prev.content.length - 1]
   let newContent: LiveContentBlock[] | null = null
 
@@ -647,6 +651,10 @@ function applyStreamingAction(
       newContent = [...prev.content, { type: "text", text: action.text }]
     }
   } else {
+    if (action.text.length === 0 && lastBlock?.type === "thinking") {
+      // Already have a thinking block; an empty follow-up event is a no-op.
+      return null
+    }
     if (lastBlock?.type === "thinking") {
       newContent = [
         ...prev.content.slice(0, -1),

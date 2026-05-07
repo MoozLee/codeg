@@ -889,7 +889,7 @@
       "sortByCreatedAt": "Data de criação",
       "sortByUpdatedAt": "Data de atualização",
       "statusRunningBadge": "Executando",
-      "statusFailedBadge": "Falhou",
+      "statusCancelledBadge": "Cancelado",
       "conversationCountUnit": "{count, plural, one {# conversa} other {# conversas}}",
       "emptyFolderHint": "Sem conversas",
       "noMatchingConversations": "Nenhuma conversa correspondente",

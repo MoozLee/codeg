@@ -36,6 +36,7 @@ interface ReasoningContextValue {
   isOpen: boolean
   setIsOpen: (open: boolean) => void
   duration: number | undefined
+  expandable: boolean
 }
 
 const ReasoningContext = createContext<ReasoningContextValue | null>(null)
@@ -54,6 +55,7 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
   duration?: number
+  expandable?: boolean
 }
 
 const AUTO_CLOSE_DELAY = 1000
@@ -67,17 +69,20 @@ export const Reasoning = memo(
     defaultOpen,
     onOpenChange,
     duration: durationProp,
+    expandable = true,
     children,
     ...props
   }: ReasoningProps) => {
-    const resolvedDefaultOpen = defaultOpen ?? isStreaming
+    const resolvedDefaultOpen = expandable
+      ? (defaultOpen ?? isStreaming)
+      : false
     // Track if defaultOpen was explicitly set to false (to prevent auto-open)
-    const isExplicitlyClosed = defaultOpen === false
+    const isExplicitlyClosed = defaultOpen === false || !expandable
 
     const [isOpen, setIsOpen] = useControllableState<boolean>({
       defaultProp: resolvedDefaultOpen,
       onChange: onOpenChange,
-      prop: open,
+      prop: expandable ? open : false,
     })
     const [duration, setDuration] = useControllableState<number | undefined>({
       defaultProp: undefined,
@@ -133,8 +138,8 @@ export const Reasoning = memo(
     )
 
     const contextValue = useMemo(
-      () => ({ duration, isOpen, isStreaming, setIsOpen }),
-      [duration, isOpen, isStreaming, setIsOpen]
+      () => ({ duration, isOpen, isStreaming, setIsOpen, expandable }),
+      [duration, isOpen, isStreaming, setIsOpen, expandable]
     )
 
     return (
@@ -166,7 +171,7 @@ export const ReasoningTrigger = memo(
     ...props
   }: ReasoningTriggerProps) => {
     const t = useTranslations("Folder.chat.reasoning")
-    const { isStreaming, isOpen, duration } = useReasoning()
+    const { isStreaming, isOpen, duration, expandable } = useReasoning()
     const defaultGetThinkingMessage = useCallback(
       (nextIsStreaming: boolean, nextDuration?: number) => {
         if (nextIsStreaming || nextDuration === 0) {
@@ -185,21 +190,27 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+          "flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors",
+          expandable
+            ? "hover:text-foreground"
+            : "cursor-default hover:text-muted-foreground",
           className
         )}
+        disabled={!expandable}
         {...props}
       >
         {children ?? (
           <>
             <BrainIcon className="size-4" />
             {thinkingMessageBuilder(isStreaming, duration)}
-            <ChevronDownIcon
-              className={cn(
-                "size-4 transition-transform",
-                isOpen ? "rotate-180" : "rotate-0"
-              )}
-            />
+            {expandable && (
+              <ChevronDownIcon
+                className={cn(
+                  "size-4 transition-transform",
+                  isOpen ? "rotate-180" : "rotate-0"
+                )}
+              />
+            )}
           </>
         )}
       </CollapsibleTrigger>

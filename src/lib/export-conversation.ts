@@ -191,6 +191,7 @@ function blocksToMarkdown(
         case "text":
           return block.text
         case "thinking":
+          if (block.text.trim().length === 0) return ""
           return block.text
             .split("\n")
             .map((line) => `> ${line}`)
@@ -230,6 +231,7 @@ function blocksToHtml(blocks: ContentBlock[], labels: ExportLabels): string {
         case "text":
           return `<div class="text-block">${escapeHtml(block.text).replace(/\n/g, "<br>")}</div>`
         case "thinking":
+          if (block.text.trim().length === 0) return ""
           return `<blockquote class="thinking">${escapeHtml(block.text).replace(/\n/g, "<br>")}</blockquote>`
         case "tool_use": {
           const name = formatToolName(block.tool_name)

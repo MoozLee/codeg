@@ -1,6 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "tauri-runtime")]
@@ -25,6 +26,9 @@ use crate::models::agent::AgentType;
 use crate::web::event_bridge::EventEmitter;
 
 const ACP_AGENTS_UPDATED_EVENT: &str = "app://acp-agents-updated";
+const NPM_PREFIX_TIMEOUT: Duration = Duration::from_millis(1500);
+
+static NPM_GLOBAL_PREFIX_CACHE: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -120,11 +124,145 @@ fn package_name_from_spec(package: &str) -> String {
     normalized.to_string()
 }
 
-/// Check whether a command is available on the system PATH.
-/// Uses `which` on unix and `where` on windows — lightweight and does not
-/// invoke the target binary itself, avoiding side-effects or slow startups.
-pub(crate) fn is_cmd_available(cmd: &str) -> bool {
-    which::which(cmd).is_ok()
+/// Check whether an NPX agent command is spawnable.
+/// Uses PATH first, then falls back to the current npm global prefix to handle
+/// GUI environments that don't inherit the user's shell PATH.
+pub(crate) async fn is_cmd_available(cmd: &str) -> bool {
+    resolve_npx_command(cmd).await.is_some()
+}
+
+fn resolve_command_on_path(cmd: &str) -> Option<PathBuf> {
+    which::which(cmd).ok()
+}
+
+pub(crate) async fn resolve_npx_command(cmd: &str) -> Option<PathBuf> {
+    if let Some(path) = resolve_command_on_path(cmd) {
+        return Some(path);
+    }
+    resolve_npx_command_from_current_npm_prefix(cmd).await
+}
+
+#[derive(Default)]
+struct NpxCommandResolver {
+    per_cmd_cache: HashMap<String, Option<PathBuf>>,
+    request_npm_prefix: Option<Option<PathBuf>>,
+}
+
+impl NpxCommandResolver {
+    async fn resolve_for_list(&mut self, cmd: &str) -> Option<PathBuf> {
+        if let Some(cached) = self.per_cmd_cache.get(cmd) {
+            return cached.clone();
+        }
+
+        let resolved = if let Some(path) = resolve_command_on_path(cmd) {
+            Some(path)
+        } else {
+            let prefix = if let Some(prefix) = &self.request_npm_prefix {
+                prefix.clone()
+            } else {
+                let resolved_prefix = cached_npm_global_prefix().await;
+                self.request_npm_prefix = Some(resolved_prefix.clone());
+                resolved_prefix
+            };
+            prefix.and_then(|p| resolve_npx_command_from_npm_prefix(cmd, &p))
+        };
+
+        self.per_cmd_cache.insert(cmd.to_string(), resolved.clone());
+        resolved
+    }
+}
+
+async fn resolve_npx_command_from_current_npm_prefix(cmd: &str) -> Option<PathBuf> {
+    let prefix = cached_npm_global_prefix().await?;
+    resolve_npx_command_from_npm_prefix(cmd, &prefix)
+}
+
+async fn cached_npm_global_prefix() -> Option<PathBuf> {
+    cached_npm_global_prefix_with(&NPM_GLOBAL_PREFIX_CACHE, resolve_current_npm_global_prefix).await
+}
+
+async fn cached_npm_global_prefix_with<F, Fut>(
+    cache: &tokio::sync::OnceCell<PathBuf>,
+    resolve: F,
+) -> Option<PathBuf>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Option<PathBuf>>,
+{
+    if let Some(prefix) = cache.get() {
+        return Some(prefix.clone());
+    }
+
+    let resolved = resolve().await?;
+    match cache.set(resolved.clone()) {
+        Ok(()) => Some(resolved),
+        Err(_) => cache.get().cloned(),
+    }
+}
+
+async fn resolve_current_npm_global_prefix() -> Option<PathBuf> {
+    let npm_path = which::which("npm").ok()?;
+    let mut cmd = crate::process::tokio_command(npm_path);
+    cmd.arg("prefix").arg("-g").kill_on_drop(true);
+    let output = tokio::time::timeout(NPM_PREFIX_TIMEOUT, cmd.output())
+        .await
+        .ok()?
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    npm_global_prefix_from_stdout(&output.stdout)
+}
+
+fn npm_global_prefix_from_stdout(stdout: &[u8]) -> Option<PathBuf> {
+    let stdout_text = String::from_utf8_lossy(stdout);
+    let prefix = stdout_text.lines().next()?.trim();
+    if prefix.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(prefix))
+}
+
+fn npm_prefix_bin_dir(prefix: &Path) -> PathBuf {
+    if cfg!(windows) {
+        prefix.to_path_buf()
+    } else {
+        prefix.join("bin")
+    }
+}
+
+fn resolve_npx_command_from_npm_prefix(cmd: &str, prefix: &Path) -> Option<PathBuf> {
+    let bin_dir = npm_prefix_bin_dir(prefix);
+
+    #[cfg(windows)]
+    let candidates = [
+        bin_dir.join(format!("{cmd}.cmd")),
+        bin_dir.join(format!("{cmd}.exe")),
+        bin_dir.join(cmd),
+    ];
+
+    #[cfg(not(windows))]
+    let candidates = [bin_dir.join(cmd)];
+
+    candidates
+        .into_iter()
+        .find(|path| is_npm_command_candidate(path))
+}
+
+#[cfg(windows)]
+fn is_npm_command_candidate(path: &Path) -> bool {
+    path.is_file()
+}
+
+#[cfg(not(windows))]
+fn is_npm_command_candidate(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    path.is_file()
+        && path
+            .metadata()
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
 }
 
 /// Verify that the agent SDK / binary is installed and usable.
@@ -134,14 +272,14 @@ pub(crate) fn is_cmd_available(cmd: &str) -> bool {
 /// agent isn't ready we return `AcpError::SdkNotInstalled` immediately
 /// and let the frontend prompt the user to install from Agent Settings.
 ///
-/// For NPX agents: checks the command exists on PATH.
+/// For NPX agents: checks the command is spawnable in this process environment.
 /// For Binary agents: checks platform support and that the binary is
 /// already cached locally.
-pub(crate) fn verify_agent_installed(agent_type: AgentType) -> Result<(), AcpError> {
+pub(crate) async fn verify_agent_installed(agent_type: AgentType) -> Result<(), AcpError> {
     let meta = registry::get_agent_meta(agent_type);
     match meta.distribution {
         registry::AgentDistribution::Npx { cmd, .. } => {
-            if !is_cmd_available(cmd) {
+            if !is_cmd_available(cmd).await {
                 // INVARIANT: the substring "is not installed" is matched
                 // verbatim by the frontend catch block in
                 // `src/contexts/acp-connections-context.tsx` to surface a
@@ -232,7 +370,7 @@ async fn detect_local_version(agent_type: AgentType) -> Option<String> {
     let meta = registry::get_agent_meta(agent_type);
     match meta.distribution {
         registry::AgentDistribution::Npx { cmd, package, .. } => {
-            if !is_cmd_available(cmd) {
+            if !is_cmd_available(cmd).await {
                 return None;
             }
             // Try `npm list -g <package_name> --json` to get the real installed version.
@@ -2163,7 +2301,7 @@ pub async fn acp_connect(
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
     // can prompt the user to install it from Agent Settings.
-    verify_agent_installed(agent_type)?;
+    verify_agent_installed(agent_type).await?;
 
     apply_agent_connect_runtime_overrides(agent_type, session_id.as_deref(), &mut runtime_env)?;
 
@@ -2222,9 +2360,10 @@ pub async fn acp_set_config_option(
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_cancel(
     connection_id: String,
+    db: State<'_, AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
-    manager.cancel(&connection_id).await
+    manager.cancel(&db.conn, &connection_id).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -2329,9 +2468,11 @@ pub(crate) async fn acp_get_agent_status_core(
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
     let (available, installed_version) = match &meta.distribution {
-        registry::AgentDistribution::Npx { .. } => (
+        registry::AgentDistribution::Npx { cmd, .. } => (
             true,
-            setting.as_ref().and_then(|m| m.installed_version.clone()),
+            resolve_npx_command(cmd)
+                .await
+                .and_then(|_| setting.as_ref().and_then(|m| m.installed_version.clone())),
         ),
         registry::AgentDistribution::Binary { platforms, cmd, .. } => {
             let detected = binary_cache::detect_installed_version(agent_type, cmd)
@@ -2382,13 +2523,19 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
     let mut agents = Vec::new();
+    let mut npx_resolver = NpxCommandResolver::default();
     for (idx, agent_type) in agent_types.into_iter().enumerate() {
         let setting = settings_map.get(&agent_type);
         let meta = registry::get_agent_meta(agent_type);
         let (available, dist_type, local_installed_version) = match &meta.distribution {
-            registry::AgentDistribution::Npx { .. } => {
-                // Use DB cached version for fast loading; updated during install/upgrade
-                let cached = setting.and_then(|m| m.installed_version.clone());
+            registry::AgentDistribution::Npx { cmd, .. } => {
+                // Keep the list path bounded: each list request probes npm
+                // global prefix at most once, then reuses the result across
+                // all NPX agents in the loop.
+                let cached = npx_resolver
+                    .resolve_for_list(cmd)
+                    .await
+                    .and_then(|_| setting.and_then(|m| m.installed_version.clone()));
                 (true, "npx", cached)
             }
             registry::AgentDistribution::Binary { platforms, cmd, .. } => {
@@ -3669,4 +3816,82 @@ enabled = false
         assert!(root.get("notify").is_some());
         assert!(root.get("plugins").is_none());
     }
+
+    use super::*;
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("codeg-acp-{name}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create test directory");
+        dir
+    }
+
+    #[test]
+    fn parses_npm_global_prefix_stdout() {
+        let prefix = npm_global_prefix_from_stdout(b"npm-prefix
+");
+        assert_eq!(prefix.as_deref(), Some(Path::new("npm-prefix")));
+
+        assert_eq!(npm_global_prefix_from_stdout(b"
+"), None);
+    }
+
+    #[test]
+    fn resolves_npx_command_from_npm_prefix_bin_dir() {
+        let prefix = unique_test_dir("npm-prefix");
+        let bin_dir = npm_prefix_bin_dir(&prefix);
+        std::fs::create_dir_all(&bin_dir).expect("create npm prefix bin directory");
+
+        #[cfg(windows)]
+        let command_path = bin_dir.join("gemini.cmd");
+        #[cfg(not(windows))]
+        let command_path = bin_dir.join("gemini");
+
+        std::fs::write(&command_path, "").expect("write command shim");
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = std::fs::metadata(&command_path)
+                .expect("read command shim metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&command_path, permissions)
+                .expect("mark command shim executable");
+        }
+
+        let resolved = resolve_npx_command_from_npm_prefix("gemini", &prefix);
+
+        assert_eq!(resolved.as_deref(), Some(command_path.as_path()));
+        let _ = std::fs::remove_dir_all(prefix);
+    }
+
+    #[tokio::test]
+    async fn does_not_cache_failed_npm_global_prefix_resolution() {
+        let cache = tokio::sync::OnceCell::const_new();
+        let first = cached_npm_global_prefix_with(&cache, || async { None }).await;
+        assert_eq!(first, None);
+
+        let expected = PathBuf::from("npm-prefix");
+        let second =
+            cached_npm_global_prefix_with(&cache, || async { Some(expected.clone()) }).await;
+
+        assert_eq!(second, Some(expected));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn ignores_non_executable_npx_command_from_npm_prefix_bin_dir() {
+        let prefix = unique_test_dir("npm-prefix-non-executable");
+        let bin_dir = npm_prefix_bin_dir(&prefix);
+        std::fs::create_dir_all(&bin_dir).expect("create npm prefix bin directory");
+        let command_path = bin_dir.join("gemini");
+        std::fs::write(&command_path, "").expect("write command shim");
+
+        let resolved = resolve_npx_command_from_npm_prefix("gemini", &prefix);
+
+        assert_eq!(resolved, None);
+        let _ = std::fs::remove_dir_all(prefix);
+    }
+
 }

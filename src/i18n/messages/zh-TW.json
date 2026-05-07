@@ -889,7 +889,7 @@
       "sortByCreatedAt": "按建立時間排序",
       "sortByUpdatedAt": "按更新時間排序",
       "statusRunningBadge": "運行中",
-      "statusFailedBadge": "失敗",
+      "statusCancelledBadge": "已取消",
       "conversationCountUnit": "{count} 條",
       "emptyFolderHint": "暫無對話",
       "noMatchingConversations": "找不到符合的對話",

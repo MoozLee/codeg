@@ -124,8 +124,9 @@ pub(crate) async fn handle_event(
             // with OpenCode — a silent EndTurn that produced no output), so
             // we flip to `Cancelled` and pair the transition with an
             // `AcpEvent::Error` toast emitted upstream by `connection.rs`.
-            // `cancelled` is already handled by the user-cancel path, so we
-            // leave it alone here. `completed` transitions remain
+            // `cancelled` is already written by `manager.cancel()` (eager
+            // CAS InProgress → Cancelled at the user-cancel entry point), so
+            // we leave it alone here. `completed` transitions remain
             // frontend-driven.
             let target_status = match stop_reason.as_str() {
                 "end_turn" => ConversationStatus::PendingReview,
@@ -562,9 +563,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_event_skips_write_on_cancelled_stop_reason() {
-        // `cancelled` is already handled by the user-cancel path
-        // (handle_terminal_event sets Cancelled via CAS), so the TurnComplete
-        // arm must not double-write.
+        // `cancelled` is already written by `manager.cancel()` (eager CAS
+        // InProgress → Cancelled at the user-cancel entry point), so the
+        // TurnComplete arm must not double-write.
         let db = test_helpers::fresh_in_memory_db().await;
         let folder_id = test_helpers::seed_folder(&db, "/tmp/turn-cancelled").await;
         let conv =

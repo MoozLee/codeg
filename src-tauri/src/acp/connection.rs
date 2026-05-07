@@ -177,9 +177,10 @@ async fn build_agent(
                 parts.push(format!("{k}={v}"));
             }
             parts.push(
-                which::which(cmd)
+                crate::commands::acp::resolve_npx_command(cmd)
+                    .await
                     .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| {
+                    .unwrap_or_else(|| {
                         crate::process::normalized_program(cmd)
                             .to_string_lossy()
                             .to_string()

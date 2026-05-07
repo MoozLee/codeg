@@ -407,9 +407,11 @@ function buildStreamingTurnsFromLiveMessage(
         }
         break
       case "thinking":
-        if (block.text.length > 0) {
-          currentBlocks.push({ type: "thinking", text: block.text })
-        }
+        // Keep empty thinking blocks during streaming so the reasoning UI
+        // can show its "Thinking..." indicator before any reasoning text
+        // arrives (and for newer Claude models that redact reasoning text
+        // entirely while still emitting thinking blocks).
+        currentBlocks.push({ type: "thinking", text: block.text })
         break
       case "plan": {
         currentBlocks.push({

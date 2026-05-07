@@ -6,7 +6,8 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
+    ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, DatabaseConnection, EntityTrait,
+    TransactionTrait,
 };
 
 use crate::acp::connection::{spawn_agent_connection, AgentConnection, ConnectionCommand};
@@ -647,18 +648,58 @@ impl ConnectionManager {
             .map_err(|_| AcpError::ProcessExited)
     }
 
-    pub async fn cancel(&self, conn_id: &str) -> Result<(), AcpError> {
-        let cmd_tx = {
+    pub async fn cancel(&self, db: &DatabaseConnection, conn_id: &str) -> Result<(), AcpError> {
+        let (cmd_tx, state_arc, emitter) = {
             let connections = self.connections.lock().await;
             let conn = connections
                 .get(conn_id)
                 .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
-            conn.cmd_tx.clone()
+            (conn.cmd_tx.clone(), conn.state.clone(), conn.emitter.clone())
         };
         cmd_tx
             .send(ConnectionCommand::Cancel)
             .await
-            .map_err(|_| AcpError::ProcessExited)
+            .map_err(|_| AcpError::ProcessExited)?;
+
+        // Eagerly flip the row to `Cancelled` so the sidebar/tabs leave the
+        // "running" state immediately. The agent typically replies with
+        // `TurnComplete{cancelled}` which the lifecycle subscriber ignores,
+        // and stays connected (so `handle_terminal_event` doesn't fire either)
+        // — without this write the row would strand on `InProgress`.
+        // CAS-guarded so we don't overwrite a `PendingReview`/`Completed`
+        // status if the turn happened to end just before the user clicked.
+        let conversation_id = state_arc.read().await.conversation_id;
+        if let Some(cid) = conversation_id {
+            match conversation_service::update_status_if(
+                db,
+                cid,
+                ConversationStatus::InProgress,
+                ConversationStatus::Cancelled,
+            )
+            .await
+            {
+                Ok(true) => {
+                    emit_with_state(
+                        &state_arc,
+                        &emitter,
+                        AcpEvent::ConversationStatusChanged {
+                            conversation_id: cid,
+                            status: ConversationStatus::Cancelled,
+                        },
+                    )
+                    .await;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!(
+                        "[ACP][ERROR] failed to mark conversation {cid} cancelled \
+                         on user cancel (conn={conn_id}): {e}"
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn respond_permission(

@@ -889,7 +889,7 @@
       "sortByCreatedAt": "생성 시간순",
       "sortByUpdatedAt": "업데이트 시간순",
       "statusRunningBadge": "실행 중",
-      "statusFailedBadge": "실패",
+      "statusCancelledBadge": "취소됨",
       "conversationCountUnit": "{count}개",
       "emptyFolderHint": "대화 없음",
       "noMatchingConversations": "일치하는 대화가 없습니다",

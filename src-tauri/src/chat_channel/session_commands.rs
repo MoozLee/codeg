@@ -557,8 +557,9 @@ pub async fn handle_cancel(
         }
     };
 
-    // Cancel the ACP connection
-    let _ = conn_mgr.cancel(&connection_id).await;
+    // Cancel the ACP connection (also CAS-updates the row to Cancelled and
+    // emits ConversationStatusChanged when the row is still InProgress).
+    let _ = conn_mgr.cancel(db, &connection_id).await;
 
     // Remove from bridge
     bridge.lock().await.remove(&connection_id);

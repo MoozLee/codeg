@@ -889,7 +889,7 @@
       "sortByCreatedAt": "وقت الإنشاء",
       "sortByUpdatedAt": "وقت التحديث",
       "statusRunningBadge": "قيد التشغيل",
-      "statusFailedBadge": "فشل",
+      "statusCancelledBadge": "ملغى",
       "conversationCountUnit": "{count} محادثة",
       "emptyFolderHint": "لا توجد محادثات",
       "noMatchingConversations": "لا توجد محادثات مطابقة",

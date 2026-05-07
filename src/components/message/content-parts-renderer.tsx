@@ -2390,10 +2390,12 @@ const ReasoningPart = memo(function ReasoningPart({
 }: {
   part: Extract<AdaptedContentPart, { type: "reasoning" }>
 }) {
+  const hasContent = part.content.trim().length > 0
+  const expandable = hasContent || part.isStreaming
   return (
-    <Reasoning isStreaming={part.isStreaming}>
+    <Reasoning isStreaming={part.isStreaming} expandable={expandable}>
       <ReasoningTrigger />
-      <ReasoningContent>{part.content}</ReasoningContent>
+      {expandable && <ReasoningContent>{part.content}</ReasoningContent>}
     </Reasoning>
   )
 })
