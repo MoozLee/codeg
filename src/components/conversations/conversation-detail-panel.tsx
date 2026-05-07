@@ -91,6 +91,17 @@ interface ConversationTabViewProps {
   reloadSignal: number
 }
 
+function createOptimisticUserIdentity(): {
+  id: string
+  anchorId: string
+} {
+  const optimisticId = randomUUID()
+  return {
+    id: `optimistic-${optimisticId}`,
+    anchorId: `optimistic:${optimisticId}`,
+  }
+}
+
 function buildOptimisticUserTurnFromDraft(
   draft: PromptDraft,
   attachedResourcesFallback: string
@@ -119,8 +130,11 @@ function buildOptimisticUserTurnFromDraft(
   }
   blocks.push({ type: "text", text })
 
+  const optimisticIdentity = createOptimisticUserIdentity()
+
   return {
-    id: `optimistic-${randomUUID()}`,
+    id: optimisticIdentity.id,
+    anchor_id: optimisticIdentity.anchorId,
     role: "user",
     blocks,
     timestamp: new Date().toISOString(),
@@ -186,7 +200,7 @@ const ConversationTabView = memo(function ConversationTabView({
   const tWelcome = useTranslations("Folder.chat.welcomeInputPanel")
   const sharedT = useTranslations("Folder.chat.shared")
   const { activeFolder: folder, activeFolderId } = useActiveFolder()
-  const { refreshConversations } = useAppWorkspace()
+  const { refreshConversations, updateConversationLocal } = useAppWorkspace()
   const folderId = activeFolderId ?? 0
   const {
     tabs,
@@ -684,13 +698,19 @@ const ConversationTabView = memo(function ConversationTabView({
       setSyncState(effectiveConversationId, "awaiting_persist")
       setHasSentMessage(true)
 
+      const persistedId = dbConvIdRef.current
+      if (persistedId != null) {
+        updateConversationLocal(persistedId, { status: "in_progress" })
+      } else {
+        void refreshConversations()
+      }
+
       // Pin the tab if it was a temporary preview (single-click opened)
       const currentTab = tabs.find((tab) => tab.id === tabId)
       if (currentTab && !currentTab.isPinned) {
         pinTab(tabId)
       }
 
-      const persistedId = dbConvIdRef.current
       if (persistedId) {
         // Existing-tab path: row already exists, send immediately with the
         // conversation_id pinned so the backend reuses our row instead of
@@ -771,6 +791,7 @@ const ConversationTabView = memo(function ConversationTabView({
       pinTab,
       refreshConversations,
       selectedAgent,
+      updateConversationLocal,
       setExternalId,
       setPendingCleanup,
       setSyncState,
@@ -799,6 +820,10 @@ const ConversationTabView = memo(function ConversationTabView({
         sessionIdRef.current = forkedSessionId
         setExternalId(effectiveConversationId, forkedSessionId)
 
+        const persistedId = dbConvIdRef.current
+        if (persistedId != null) {
+          updateConversationLocal(persistedId, { status: "in_progress" })
+        }
         refreshConversations()
         // Send the message on the forked session (S2)
         handleSend(draft, selectedModeIdArg)
@@ -822,6 +847,7 @@ const ConversationTabView = memo(function ConversationTabView({
       handleSend,
       refreshConversations,
       setExternalId,
+      updateConversationLocal,
       t,
     ]
   )
@@ -891,8 +917,10 @@ const ConversationTabView = memo(function ConversationTabView({
   const handleAnswerQuestion = useCallback(
     (answer: string) => {
       if (connStatus !== "connected") return
+      const optimisticIdentity = createOptimisticUserIdentity()
       const optimisticTurn: MessageTurn = {
-        id: `optimistic-${randomUUID()}`,
+        id: optimisticIdentity.id,
+        anchor_id: optimisticIdentity.anchorId,
         role: "user",
         blocks: [{ type: "text", text: answer }],
         timestamp: new Date().toISOString(),
@@ -904,6 +932,10 @@ const ConversationTabView = memo(function ConversationTabView({
       )
       setSendSignal((prev) => prev + 1)
       setSyncState(effectiveConversationId, "awaiting_persist")
+      const persistedId = dbConvIdRef.current
+      if (persistedId != null) {
+        updateConversationLocal(persistedId, { status: "in_progress" })
+      }
       lifecycleSend(
         { blocks: [{ type: "text", text: answer }], displayText: answer },
         null
@@ -915,6 +947,7 @@ const ConversationTabView = memo(function ConversationTabView({
       effectiveConversationId,
       lifecycleSend,
       setSyncState,
+      updateConversationLocal,
     ]
   )
 

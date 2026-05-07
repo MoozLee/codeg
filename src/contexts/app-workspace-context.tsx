@@ -31,6 +31,20 @@ import type {
   FolderDetail,
 } from "@/lib/types"
 
+interface ConversationSummaryLocalSync {
+  id: number
+  folderId?: number
+  agentType?: AgentType
+  title?: string | null
+  status?: DbConversationSummary["status"]
+  model?: string | null
+  gitBranch?: string | null
+  externalId?: string | null
+  messageCount?: number
+  createdAt?: string
+  updatedAt?: string
+}
+
 interface AppWorkspaceContextValue {
   folders: FolderDetail[]
   allFolders: FolderDetail[]
@@ -46,6 +60,7 @@ interface AppWorkspaceContextValue {
     id: number,
     patch: Partial<Pick<DbConversationSummary, "status" | "title">>
   ) => void
+  syncConversationSummaryLocal: (sync: ConversationSummaryLocalSync) => void
 
   branches: Map<number, string | null>
   getBranch: (folderId: number) => string | null | undefined
@@ -183,17 +198,98 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     [allFolders]
   )
 
+  const syncConversationSummaryLocal = useCallback(
+    ({
+      id,
+      folderId,
+      agentType,
+      title,
+      status,
+      model,
+      gitBranch,
+      externalId,
+      messageCount,
+      createdAt,
+      updatedAt,
+    }: ConversationSummaryLocalSync) => {
+      setConversations((prev) => {
+        const now = new Date().toISOString()
+        const nextUpdatedAt = updatedAt ?? now
+        const existingIndex = prev.findIndex(
+          (conversation) => conversation.id === id
+        )
+
+        if (existingIndex >= 0) {
+          const existing = prev[existingIndex]
+          const nextMessageCount =
+            messageCount !== undefined
+              ? Math.max(existing.message_count, messageCount)
+              : existing.message_count
+          const nextConversation: DbConversationSummary = {
+            ...existing,
+            ...(folderId != null ? { folder_id: folderId } : {}),
+            ...(agentType ? { agent_type: agentType } : {}),
+            ...(title !== undefined ? { title } : {}),
+            ...(status ? { status } : {}),
+            ...(model !== undefined ? { model } : {}),
+            ...(gitBranch !== undefined ? { git_branch: gitBranch } : {}),
+            ...(externalId !== undefined ? { external_id: externalId } : {}),
+            message_count: nextMessageCount,
+            updated_at: nextUpdatedAt,
+          }
+
+          const changed =
+            nextConversation.folder_id !== existing.folder_id ||
+            nextConversation.agent_type !== existing.agent_type ||
+            nextConversation.title !== existing.title ||
+            nextConversation.status !== existing.status ||
+            nextConversation.model !== existing.model ||
+            nextConversation.git_branch !== existing.git_branch ||
+            nextConversation.external_id !== existing.external_id ||
+            nextConversation.message_count !== existing.message_count ||
+            nextConversation.updated_at !== existing.updated_at
+
+          if (!changed) {
+            return prev
+          }
+
+          const next = [...prev]
+          next[existingIndex] = nextConversation
+          return next
+        }
+
+        if (folderId == null || !agentType) {
+          return prev
+        }
+
+        const newConversation: DbConversationSummary = {
+          id,
+          folder_id: folderId,
+          title: title ?? null,
+          agent_type: agentType,
+          status: status ?? "in_progress",
+          model: model ?? null,
+          git_branch: gitBranch ?? null,
+          external_id: externalId ?? null,
+          message_count: messageCount ?? 0,
+          created_at: createdAt ?? nextUpdatedAt,
+          updated_at: nextUpdatedAt,
+        }
+
+        return [...prev, newConversation]
+      })
+    },
+    []
+  )
+
   const updateConversationLocal = useCallback(
     (
       id: number,
       patch: Partial<Pick<DbConversationSummary, "status" | "title">>
     ) => {
-      const now = new Date().toISOString()
-      setConversations((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, ...patch, updated_at: now } : c))
-      )
+      syncConversationSummaryLocal({ id, ...patch })
     },
-    []
+    [syncConversationSummaryLocal]
   )
 
   const getBranch = useCallback(
@@ -384,6 +480,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       conversationsError,
       refreshConversations,
       updateConversationLocal,
+      syncConversationSummaryLocal,
       branches,
       getBranch,
       setBranch,
@@ -407,6 +504,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       conversationsError,
       refreshConversations,
       updateConversationLocal,
+      syncConversationSummaryLocal,
       branches,
       getBranch,
       setBranch,
@@ -436,12 +534,25 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
  * `useAppWorkspace`) and `AcpConnectionsProvider` (for `useAcpEvent`).
  */
 export function ConversationStatusEventBridge() {
-  const { updateConversationLocal } = useAppWorkspace()
+  const { syncConversationSummaryLocal, updateConversationLocal } =
+    useAppWorkspace()
   useAcpEvent((envelope: EventEnvelope) => {
-    if (envelope.type !== "conversation_status_changed") return
-    updateConversationLocal(envelope.conversation_id, {
-      status: envelope.status,
-    })
+    switch (envelope.type) {
+      case "conversation_linked":
+        syncConversationSummaryLocal({
+          id: envelope.conversation_id,
+          folderId: envelope.folder_id,
+          status: "in_progress",
+        })
+        return
+      case "conversation_status_changed":
+        updateConversationLocal(envelope.conversation_id, {
+          status: envelope.status,
+        })
+        return
+      default:
+        return
+    }
   })
   return null
 }
