@@ -773,8 +773,6 @@ export function MessageListView({
       (_, index) => timelineTurns[index].phase !== "streaming"
     )
 
-    const anchors: UserAnchorItem[] = []
-
     // Map each adapted message directly to a render item (1:1).
     // Backend group_into_turns() already ensures each turn is a complete unit.
     const rawItems: ThreadRenderItem[] = allAdapted.map((msg, i) => {
@@ -782,13 +780,6 @@ export function MessageListView({
       const turn = timelineTurns[i].turn
       const role = msg.role === "tool" ? "assistant" : msg.role
       const key = `${phase}-${msg.id}-${i}`
-      if (role === "user" && turn.anchor_id) {
-        anchors.push({
-          anchorId: turn.anchor_id,
-          itemKey: key,
-          rowIndex: i,
-        })
-      }
       let group = groupCache.get(msg)
       if (!group) {
         group = {
@@ -822,6 +813,21 @@ export function MessageListView({
     // Collapse consecutive assistant turn render items into a single rendered
     // turn, so tool-groups straddling a turn boundary fold into one collapsible.
     const items = mergeConsecutiveAssistantTurns(rawItems)
+
+    const anchors: UserAnchorItem[] = []
+    items.forEach((item, rowIndex) => {
+      if (
+        item.kind === "turn" &&
+        item.group.role === "user" &&
+        item.anchorId !== null
+      ) {
+        anchors.push({
+          anchorId: item.anchorId,
+          itemKey: item.key,
+          rowIndex,
+        })
+      }
+    })
 
     // Compute showStats and isRoleTransition for each turn item
     for (let idx = 0; idx < items.length; idx++) {
