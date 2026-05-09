@@ -359,7 +359,10 @@ impl ConversationWindowState {
         if let Some(conversation_ids) = removed_conversations {
             if let Ok(mut labels) = self.label_by_conversation.lock() {
                 for conversation_id in conversation_ids {
-                    if labels.get(&conversation_id).is_some_and(|stored| stored == label) {
+                    if labels
+                        .get(&conversation_id)
+                        .is_some_and(|stored| stored == label)
+                    {
                         labels.remove(&conversation_id);
                     }
                 }
@@ -560,9 +563,9 @@ pub async fn open_conversation_window(
         .inner_size(980.0, 760.0)
         .min_inner_size(760.0, 520.0)
         .center();
-    let conversation_window = apply_platform_window_style(builder)
-        .build()
-        .map_err(|e| AppCommandError::window("Failed to open conversation window", e.to_string()))?;
+    let conversation_window = apply_platform_window_style(builder).build().map_err(|e| {
+        AppCommandError::window("Failed to open conversation window", e.to_string())
+    })?;
     post_window_setup(&conversation_window);
     state.set_open(label, conversation_id);
     conversation_window.set_focus().map_err(|e| {
@@ -1051,8 +1054,7 @@ pub async fn open_pet_window(
     app: AppHandle,
     db: tauri::State<'_, AppDatabase>,
 ) -> Result<(), AppCommandError> {
-    let mut config =
-        crate::commands::pet::pet_get_settings_core(&db.conn).await?;
+    let mut config = crate::commands::pet::pet_get_settings_core(&db.conn).await?;
     let pet_id = config
         .active_pet_id
         .clone()
@@ -1173,10 +1175,8 @@ fn spawn_pet_hover_watcher(app: AppHandle) {
             let Ok(cursor) = app.cursor_position() else {
                 continue;
             };
-            let inside = cursor.x >= x_min
-                && cursor.x < x_max
-                && cursor.y >= y_min
-                && cursor.y < y_max;
+            let inside =
+                cursor.x >= x_min && cursor.x < x_max && cursor.y >= y_min && cursor.y < y_max;
             if inside && !was_inside {
                 let _ = app.emit(PET_HOVER_ENTER_EVENT, ());
             } else if !inside && was_inside {

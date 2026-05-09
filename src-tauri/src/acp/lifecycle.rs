@@ -13,11 +13,11 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::broadcast;
 
 use crate::acp::manager::ConnectionManager;
+use crate::acp::session_state::SessionState;
 use crate::acp::types::{AcpEvent, ConnectionStatus, EventEnvelope};
 use crate::db::entities::conversation::ConversationStatus;
 use crate::db::error::DbError;
 use crate::db::service::conversation_service;
-use crate::acp::session_state::SessionState;
 use crate::web::event_bridge::{emit_with_state, EventEmitter, WebEvent, WebEventBroadcaster};
 use tokio::sync::RwLock;
 
@@ -76,7 +76,11 @@ async fn handle_event_with_retry(
                 eprintln!(
                     "[lifecycle][{level}] handle_event failed (attempt {attempt_num}{}) \
                      for {:?}: {e}",
-                    if is_last { ", giving up" } else { ", will retry" },
+                    if is_last {
+                        ", giving up"
+                    } else {
+                        ", will retry"
+                    },
                     envelope.payload
                 );
             }
@@ -136,9 +140,8 @@ pub(crate) async fn handle_event(
                 // `cancelled` and any future reason: don't write here.
                 _ => return Ok(()),
             };
-            let Some((state_arc, emitter)) = manager
-                .get_state_and_emitter(&envelope.connection_id)
-                .await
+            let Some((state_arc, emitter)) =
+                manager.get_state_and_emitter(&envelope.connection_id).await
             else {
                 return Ok(());
             };
@@ -520,20 +523,21 @@ mod tests {
         // The lifecycle subscriber must flip the conversation to Cancelled
         // for refusal/max_tokens/max_turn_requests/unknown so the user sees
         // a terminal state instead of a misleading PendingReview ("待审查").
-        let cases = ["refusal", "max_tokens", "max_turn_requests", "unknown", "empty"];
+        let cases = [
+            "refusal",
+            "max_tokens",
+            "max_turn_requests",
+            "unknown",
+            "empty",
+        ];
         for stop_reason in cases {
             let db = test_helpers::fresh_in_memory_db().await;
             let folder_id =
                 test_helpers::seed_folder(&db, &format!("/tmp/turn-fail-{stop_reason}")).await;
-            let conv = conversation_service::create(
-                &db.conn,
-                folder_id,
-                AgentType::OpenCode,
-                None,
-                None,
-            )
-            .await
-            .unwrap();
+            let conv =
+                conversation_service::create(&db.conn, folder_id, AgentType::OpenCode, None, None)
+                    .await
+                    .unwrap();
 
             let mgr = ConnectionManager::new();
             {
@@ -668,9 +672,14 @@ mod tests {
         }
         let mut cache: HashMap<String, CachedConn> = HashMap::new();
         seed_cache(&mut cache, &mgr, "c1", conv.id).await;
-        assert!(cache.contains_key("c1"), "ConversationLinked should populate cache");
+        assert!(
+            cache.contains_key("c1"),
+            "ConversationLinked should populate cache"
+        );
 
-        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        handle_terminal_event(&db.conn, &mut cache, "c1")
+            .await
+            .unwrap();
         assert_eq!(
             read_row_status(&db, conv.id).await,
             ConversationStatus::Cancelled,
@@ -706,7 +715,9 @@ mod tests {
         let mut cache: HashMap<String, CachedConn> = HashMap::new();
         seed_cache(&mut cache, &mgr, "c1", conv.id).await;
 
-        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        handle_terminal_event(&db.conn, &mut cache, "c1")
+            .await
+            .unwrap();
         assert_eq!(
             read_row_status(&db, conv.id).await,
             ConversationStatus::PendingReview,
@@ -740,7 +751,9 @@ mod tests {
         let mut cache: HashMap<String, CachedConn> = HashMap::new();
         seed_cache(&mut cache, &mgr, "c1", conv.id).await;
 
-        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        handle_terminal_event(&db.conn, &mut cache, "c1")
+            .await
+            .unwrap();
         assert_eq!(
             read_row_status(&db, conv.id).await,
             ConversationStatus::Completed,
@@ -772,10 +785,14 @@ mod tests {
         seed_cache(&mut cache, &mgr, "c1", conv.id).await;
 
         // First terminal event: cancels, drains.
-        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        handle_terminal_event(&db.conn, &mut cache, "c1")
+            .await
+            .unwrap();
         assert!(!cache.contains_key("c1"));
         // Second terminal event: empty cache, returns Ok with no DB writes.
-        handle_terminal_event(&db.conn, &mut cache, "c1").await.unwrap();
+        handle_terminal_event(&db.conn, &mut cache, "c1")
+            .await
+            .unwrap();
         assert_eq!(
             read_row_status(&db, conv.id).await,
             ConversationStatus::Cancelled

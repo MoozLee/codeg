@@ -147,12 +147,13 @@ export async function acpSetMode(
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ): Promise<void> {
   return getTransport().call("acp_set_config_option", {
     connectionId,
     configId,
-    valueId,
+    valueId: typeof value === "string" ? value : null,
+    value: typeof value === "boolean" ? value : null,
   })
 }
 

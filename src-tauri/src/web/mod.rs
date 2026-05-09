@@ -362,10 +362,7 @@ pub(crate) async fn do_start_web_server_with_state(
     // the serve task still works; we just lose this defense-in-depth on
     // this start. See issue #126.
     if let Err(e) = socket_inherit::mark_listener_non_inheritable(&listener) {
-        eprintln!(
-            "[WEB][WARN] failed to mark listener non-inheritable: {}",
-            e
-        );
+        eprintln!("[WEB][WARN] failed to mark listener non-inheritable: {}", e);
     }
 
     // Persist only after a successful bind so a failed attempt doesn't overwrite saved state.
@@ -520,10 +517,7 @@ pub async fn start_web_server(
 
     // See do_start_web_server_with_state for rationale.
     if let Err(e) = socket_inherit::mark_listener_non_inheritable(&listener) {
-        eprintln!(
-            "[WEB][WARN] failed to mark listener non-inheritable: {}",
-            e
-        );
+        eprintln!("[WEB][WARN] failed to mark listener non-inheritable: {}", e);
     }
 
     // Persist only after a successful bind so a failed attempt doesn't overwrite saved state.

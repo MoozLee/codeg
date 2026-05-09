@@ -67,8 +67,7 @@ impl TerminalInstance {
     /// remain. Must be called after the direct child has already exited —
     /// otherwise we would abort readers that are still making progress.
     async fn drain_readers(&self) {
-        let handles: Vec<JoinHandle<()>> =
-            std::mem::take(&mut *self.reader_handles.lock().await);
+        let handles: Vec<JoinHandle<()>> = std::mem::take(&mut *self.reader_handles.lock().await);
         for handle in handles {
             let abort = handle.abort_handle();
             if tokio::time::timeout(READER_DRAIN_GRACE, handle)

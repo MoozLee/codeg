@@ -111,6 +111,53 @@ export interface LiveMessage {
 
 // ── Per-connection state ──
 
+export type CompactionSupport = "unknown" | "unsupported" | "agent_managed"
+export type CompactionTriggerStatus =
+  | "idle"
+  | "triggered"
+  | "running"
+  | "completed"
+  | "failed"
+
+export type ConfiguredModelSource =
+  | "agent_env"
+  | "agent_config_env"
+  | "agent_root_config"
+  | "selector"
+
+export type ContextWindowMaxSource =
+  | "agent_env"
+  | "agent_config_env"
+  | "agent_root_config"
+
+export interface RuntimeConfigField {
+  key: string
+  value: string
+}
+
+export interface RuntimeConfigSnapshot {
+  agentType: AgentType
+  configFilePath: string | null
+  safeEnvFields: RuntimeConfigField[]
+  safeRootConfigFields: RuntimeConfigField[]
+  safeConfigEnvFields: RuntimeConfigField[]
+  selectorModel: string | null
+}
+
+export interface ContextManagementState {
+  configuredModel: string | null
+  configuredModelSource: ConfiguredModelSource | null
+  runtimeModel: string | null
+  configuredContextWindowMaxTokens: number | null
+  contextWindowMaxSource: ContextWindowMaxSource | null
+  autoCompactionEnabled: boolean | null
+  autoCompactionThreshold: number | null
+  compactionSupport: CompactionSupport
+  compactionStatus: CompactionTriggerStatus
+  lastCompactionError: string | null
+  runtimeConfig: RuntimeConfigSnapshot | null
+}
+
 export interface ConnectionState {
   connectionId: string
   contextKey: string
@@ -125,6 +172,7 @@ export interface ConnectionState {
   configOptions: SessionConfigOptionInfo[] | null
   availableCommands: AvailableCommandInfo[] | null
   usage: SessionUsageUpdateInfo | null
+  contextManagement: ContextManagementState
   liveMessage: LiveMessage | null
   pendingPermission: PendingPermission | null
   pendingQuestion: PendingQuestion | null
@@ -158,6 +206,7 @@ type Action =
       connectionId: string
       agentType: AgentType
       workingDir: string | null
+      contextManagement: ContextManagementState
     }
   | {
       type: "HYDRATE_FROM_SNAPSHOT"
@@ -267,7 +316,13 @@ type Action =
       type: "CONFIG_OPTION_CHANGED"
       contextKey: string
       configId: string
-      valueId: string
+      value: string | boolean
+    }
+  | {
+      type: "COMPACTION_STATUS_CHANGED"
+      contextKey: string
+      status: CompactionTriggerStatus
+      error?: string | null
     }
   | {
       type: "PLAN_UPDATE"
@@ -306,6 +361,22 @@ type ConnectionsMap = Map<string, ConnectionState>
 const MAX_LIVE_TOOL_RAW_OUTPUT_CHARS = 200_000
 const MAX_BUFFERED_UNMAPPED_EVENTS_PER_CONNECTION = 64
 const MAX_BUFFERED_UNMAPPED_CONNECTIONS = 128
+const DEFAULT_AUTO_COMPACTION_THRESHOLD = 80
+const COMPACTION_COMPLETE_RESET_DELAY_MS = 5000
+
+const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementState = {
+  configuredModel: null,
+  configuredModelSource: null,
+  runtimeModel: null,
+  configuredContextWindowMaxTokens: null,
+  contextWindowMaxSource: null,
+  autoCompactionEnabled: null,
+  autoCompactionThreshold: null,
+  compactionSupport: "unknown",
+  compactionStatus: "idle",
+  lastCompactionError: null,
+  runtimeConfig: null,
+}
 
 // Per-agentType cache for selectors (modes / configOptions).
 // Populated when real data arrives from the backend.
@@ -338,6 +409,315 @@ function asFiniteNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function parseJsonObject(
+  raw: string | null | undefined
+): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    return asRecord(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+function stringFromRecord(
+  record: Record<string, unknown> | null | undefined,
+  key: string
+): string | null {
+  const value = record?.[key]
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null
+}
+
+function envValue(
+  env: Record<string, string> | null | undefined,
+  key: string
+): string | null {
+  const value = env?.[key]
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null
+}
+
+function parsePercentValue(
+  value: string | number | null | undefined
+): number | null {
+  if (value == null) return null
+  const normalized = String(value).trim().replace(/%$/, "")
+  if (!normalized) return null
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed)) return null
+  const percent = parsed > 0 && parsed <= 1 ? parsed * 100 : parsed
+  if (percent < 1 || percent > 100) return null
+  return percent
+}
+
+function parsePositiveIntegerValue(
+  value: string | number | null | undefined
+): number | null {
+  if (value == null) return null
+  const parsed = Number(String(value).trim())
+  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  return Math.floor(parsed)
+}
+
+const CONTEXT_CONFIG_FIELD_PATTERNS = [
+  "model",
+  "compact",
+  "compaction",
+  "context",
+]
+
+const SECRET_FIELD_PATTERNS = [
+  "key",
+  "token",
+  "secret",
+  "password",
+  "credential",
+  "auth",
+]
+
+function isContextConfigKey(key: string): boolean {
+  const normalized = key.toLowerCase()
+  return CONTEXT_CONFIG_FIELD_PATTERNS.some((pattern) =>
+    normalized.includes(pattern)
+  )
+}
+
+function isSecretKey(key: string): boolean {
+  const normalized = key.toLowerCase()
+  return SECRET_FIELD_PATTERNS.some((pattern) => normalized.includes(pattern))
+}
+
+function safeContextConfigFields(
+  record: Record<string, unknown> | null | undefined
+): RuntimeConfigField[] {
+  if (!record) return []
+  return Object.entries(record)
+    .filter(([key, value]) => {
+      if (!isContextConfigKey(key) || isSecretKey(key)) return false
+      return ["string", "number", "boolean"].includes(typeof value)
+    })
+    .map(([key, value]) => ({ key, value: String(value) }))
+    .sort((a, b) => a.key.localeCompare(b.key))
+}
+
+function modelEnvKeysForAgent(agentType: AgentType): string[] {
+  if (agentType === "claude_code") {
+    return ["ANTHROPIC_MODEL"]
+  }
+  if (agentType === "gemini") {
+    return ["GEMINI_MODEL", "GOOGLE_GEMINI_MODEL", "MODEL"]
+  }
+  return ["OPENAI_MODEL", "MODEL", "ANTHROPIC_MODEL", "GEMINI_MODEL"]
+}
+
+function firstEnvValue(
+  record: Record<string, string> | null | undefined,
+  keys: string[]
+): string | null {
+  for (const key of keys) {
+    const value = envValue(record, key)
+    if (value) return value
+  }
+  return null
+}
+
+function firstRecordString(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[]
+): string | null {
+  for (const key of keys) {
+    const value = stringFromRecord(record, key)
+    if (value) return value
+  }
+  return null
+}
+
+function contextWindowMaxEnvKeysForAgent(agentType: AgentType): string[] {
+  if (agentType === "claude_code") {
+    return ["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]
+  }
+  return []
+}
+
+function contextWindowMaxRootKeysForAgent(agentType: AgentType): string[] {
+  if (agentType === "claude_code") {
+    return [
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+      "claudeCodeAutoCompactWindow",
+      "claude_code_auto_compact_window",
+    ]
+  }
+  return []
+}
+
+function firstPositiveIntegerEnvValue(
+  record: Record<string, string> | null | undefined,
+  keys: string[]
+): number | null {
+  for (const key of keys) {
+    const value = parsePositiveIntegerValue(envValue(record, key))
+    if (value != null) return value
+  }
+  return null
+}
+
+function firstPositiveIntegerRecordValue(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[]
+): number | null {
+  for (const key of keys) {
+    const raw = record?.[key]
+    if (typeof raw !== "string" && typeof raw !== "number") continue
+    const value = parsePositiveIntegerValue(raw)
+    if (value != null) return value
+  }
+  return null
+}
+
+function debugContextManagement(
+  label: string,
+  details: Record<string, unknown>
+) {
+  if (typeof window === "undefined") return
+  try {
+    if (
+      window.localStorage.getItem("codeg.debug.contextManagement") !== "true"
+    ) {
+      return
+    }
+  } catch {
+    return
+  }
+  console.debug(`[context-management] ${label}`, details)
+}
+
+function contextManagementFromAgentStatus(
+  agent: AcpAgentStatus | null,
+  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT
+): ContextManagementState {
+  if (!agent) return previous
+
+  const config = parseJsonObject(agent.config_json)
+  const configEnv = asRecord(config?.env)
+  const rootModel = stringFromRecord(config, "model")
+  const modelEnvKeys = modelEnvKeysForAgent(agent.agent_type)
+  const contextWindowMaxKeys = contextWindowMaxEnvKeysForAgent(agent.agent_type)
+  const envConfiguredModel = firstEnvValue(agent.env, modelEnvKeys)
+  const configEnvConfiguredModel = firstRecordString(configEnv, modelEnvKeys)
+  const agentConfiguredModel =
+    envConfiguredModel ?? configEnvConfiguredModel ?? rootModel
+  const configuredModelSource: ConfiguredModelSource | null = envConfiguredModel
+    ? "agent_env"
+    : configEnvConfiguredModel
+      ? "agent_config_env"
+      : rootModel
+        ? "agent_root_config"
+        : null
+  const configuredModel = agentConfiguredModel ?? previous.configuredModel
+
+  const claudeAutoCompactPercent = parsePercentValue(
+    envValue(agent.env, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
+      stringFromRecord(configEnv, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
+      stringFromRecord(config, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
+      stringFromRecord(config, "claudeAutocompactPctOverride")
+  )
+  const envConfiguredContextWindowMax = firstPositiveIntegerEnvValue(
+    agent.env,
+    contextWindowMaxKeys
+  )
+  const configEnvConfiguredContextWindowMax = firstPositiveIntegerRecordValue(
+    configEnv,
+    contextWindowMaxKeys
+  )
+  const contextWindowMaxRootKeys = contextWindowMaxRootKeysForAgent(
+    agent.agent_type
+  )
+  const rootConfiguredContextWindowMax = firstPositiveIntegerRecordValue(
+    config,
+    contextWindowMaxRootKeys
+  )
+  const claudeAutoCompactWindow =
+    envConfiguredContextWindowMax ??
+    configEnvConfiguredContextWindowMax ??
+    rootConfiguredContextWindowMax
+  const configuredContextWindowMaxTokens =
+    claudeAutoCompactWindow ?? previous.configuredContextWindowMaxTokens
+  const contextWindowMaxSource: ContextWindowMaxSource | null =
+    envConfiguredContextWindowMax != null
+      ? "agent_env"
+      : configEnvConfiguredContextWindowMax != null
+        ? "agent_config_env"
+        : rootConfiguredContextWindowMax != null
+          ? "agent_root_config"
+          : previous.contextWindowMaxSource
+  const hasClaudeAutoCompactionConfig =
+    claudeAutoCompactPercent != null || claudeAutoCompactWindow != null
+  const runtimeConfig: RuntimeConfigSnapshot = {
+    agentType: agent.agent_type,
+    configFilePath: agent.config_file_path ?? null,
+    safeEnvFields: safeContextConfigFields(agent.env),
+    safeRootConfigFields: safeContextConfigFields(config),
+    safeConfigEnvFields: safeContextConfigFields(configEnv),
+    selectorModel: previous.runtimeConfig?.selectorModel ?? null,
+  }
+  const next: ContextManagementState = {
+    ...previous,
+    configuredModel,
+    configuredModelSource:
+      configuredModelSource ?? previous.configuredModelSource,
+    configuredContextWindowMaxTokens,
+    contextWindowMaxSource,
+    autoCompactionEnabled: hasClaudeAutoCompactionConfig
+      ? true
+      : previous.autoCompactionEnabled,
+    autoCompactionThreshold:
+      claudeAutoCompactPercent ?? previous.autoCompactionThreshold,
+    compactionSupport: hasClaudeAutoCompactionConfig
+      ? "agent_managed"
+      : previous.compactionSupport,
+    runtimeConfig,
+  }
+
+  debugContextManagement("fromAgentStatus", {
+    agentType: agent.agent_type,
+    modelEnvKeys,
+    envCandidates: Object.fromEntries(
+      modelEnvKeys.map((key) => [key, envValue(agent.env, key)])
+    ),
+    contextWindowMaxKeys,
+    contextWindowMaxRootKeys,
+    envContextWindowMax: envConfiguredContextWindowMax,
+    configEnvContextWindowMax: configEnvConfiguredContextWindowMax,
+    rootContextWindowMax: rootConfiguredContextWindowMax,
+    rootConfigCandidates: {
+      model: rootModel,
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: stringFromRecord(
+        config,
+        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
+      ),
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: stringFromRecord(
+        config,
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+      ),
+    },
+    configEnvCandidates: safeContextConfigFields(configEnv),
+    agentConfiguredModel,
+    previousModel: previous.configuredModel,
+    previousSource: previous.configuredModelSource,
+    finalModel: next.configuredModel,
+    finalSource: next.configuredModelSource,
+    compactionPercent: claudeAutoCompactPercent,
+    compactionWindow: claudeAutoCompactWindow,
+    configuredContextWindowMaxTokens: next.configuredContextWindowMaxTokens,
+    contextWindowMaxSource: next.contextWindowMaxSource,
+  })
+
+  return next
 }
 
 function parseClaudeApiRetryEvent(
@@ -562,9 +942,139 @@ function sameConfigOptions(
           }
         }
       }
+    } else if (leftKind.current_value !== rightKind.current_value) {
+      return false
     }
   }
   return true
+}
+
+function configOptionCurrentValue(
+  option: SessionConfigOptionInfo
+): string | boolean {
+  return option.kind.current_value
+}
+
+function parseBooleanConfigValue(
+  option: SessionConfigOptionInfo | undefined
+): boolean | null {
+  if (!option) return null
+  if (option.kind.type === "boolean") return option.kind.current_value
+
+  const normalized = option.kind.current_value.trim().toLowerCase()
+  if (["true", "on", "yes", "enabled", "enable", "auto"].includes(normalized)) {
+    return true
+  }
+  if (
+    ["false", "off", "no", "disabled", "disable", "manual", "never"].includes(
+      normalized
+    )
+  ) {
+    return false
+  }
+  return null
+}
+
+function parsePercentConfigValue(
+  option: SessionConfigOptionInfo | undefined
+): number | null {
+  if (!option || option.kind.type !== "select") return null
+
+  return parsePercentValue(option.kind.current_value)
+}
+
+function contextManagementFromSelectors(
+  options: SessionConfigOptionInfo[] | null,
+  commands: AvailableCommandInfo[] | null,
+  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT
+): ContextManagementState {
+  const modelOption = options?.find((option) => option.category === "model")
+  const selectorModel = modelOption
+    ? String(configOptionCurrentValue(modelOption))
+    : null
+  const previousSource = previous.configuredModelSource
+  const shouldUseSelectorModel = selectorModel != null && previousSource == null
+  const configuredModel = shouldUseSelectorModel
+    ? selectorModel
+    : previous.configuredModel
+  const configuredModelSource = shouldUseSelectorModel
+    ? "selector"
+    : previous.configuredModelSource
+  const autoCompactOption = options?.find((option) => {
+    const id = option.id.toLowerCase()
+    const name = option.name.toLowerCase()
+    return (
+      id.includes("auto_compact") ||
+      id.includes("auto-compact") ||
+      id.includes("autocompact") ||
+      id.includes("auto_compaction") ||
+      name.includes("auto compact") ||
+      name.includes("auto-compaction")
+    )
+  })
+  const thresholdOption = options?.find((option) => {
+    const id = option.id.toLowerCase()
+    const name = option.name.toLowerCase()
+    return (
+      id.includes("compact_threshold") ||
+      id.includes("compaction_threshold") ||
+      id.includes("context_threshold") ||
+      name.includes("compact threshold") ||
+      name.includes("compaction threshold") ||
+      name.includes("context threshold")
+    )
+  })
+  const parsedAutoCompactionEnabled = parseBooleanConfigValue(autoCompactOption)
+  const autoCompactionEnabled =
+    parsedAutoCompactionEnabled ?? previous.autoCompactionEnabled
+  const autoCompactionThreshold =
+    parsePercentConfigValue(thresholdOption) ?? previous.autoCompactionThreshold
+  const compactionCommand = findCompactionCommand(commands)
+  const compactionSupport = compactionCommand
+    ? "agent_managed"
+    : commands
+      ? "unsupported"
+      : previous.compactionSupport
+  const runtimeConfig = previous.runtimeConfig
+    ? {
+        ...previous.runtimeConfig,
+        selectorModel,
+      }
+    : previous.runtimeConfig
+  const next: ContextManagementState = {
+    ...previous,
+    configuredModel,
+    configuredModelSource,
+    runtimeModel: previous.runtimeModel,
+    autoCompactionEnabled,
+    autoCompactionThreshold,
+    compactionSupport,
+    runtimeConfig,
+  }
+
+  debugContextManagement("fromSelectors", {
+    selectorModel,
+    previousSource,
+    shouldUseSelectorModel,
+    finalModel: next.configuredModel,
+    finalSource: next.configuredModelSource,
+    autoCompactionEnabled,
+    autoCompactionThreshold,
+  })
+
+  return next
+}
+
+function findCompactionCommand(
+  commands: AvailableCommandInfo[] | null
+): AvailableCommandInfo | null {
+  if (!commands) return null
+  return (
+    commands.find((command) => {
+      const name = command.name.replace(/^\//, "").toLowerCase()
+      return name === "compact" || name === "summarize"
+    }) ?? null
+  )
 }
 
 function sameCommands(
@@ -701,6 +1211,7 @@ function connectionsReducer(
         configOptions: null,
         availableCommands: null,
         usage: null,
+        contextManagement: action.contextManagement,
         liveMessage: null,
         pendingPermission: null,
         pendingQuestion: null,
@@ -728,6 +1239,11 @@ function connectionsReducer(
         configOptions: action.patch.configOptions,
         availableCommands: action.patch.availableCommands,
         usage: action.patch.usage,
+        contextManagement: contextManagementFromSelectors(
+          action.patch.configOptions,
+          action.patch.availableCommands,
+          current.contextManagement
+        ),
         liveMessage: action.patch.liveMessage,
         pendingPermission: action.patch.pendingPermission,
         promptCapabilities:
@@ -1179,6 +1695,11 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         configOptions: action.configOptions,
+        contextManagement: contextManagementFromSelectors(
+          action.configOptions,
+          conn.availableCommands,
+          conn.contextManagement
+        ),
       })
       return next
     }
@@ -1251,19 +1772,39 @@ function connectionsReducer(
       const idx = options.findIndex((o) => o.id === action.configId)
       if (idx === -1) return state
       const opt = options[idx]
-      if (
-        opt.kind.type !== "select" ||
-        opt.kind.current_value === action.valueId
-      ) {
+      if (opt.kind.current_value === action.value) {
+        return state
+      }
+      if (opt.kind.type === "select" && typeof action.value !== "string") {
+        return state
+      }
+      if (opt.kind.type === "boolean" && typeof action.value !== "boolean") {
         return state
       }
       const updated = [...options]
-      updated[idx] = {
-        ...opt,
-        kind: { ...opt.kind, current_value: action.valueId },
+      if (opt.kind.type === "select") {
+        if (typeof action.value !== "string") return state
+        updated[idx] = {
+          ...opt,
+          kind: { ...opt.kind, current_value: action.value },
+        }
+      } else {
+        if (typeof action.value !== "boolean") return state
+        updated[idx] = {
+          ...opt,
+          kind: { ...opt.kind, current_value: action.value },
+        }
       }
       const next = new Map(state)
-      next.set(action.contextKey, { ...conn, configOptions: updated })
+      next.set(action.contextKey, {
+        ...conn,
+        configOptions: updated,
+        contextManagement: contextManagementFromSelectors(
+          updated,
+          conn.availableCommands,
+          conn.contextManagement
+        ),
+      })
       return next
     }
 
@@ -1367,6 +1908,32 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         availableCommands: commands,
+        contextManagement: contextManagementFromSelectors(
+          conn.configOptions,
+          commands,
+          conn.contextManagement
+        ),
+      })
+      return next
+    }
+
+    case "COMPACTION_STATUS_CHANGED": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      if (
+        conn.contextManagement.compactionStatus === action.status &&
+        conn.contextManagement.lastCompactionError === (action.error ?? null)
+      ) {
+        return state
+      }
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        contextManagement: {
+          ...conn.contextManagement,
+          compactionStatus: action.status,
+          lastCompactionError: action.error ?? null,
+        },
       })
       return next
     }
@@ -1390,6 +1957,14 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         usage: action.usage,
+        contextManagement:
+          conn.contextManagement.compactionStatus === "failed"
+            ? {
+                ...conn.contextManagement,
+                compactionStatus: "idle",
+                lastCompactionError: null,
+              }
+            : conn.contextManagement,
       })
       return next
     }
@@ -1439,6 +2014,7 @@ export interface AcpActionsValue {
     sessionId?: string
   ): Promise<void>
   disconnect(contextKey: string): Promise<void>
+  reconnect(contextKey: string): Promise<void>
   disconnectAll(): Promise<void>
   sendPrompt(
     contextKey: string,
@@ -1449,7 +2025,7 @@ export interface AcpActionsValue {
   setConfigOption(
     contextKey: string,
     configId: string,
-    valueId: string
+    value: string | boolean
   ): Promise<void>
   cancel(contextKey: string): Promise<void>
   respondPermission(
@@ -1665,6 +2241,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   // Populated by the `useAcpEvent` hook; read by the primary `acp://event`
   // listener and the buffered-events replay loop.
   const eventSubscribersRef = useRef<Set<EventSubscriberRef>>(new Set())
+  const compactionTriggerZonesRef = useRef(new Set<string>())
 
   // ── Notify helpers ──
 
@@ -1802,6 +2379,75 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     const compacted = Array.from(grouped.values()).flat()
     dispatch({ type: "STREAM_BATCH", actions: compacted })
   }, [dispatch])
+
+  const maybeTriggerAgentCompaction = useCallback(
+    (contextKey: string) => {
+      const conn = storeRef.current.connections.get(contextKey)
+      if (!conn?.usage || conn.usage.used <= 0) return
+      const management = conn.contextManagement
+      if (management.compactionSupport !== "agent_managed") return
+      if (management.autoCompactionEnabled !== true) return
+      if (
+        management.compactionStatus === "triggered" ||
+        management.compactionStatus === "running"
+      ) {
+        return
+      }
+      if (conn.status !== "connected") return
+      const command = findCompactionCommand(conn.availableCommands)
+      if (!command) return
+      const effectiveContextMax =
+        conn.contextManagement.configuredContextWindowMaxTokens ??
+        conn.usage.size
+      const percent = (conn.usage.used / effectiveContextMax) * 100
+      const threshold =
+        management.autoCompactionThreshold ?? DEFAULT_AUTO_COMPACTION_THRESHOLD
+      if (percent < threshold) return
+      const zone = Math.floor(percent / 5) * 5
+      const sessionKey = conn.sessionId ?? conn.connectionId
+      const triggerKey = `${conn.connectionId}:${sessionKey}:${threshold}:${effectiveContextMax}:${zone}`
+      if (compactionTriggerZonesRef.current.has(triggerKey)) return
+      compactionTriggerZonesRef.current.add(triggerKey)
+      debugContextManagement("autoCompactionTrigger", {
+        contextKey,
+        used: conn.usage.used,
+        liveSize: conn.usage.size,
+        effectiveContextMax,
+        maxSource:
+          conn.contextManagement.configuredContextWindowMaxTokens != null
+            ? conn.contextManagement.contextWindowMaxSource
+            : "live_usage",
+        percent,
+        threshold,
+        zone,
+        command: command.name,
+      })
+      dispatch({
+        type: "COMPACTION_STATUS_CHANGED",
+        contextKey,
+        status: "triggered",
+      })
+      const commandText = command.name.startsWith("/")
+        ? command.name
+        : `/${command.name}`
+      dispatch({
+        type: "COMPACTION_STATUS_CHANGED",
+        contextKey,
+        status: "running",
+      })
+      acpPrompt(conn.connectionId, [{ type: "text", text: commandText }]).catch(
+        (error: unknown) => {
+          dispatch({
+            type: "COMPACTION_STATUS_CHANGED",
+            contextKey,
+            status: "failed",
+            error: normalizeErrorMessage(error),
+          })
+        }
+      )
+    },
+    [dispatch]
+  )
 
   const enqueueStreamingAction = useCallback(
     (action: StreamingAction) => {
@@ -2004,16 +2650,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           break
         case "conversation_linked":
           // Backend just bound (or reaffirmed) the connection's DB conversation
-          // row. Phase 3a frontend pre-creates rows for new-tab sends so this
-          // event is mostly a confirmation; we log it for visibility. Phase 3b
-          // will use this to drive UI mapping when the frontend stops creating
-          // rows itself.
-          console.log("[acp-context] conversation_linked", {
-            contextKey,
-            connectionId: e.connection_id,
-            conversationId: e.conversation_id,
-            folderId: e.folder_id,
-          })
+          // row. The frontend currently does not need to mutate state here.
           break
         case "session_modes": {
           flushStreamingQueue()
@@ -2069,32 +2706,34 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             }
             entry.configOptions = resolvedConfigOptions
             selectorsCache.set(cfgConn.agentType, entry)
-            // Sync cached config options to backend if they differ
-            for (let i = 0; i < resolvedConfigOptions.length; i++) {
-              const resolved = resolvedConfigOptions[i]
-              const original = e.config_options[i]
-              if (
-                resolved.kind.type === "select" &&
-                original.kind.type === "select" &&
-                resolved.kind.current_value !== original.kind.current_value &&
-                resolved.kind.current_value
-              ) {
-                acpSetConfigOption(
-                  cfgConn.connectionId,
-                  resolved.id,
-                  resolved.kind.current_value
-                ).catch((err: unknown) => {
-                  const message =
-                    err instanceof Error ? err.message : String(err)
-                  if (message.includes("connection not found")) {
-                    return
-                  }
-                  console.error(
-                    "[ACP] Failed to sync saved config option to backend:",
-                    err
-                  )
-                })
+            // Sync cached config options to backend if they differ.
+            // Compare by id instead of array index so agent-side reordering
+            // cannot misapply a saved model/context option.
+            const originalsById = new Map(
+              e.config_options.map((option) => [option.id, option])
+            )
+            for (const resolved of resolvedConfigOptions) {
+              const original = originalsById.get(resolved.id)
+              if (!original || resolved.kind.type !== original.kind.type) {
+                continue
               }
+              if (resolved.kind.current_value === original.kind.current_value) {
+                continue
+              }
+              acpSetConfigOption(
+                cfgConn.connectionId,
+                resolved.id,
+                resolved.kind.current_value
+              ).catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err)
+                if (message.includes("connection not found")) {
+                  return
+                }
+                console.error(
+                  "[ACP] Failed to sync saved config option to backend:",
+                  err
+                )
+              })
             }
           }
           break
@@ -2163,6 +2802,24 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             contextKey,
             status: "connected",
           })
+          const completedConn = storeRef.current.connections.get(contextKey)
+          if (
+            completedConn?.contextManagement.compactionStatus === "running" ||
+            completedConn?.contextManagement.compactionStatus === "triggered"
+          ) {
+            dispatch({
+              type: "COMPACTION_STATUS_CHANGED",
+              contextKey,
+              status: "completed",
+            })
+            window.setTimeout(() => {
+              dispatch({
+                type: "COMPACTION_STATUS_CHANGED",
+                contextKey,
+                status: "idle",
+              })
+            }, COMPACTION_COMPLETE_RESET_DELAY_MS)
+          }
           // Detect pending question from tool calls in the completed turn
           const turnConn = storeRef.current.connections.get(contextKey)
           if (turnConn?.liveMessage) {
@@ -2322,6 +2979,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               size: e.size,
             },
           })
+          maybeTriggerAgentCompaction(contextKey)
           break
       }
     },
@@ -2330,6 +2988,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       enqueueStreamingAction,
       flushPendingToolCallUpdates,
       flushStreamingQueue,
+      maybeTriggerAgentCompaction,
       scheduleToolCallUpdateFlush,
       t,
       tChat,
@@ -2635,12 +3294,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
 
         reverseMapRef.current.set(connectionId, contextKey)
         lastActivityRef.current.set(contextKey, Date.now())
+        const initialContextManagement =
+          contextManagementFromAgentStatus(configuredAgent)
         dispatch({
           type: "CONNECTION_CREATED",
           contextKey,
           connectionId,
           agentType,
           workingDir: nextWorkingDir,
+          contextManagement: initialContextManagement,
         })
 
         // Hydrate from backend snapshot. Non-blocking: if the snapshot
@@ -2767,6 +3429,28 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [dispatch]
   )
 
+  const reconnect = useCallback(
+    async (contextKey: string) => {
+      const conn = storeRef.current.connections.get(contextKey)
+      if (
+        !conn ||
+        conn.status === "prompting" ||
+        conn.status === "connecting"
+      ) {
+        return
+      }
+      const { agentType, workingDir, sessionId } = conn
+      await disconnect(contextKey)
+      await connect(
+        contextKey,
+        agentType,
+        workingDir ?? undefined,
+        sessionId ?? undefined
+      )
+    },
+    [connect, disconnect]
+  )
+
   const disconnectAll = useCallback(async () => {
     const promises: Promise<void>[] = []
     for (const [, conn] of storeRef.current.connections) {
@@ -2815,14 +3499,23 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setConfigOption = useCallback(
-    async (contextKey: string, configId: string, valueId: string) => {
+    async (contextKey: string, configId: string, value: string | boolean) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
+      const currentOptions =
+        conn.configOptions ?? selectorsCache.get(conn.agentType)?.configOptions
+      const option = currentOptions?.find((item) => item.id === configId)
+      if (option?.kind.type === "boolean" && typeof value !== "boolean") {
+        return
+      }
+      if (option?.kind.type === "select" && typeof value !== "string") {
+        return
+      }
       dispatch({
         type: "CONFIG_OPTION_CHANGED",
         contextKey,
         configId,
-        valueId,
+        value,
       })
       // Persist user selection to localStorage
       const updatedConn = storeRef.current.connections.get(contextKey)
@@ -2830,10 +3523,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         updatedConn?.configOptions ??
         selectorsCache.get(conn.agentType)?.configOptions
       if (allOptions) {
-        saveConfigPreference(conn.agentType, configId, valueId, allOptions)
+        saveConfigPreference(conn.agentType, configId, value, allOptions)
       }
       lastActivityRef.current.set(contextKey, Date.now())
-      await acpSetConfigOption(conn.connectionId, configId, valueId)
+      await acpSetConfigOption(conn.connectionId, configId, value)
     },
     [dispatch]
   )
@@ -2870,6 +3563,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     () => ({
       connect,
       disconnect,
+      reconnect,
       disconnectAll,
       sendPrompt,
       setMode,
@@ -2884,6 +3578,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [
       connect,
       disconnect,
+      reconnect,
       disconnectAll,
       sendPrompt,
       setMode,

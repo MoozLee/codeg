@@ -10,7 +10,9 @@ use sea_orm::{
     TransactionTrait,
 };
 
-use crate::acp::connection::{spawn_agent_connection, AgentConnection, ConnectionCommand};
+use crate::acp::connection::{
+    spawn_agent_connection, AgentConnection, ConnectionCommand, SessionConfigCommandValue,
+};
 use crate::acp::error::AcpError;
 use crate::acp::types::{
     AcpEvent, ConnectionInfo, ConnectionStatus, ForkResultInfo, PromptInputBlock,
@@ -222,8 +224,7 @@ impl ConnectionManager {
         // latencies and tune `CODEG_ACP_SPAWN_HANDSHAKE_TIMEOUT_SECS`.
         if dedup_lock.is_some() {
             let timeout = self.spawn_handshake_timeout;
-            let (outcome, elapsed) =
-                wait_for_session_started(session_started_rx, timeout).await;
+            let (outcome, elapsed) = wait_for_session_started(session_started_rx, timeout).await;
             eprintln!(
                 "[ACP] dedup_wait connection_id={} session_id={} outcome={} \
                  elapsed_ms={} timeout_ms={}",
@@ -491,15 +492,10 @@ impl ConnectionManager {
                 // silent fallback to working_dir-based find-or-create masked
                 // contract violations.
                 (None, Some(folder_id)) => {
-                    let row = conversation_service::create(
-                        &db.conn,
-                        folder_id,
-                        agent_type,
-                        None,
-                        None,
-                    )
-                    .await
-                    .map_err(|e| AcpError::protocol(e.to_string()))?;
+                    let row =
+                        conversation_service::create(&db.conn, folder_id, agent_type, None, None)
+                            .await
+                            .map_err(|e| AcpError::protocol(e.to_string()))?;
                     emit_with_state(
                         &state_arc,
                         &emitter,
@@ -630,7 +626,7 @@ impl ConnectionManager {
         &self,
         conn_id: &str,
         config_id: String,
-        value_id: String,
+        value: SessionConfigCommandValue,
     ) -> Result<(), AcpError> {
         let cmd_tx = {
             let connections = self.connections.lock().await;
@@ -640,10 +636,7 @@ impl ConnectionManager {
             conn.cmd_tx.clone()
         };
         cmd_tx
-            .send(ConnectionCommand::SetConfigOption {
-                config_id,
-                value_id,
-            })
+            .send(ConnectionCommand::SetConfigOption { config_id, value })
             .await
             .map_err(|_| AcpError::ProcessExited)
     }
@@ -654,7 +647,11 @@ impl ConnectionManager {
             let conn = connections
                 .get(conn_id)
                 .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
-            (conn.cmd_tx.clone(), conn.state.clone(), conn.emitter.clone())
+            (
+                conn.cmd_tx.clone(),
+                conn.state.clone(),
+                conn.emitter.clone(),
+            )
         };
         cmd_tx
             .send(ConnectionCommand::Cancel)
@@ -946,10 +943,7 @@ impl ConnectionManager {
     /// Per-session state is acquired via `read().await` to avoid the
     /// `try_read`-skip false negative that would intermittently return None
     /// while `emit_with_state` is mid-update — the wait is microseconds.
-    pub async fn find_connection_by_conversation_id(
-        &self,
-        conversation_id: i32,
-    ) -> Option<String> {
+    pub async fn find_connection_by_conversation_id(&self, conversation_id: i32) -> Option<String> {
         let connections = self.connections.lock().await;
         for (id, conn) in connections.iter() {
             let state = conn.state.read().await;
@@ -1050,8 +1044,7 @@ mod tests {
             if evt.channel != "acp://event" {
                 continue;
             }
-            return serde_json::from_value((*evt.payload).clone())
-                .expect("envelope deserializes");
+            return serde_json::from_value((*evt.payload).clone()).expect("envelope deserializes");
         }
     }
 
@@ -1179,15 +1172,10 @@ mod tests {
         let db = test_helpers::fresh_in_memory_db().await;
         let folder_id = test_helpers::seed_folder(&db, "/tmp/caller-id").await;
         // Pre-create a conversation row the caller will reference.
-        let pre_existing = conversation_service::create(
-            &db.conn,
-            folder_id,
-            AgentType::ClaudeCode,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let pre_existing =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
 
         let mgr = ConnectionManager::new();
         let (broadcaster, mut rx) = make_test_broadcaster();
@@ -1206,13 +1194,7 @@ mod tests {
 
         // Send with caller-supplied conversation_id + folder_id.
         let _ = mgr
-            .send_prompt_linked(
-                &db,
-                conn_id,
-                vec![],
-                Some(folder_id),
-                Some(pre_existing.id),
-            )
+            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), Some(pre_existing.id))
             .await;
 
         // No new conversation row was created.
@@ -1265,15 +1247,10 @@ mod tests {
         use crate::db::test_helpers;
         let db = test_helpers::fresh_in_memory_db().await;
         let folder_id = test_helpers::seed_folder(&db, "/tmp/already").await;
-        let pre = conversation_service::create(
-            &db.conn,
-            folder_id,
-            AgentType::ClaudeCode,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let pre =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
 
         let mgr = ConnectionManager::new();
         let (broadcaster, mut rx) = make_test_broadcaster();
@@ -1294,13 +1271,7 @@ mod tests {
 
         let before = count_conversation_rows(&db).await;
         let _ = mgr
-            .send_prompt_linked(
-                &db,
-                conn_id,
-                vec![],
-                Some(folder_id),
-                Some(pre.id),
-            )
+            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), Some(pre.id))
             .await;
         let after = count_conversation_rows(&db).await;
         assert_eq!(after, before);
@@ -1319,9 +1290,9 @@ mod tests {
                 assert_eq!(conversation_id, pre.id);
                 assert_eq!(status, ConversationStatus::InProgress);
             }
-            other => panic!(
-                "first event must be ConversationStatusChanged(InProgress), got {other:?}"
-            ),
+            other => {
+                panic!("first event must be ConversationStatusChanged(InProgress), got {other:?}")
+            }
         }
         let env_cancelled = recv_first_acp_event(&mut rx).await;
         match env_cancelled.payload {
@@ -1392,9 +1363,9 @@ mod tests {
                 assert_eq!(conversation_id, conv_id);
                 assert_eq!(status, ConversationStatus::InProgress);
             }
-            other => panic!(
-                "second event must be ConversationStatusChanged(InProgress), got {other:?}"
-            ),
+            other => {
+                panic!("second event must be ConversationStatusChanged(InProgress), got {other:?}")
+            }
         }
         let env3 = recv_first_acp_event(&mut rx).await;
         match env3.payload {
@@ -1462,9 +1433,9 @@ mod tests {
                 assert_eq!(conversation_id, conv_id);
                 assert_eq!(status, ConversationStatus::Cancelled);
             }
-            other => panic!(
-                "second send must rollback to Cancelled after send failure, got {other:?}"
-            ),
+            other => {
+                panic!("second send must rollback to Cancelled after send failure, got {other:?}")
+            }
         }
         let row2 = conversation::Entity::find_by_id(conv_id)
             .one(&db.conn)
@@ -1711,14 +1682,7 @@ mod tests {
     async fn sweep_idle_picks_only_qualifying_subset() {
         let mgr = ConnectionManager::new();
         for id in ["a", "b", "c"] {
-            insert_fake_connection(
-                &mgr,
-                id,
-                AgentType::ClaudeCode,
-                None,
-                EventEmitter::Noop,
-            )
-            .await;
+            insert_fake_connection(&mgr, id, AgentType::ClaudeCode, None, EventEmitter::Noop).await;
         }
         // a: idle (sweep target), b: fresh (not idle), c: idle but Prompting (skipped).
         backdate_last_activity(&mgr, "a", 600).await;
@@ -1823,8 +1787,7 @@ mod tests {
         tokio::spawn(async move {
             let _ = tx.send(());
         });
-        let (outcome, elapsed) =
-            wait_for_session_started(rx, Duration::from_millis(500)).await;
+        let (outcome, elapsed) = wait_for_session_started(rx, Duration::from_millis(500)).await;
         assert_eq!(outcome, HandshakeWaitOutcome::Ready);
         assert!(
             elapsed < Duration::from_millis(500),
@@ -1838,8 +1801,7 @@ mod tests {
         // Drop the sender — emulates "connection died before SessionStarted",
         // i.e. SessionState's tx was dropped during cleanup.
         drop(tx);
-        let (outcome, elapsed) =
-            wait_for_session_started(rx, Duration::from_millis(500)).await;
+        let (outcome, elapsed) = wait_for_session_started(rx, Duration::from_millis(500)).await;
         assert_eq!(outcome, HandshakeWaitOutcome::Aborted);
         assert!(
             elapsed < Duration::from_millis(500),
@@ -1852,8 +1814,7 @@ mod tests {
         let (_tx, rx) = tokio::sync::oneshot::channel::<()>();
         // Hold the sender alive but never fire and never drop. Tight
         // timeout so the test stays fast; production timeout is 60s.
-        let (outcome, elapsed) =
-            wait_for_session_started(rx, Duration::from_millis(40)).await;
+        let (outcome, elapsed) = wait_for_session_started(rx, Duration::from_millis(40)).await;
         assert_eq!(outcome, HandshakeWaitOutcome::TimedOut);
         assert!(
             elapsed >= Duration::from_millis(40),
@@ -1943,9 +1904,9 @@ mod tests {
             AcpEvent::ConversationStatusChanged { status, .. } => {
                 assert_eq!(status, ConversationStatus::InProgress);
             }
-            other => panic!(
-                "expected ConversationStatusChanged(InProgress) before send, got {other:?}"
-            ),
+            other => {
+                panic!("expected ConversationStatusChanged(InProgress) before send, got {other:?}")
+            }
         }
         let env_cancelled = recv_first_acp_event(&mut rx).await;
         match env_cancelled.payload {
@@ -1997,7 +1958,6 @@ mod tests {
         forked_session_id: &str,
         original_session_id: &str,
     ) -> (Arc<ConnectionManager>, tokio::task::JoinHandle<()>) {
-        use crate::acp::connection::ConnectionCommand;
         let (tx, mut rx) = mpsc::channel::<ConnectionCommand>(4);
         let mut state = SessionState::new(
             conn_id.to_string(),
@@ -2062,7 +2022,8 @@ mod tests {
             .await
             .unwrap();
 
-        let (mgr, join) = manager_with_fake_fork("c-fork", pre.id, "session-S2", "session-S1").await;
+        let (mgr, join) =
+            manager_with_fake_fork("c-fork", pre.id, "session-S2", "session-S1").await;
         let result = mgr
             .fork_session(&db, "c-fork")
             .await
@@ -2075,12 +2036,16 @@ mod tests {
         assert_ne!(sibling_id, pre.id, "sibling row must be a fresh row");
 
         // Current row: external_id=S2, title prefixed.
-        let current = conversation_service::get_by_id(&db.conn, pre.id).await.unwrap();
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
         assert_eq!(current.external_id.as_deref(), Some("session-S2"));
         assert_eq!(current.title.as_deref(), Some("[Fork] Original Topic"));
 
         // Sibling row: external_id=S1, clean title, PendingReview, same folder/git_branch.
-        let sibling = conversation_service::get_by_id(&db.conn, sibling_id).await.unwrap();
+        let sibling = conversation_service::get_by_id(&db.conn, sibling_id)
+            .await
+            .unwrap();
         assert_eq!(sibling.external_id.as_deref(), Some("session-S1"));
         assert_eq!(sibling.title.as_deref(), Some("Original Topic"));
         assert_eq!(sibling.status, "pending_review");
@@ -2109,7 +2074,9 @@ mod tests {
         let result = mgr.fork_session(&db, "c-restack").await.unwrap();
         let _ = join.await;
 
-        let current = conversation_service::get_by_id(&db.conn, pre.id).await.unwrap();
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
         assert_eq!(
             current.title.as_deref(),
             Some("[Fork] Topic"),
@@ -2145,7 +2112,9 @@ mod tests {
         mgr.fork_session(&db, "c-nosp").await.unwrap();
         let _ = join.await;
 
-        let current = conversation_service::get_by_id(&db.conn, pre.id).await.unwrap();
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
         assert_eq!(
             current.title.as_deref(),
             Some("[Fork] NoSpaceTitle"),

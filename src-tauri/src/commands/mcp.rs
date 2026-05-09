@@ -519,7 +519,10 @@ fn normalize_mcp_type(raw: &str) -> Option<&'static str> {
         _ => {}
     }
 
-    let collapsed: String = lower.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let collapsed: String = lower
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
     if collapsed == "streamablehttp" {
         return Some("http");
     }
@@ -1536,10 +1539,7 @@ fn disable_claude_local_plugin(id: &str) -> Result<(), AppCommandError> {
     let Some(obj) = root.as_object_mut() else {
         return Ok(());
     };
-    let Some(plugins) = obj
-        .get_mut("enabledPlugins")
-        .and_then(Value::as_object_mut)
-    else {
+    let Some(plugins) = obj.get_mut("enabledPlugins").and_then(Value::as_object_mut) else {
         return Ok(());
     };
     let key = claude_local_plugin_key(id);
@@ -3943,7 +3943,10 @@ mod tests {
         let stdio = codex_entry("type = \"stdio\"\ncommand = \"npx\"\n");
         let canonical = codex_entry_to_canonical("ex", &stdio).expect("stdio entry");
         assert_eq!(canonical.get("type").and_then(Value::as_str), Some("stdio"));
-        assert_eq!(canonical.get("command").and_then(Value::as_str), Some("npx"));
+        assert_eq!(
+            canonical.get("command").and_then(Value::as_str),
+            Some("npx")
+        );
 
         let sse = codex_entry("type = \"sse\"\nurl = \"https://mcp.example.com/sse\"\n");
         let canonical = codex_entry_to_canonical("ex", &sse).expect("sse entry");

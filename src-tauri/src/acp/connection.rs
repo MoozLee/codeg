@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sacp::schema::{HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
 use sacp::schema::{
     BlobResourceContents, CancelNotification, ClientCapabilities, ContentBlock, ContentChunk,
     CreateTerminalRequest, CreateTerminalResponse, EmbeddedResource, EmbeddedResourceResource,
@@ -19,6 +18,7 @@ use sacp::schema::{
     ToolCallContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
 };
+use sacp::schema::{HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
 use sacp::util::MatchDispatch;
 use sacp::{
     on_receive_request, Agent, Client, ConnectionTo, Dispatch, Responder, SessionMessage,
@@ -34,9 +34,9 @@ use crate::acp::session_state::SessionState;
 use crate::acp::terminal_runtime::{TerminalRuntime, TerminalRuntimeError};
 use crate::acp::types::{
     AcpEvent, AvailableCommandInfo, ConnectionInfo, ConnectionStatus, PermissionOptionInfo,
-    PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock, SessionConfigKindInfo,
-    SessionConfigOptionInfo, SessionConfigSelectGroupInfo, SessionConfigSelectInfo,
-    SessionConfigSelectOptionInfo, SessionModeInfo, SessionModeStateInfo,
+    PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock, SessionConfigBooleanInfo,
+    SessionConfigKindInfo, SessionConfigOptionInfo, SessionConfigSelectGroupInfo,
+    SessionConfigSelectInfo, SessionConfigSelectOptionInfo, SessionModeInfo, SessionModeStateInfo,
 };
 use crate::models::agent::AgentType;
 use crate::network::proxy;
@@ -71,6 +71,12 @@ fn merge_agent_env(
     merged.into_iter().collect()
 }
 
+#[derive(Debug, Clone)]
+pub enum SessionConfigCommandValue {
+    ValueId(String),
+    Boolean(bool),
+}
+
 /// Commands sent from Tauri command handlers to the ACP connection loop.
 pub enum ConnectionCommand {
     Prompt {
@@ -81,7 +87,7 @@ pub enum ConnectionCommand {
     },
     SetConfigOption {
         config_id: String,
-        value_id: String,
+        value: SessionConfigCommandValue,
     },
     Cancel,
     RespondPermission {
@@ -89,7 +95,8 @@ pub enum ConnectionCommand {
         option_id: String,
     },
     Fork {
-        reply: tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkProtocolResult, AcpError>>,
+        reply:
+            tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkProtocolResult, AcpError>>,
     },
     Disconnect,
 }
@@ -598,6 +605,15 @@ fn map_session_config_option(option: &SessionConfigOption) -> Option<SessionConf
                 }),
             })
         }
+        SessionConfigKind::Boolean(boolean) => Some(SessionConfigOptionInfo {
+            id: option.id.to_string(),
+            name: option.name.clone(),
+            description: option.description.clone(),
+            category: option.category.as_ref().map(map_session_config_category),
+            kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
+                current_value: boolean.current_value,
+            }),
+        }),
         _ => None,
     }
 }
@@ -1608,9 +1624,16 @@ async fn set_session_config_option(
     emitter: &EventEmitter,
     agent_type: AgentType,
     config_id: String,
-    value_id: String,
+    value: SessionConfigCommandValue,
 ) -> Result<(), sacp::Error> {
-    let req = SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value_id);
+    let req = match value {
+        SessionConfigCommandValue::ValueId(value) => {
+            SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value.as_str())
+        }
+        SessionConfigCommandValue::Boolean(value) => {
+            SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value)
+        }
+    };
     let untyped_req = UntypedMessage::new("session/set_config_option", req).map_err(|e| {
         sacp::util::internal_error(format!("Failed to build config option request: {e}"))
     })?;
@@ -2276,10 +2299,12 @@ async fn handle_fork_or_exit(
 
     // Reply protocol-level result to manager.fork_session, which will combine
     // it with the freshly-created sibling row id to produce the wire ForkResultInfo.
-    let _ = fork_info.reply.send(Ok(crate::acp::types::ForkProtocolResult {
-        forked_session_id: new_sid.clone(),
-        original_session_id: fork_info.original_session_id,
-    }));
+    let _ = fork_info
+        .reply
+        .send(Ok(crate::acp::types::ForkProtocolResult {
+            forked_session_id: new_sid.clone(),
+            original_session_id: fork_info.original_session_id,
+        }));
 
     // Build a NewSessionResponse from the ForkSessionResponse so we can
     // attach directly — the forked session is already live on this process.
@@ -2393,9 +2418,7 @@ fn turn_failure_error_event(reason_str: &str, agent_type: AgentType) -> Option<A
         ),
         "max_turn_requests" => (
             "turn_failed_max_turn_requests",
-            format!(
-                "{agent_type} reached the maximum number of allowed requests for this turn."
-            ),
+            format!("{agent_type} reached the maximum number of allowed requests for this turn."),
         ),
         "unknown" => (
             "turn_failed_unknown",
@@ -2719,7 +2742,7 @@ async fn run_conversation_loop<'a>(
                                 }
                                 Some(ConnectionCommand::SetConfigOption {
                                     config_id,
-                                    value_id,
+                                    value,
                                 }) => {
                                     if let Err(e) = set_session_config_option(
                                         &cx,
@@ -2728,7 +2751,7 @@ async fn run_conversation_loop<'a>(
                                         emitter,
                                         agent_type,
                                         config_id,
-                                        value_id,
+                                        value,
                                     )
                                     .await
                                     {
@@ -2854,14 +2877,11 @@ async fn run_conversation_loop<'a>(
                     .await;
                 }
             }
-            Some(ConnectionCommand::SetConfigOption {
-                config_id,
-                value_id,
-            }) => {
+            Some(ConnectionCommand::SetConfigOption { config_id, value }) => {
                 let cx = session.connection();
                 let sid = session.session_id().clone();
                 if let Err(e) = set_session_config_option(
-                    &cx, &sid, state, emitter, agent_type, config_id, value_id,
+                    &cx, &sid, state, emitter, agent_type, config_id, value,
                 )
                 .await
                 {
@@ -3444,8 +3464,7 @@ mod tests {
             "args": ["-y", "@mcp_hub_org/cli@latest", "run", "figma-developer-mcp"],
             "env": {"FIGMA_API_KEY": "secret"},
         });
-        let server =
-            canonical_spec_to_mcp_server("figma", &spec).expect("stdio spec should map");
+        let server = canonical_spec_to_mcp_server("figma", &spec).expect("stdio spec should map");
         match server {
             McpServer::Stdio(s) => {
                 assert_eq!(s.name, "figma");
@@ -3467,8 +3486,7 @@ mod tests {
             "type": "stdio",
             "command": "cargo",
         });
-        let server =
-            canonical_spec_to_mcp_server("x", &spec).expect("bare command should resolve");
+        let server = canonical_spec_to_mcp_server("x", &spec).expect("bare command should resolve");
         match server {
             McpServer::Stdio(s) => assert!(
                 s.command.is_absolute(),
@@ -3513,8 +3531,7 @@ mod tests {
             "command": "/usr/local/bin/npx",
             "args": ["-y", "@mcp_hub_org/cli@latest", "run", "figma-developer-mcp"],
         });
-        let server =
-            canonical_spec_to_mcp_server("figma", &spec).expect("stdio spec should map");
+        let server = canonical_spec_to_mcp_server("figma", &spec).expect("stdio spec should map");
         let json = serde_json::to_value(&server).expect("server should serialize");
         assert_eq!(json["name"], "figma");
         assert_eq!(json["command"], "/usr/local/bin/npx");
@@ -3814,7 +3831,10 @@ mod tests {
 
         let guard = state.read().await;
         assert_eq!(
-            guard.pending_permission.as_ref().map(|pending| pending.request_id.as_str()),
+            guard
+                .pending_permission
+                .as_ref()
+                .map(|pending| pending.request_id.as_str()),
             Some("req-2")
         );
     }

@@ -16,9 +16,7 @@ pub fn mark_listener_non_inheritable(listener: &TcpListener) -> io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawSocket;
-        use windows_sys::Win32::Foundation::{
-            SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT,
-        };
+        use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT};
         // RawSocket is u64 on Windows but the actual SOCKET value fits in
         // a pointer-width integer (32-bit on x86, 64-bit on x64). Going
         // through `usize` is the canonical idiom that's correct on both.

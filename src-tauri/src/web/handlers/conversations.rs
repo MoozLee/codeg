@@ -234,4 +234,3 @@ pub async fn delete_conversation(
         .map_err(AppCommandError::from)?;
     Ok(Json(()))
 }
-

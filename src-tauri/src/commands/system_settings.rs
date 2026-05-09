@@ -1,7 +1,7 @@
 #[cfg(feature = "tauri-runtime")]
-use std::{collections::BTreeMap, sync::OnceLock};
-#[cfg(feature = "tauri-runtime")]
 use std::path::{Component, Path, PathBuf};
+#[cfg(feature = "tauri-runtime")]
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use sea_orm::DatabaseConnection;
 #[cfg(feature = "tauri-runtime")]
@@ -11,14 +11,13 @@ use crate::app_error::AppCommandError;
 use crate::db::service::app_metadata_service;
 #[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
+use crate::models::{
+    AvailableTerminalShells, SystemFontFamily, SystemFontFamilyList, SystemFontFamilySource,
+    SystemFontSettings, SystemLanguageSettings, SystemOpenTargetSettings, SystemProxySettings,
+    SystemTerminalSettings, TerminalShellOption,
+};
 #[cfg(feature = "tauri-runtime")]
 use crate::models::{SystemOpenTarget, SystemRenderingSettings};
-use crate::models::{
-    AvailableTerminalShells, SystemFontFamily, SystemFontFamilyList,
-    SystemFontFamilySource, SystemFontSettings, SystemLanguageSettings,
-    SystemOpenTargetSettings, SystemProxySettings, SystemTerminalSettings,
-    TerminalShellOption,
-};
 #[cfg(feature = "tauri-runtime")]
 use crate::network::proxy;
 #[cfg(feature = "tauri-runtime")]
@@ -249,8 +248,7 @@ fn spawn_code_cli(root: &Path, target: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
 fn spawn_platform_vscode(root: &Path, target: &Path) -> Result<(), std::io::Error> {
-    let app_cli =
-        Path::new("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code");
+    let app_cli = Path::new("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code");
     if app_cli.exists() {
         let mut command = crate::process::std_command(app_cli);
         command.arg("--new-window").arg(root).arg(target);

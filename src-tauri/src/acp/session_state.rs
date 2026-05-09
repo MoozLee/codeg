@@ -364,8 +364,7 @@ impl SessionState {
                 live.content
                     .retain(|b| !matches!(b, LiveContentBlock::Plan { .. }));
                 live.content.push(LiveContentBlock::Plan {
-                    entries: serde_json::to_value(entries)
-                        .unwrap_or(serde_json::Value::Null),
+                    entries: serde_json::to_value(entries).unwrap_or(serde_json::Value::Null),
                 });
             }
             AcpEvent::ConversationStatusChanged { .. } => {
@@ -771,8 +770,7 @@ mod tests {
         assert!(s.session_started_tx.is_none());
         // rx resolves with Ok(()) — bounded timeout because the test must
         // never hang if the signal logic regresses.
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
         assert!(
             matches!(result, Ok(Ok(()))),
             "rx must fire on SessionStarted; got {result:?}"
@@ -791,8 +789,7 @@ mod tests {
             session_id: "ext-2".into(),
         });
         // The first send delivered; rx is consumed.
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
         assert!(matches!(result, Ok(Ok(()))));
     }
 
@@ -807,8 +804,7 @@ mod tests {
             s.install_session_started_signal()
             // s drops here, taking tx with it.
         };
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
         assert!(
             matches!(result, Ok(Err(_))),
             "rx must receive Err when sender drops without sending; got {result:?}"

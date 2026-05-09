@@ -22,11 +22,11 @@ pub use message::{
     TurnUsage, UnifiedMessage,
 };
 pub use quick_message::QuickMessageInfo;
-#[cfg(feature = "tauri-runtime")]
-pub use system::{SystemOpenTarget, SystemRenderingSettings};
 pub use system::{
     AvailableTerminalShells, GitCredentials, GitDetectResult, GitHubAccountsSettings,
     GitHubTokenValidation, GitSettings, SystemFontFamily, SystemFontFamilyList,
-    SystemFontFamilySource, SystemFontSettings, SystemLanguageSettings,
-    SystemOpenTargetSettings, SystemProxySettings, SystemTerminalSettings, TerminalShellOption,
+    SystemFontFamilySource, SystemFontSettings, SystemLanguageSettings, SystemOpenTargetSettings,
+    SystemProxySettings, SystemTerminalSettings, TerminalShellOption,
 };
+#[cfg(feature = "tauri-runtime")]
+pub use system::{SystemOpenTarget, SystemRenderingSettings};

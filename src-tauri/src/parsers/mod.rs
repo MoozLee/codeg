@@ -742,10 +742,12 @@ mod tests {
 
     use super::{
         infer_context_window_max_tokens, latest_turn_total_usage_tokens,
-        merge_context_window_stats, path_eq_for_matching,
-        stable_user_anchor_id_from_message, stable_user_anchor_id_from_parts,
+        merge_context_window_stats, path_eq_for_matching, stable_user_anchor_id_from_message,
+        stable_user_anchor_id_from_parts,
     };
-    use crate::models::{ContentBlock, MessageTurn, SessionStats, TurnRole, TurnUsage, UnifiedMessage};
+    use crate::models::{
+        ContentBlock, MessageTurn, SessionStats, TurnRole, TurnUsage, UnifiedMessage,
+    };
 
     #[test]
     fn infers_model_context_limits() {

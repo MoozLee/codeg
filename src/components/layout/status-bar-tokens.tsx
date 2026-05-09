@@ -65,6 +65,11 @@ export function StatusBarTokens() {
     getConnSnapshot
   )
 
+  const contextManagement = activeConn?.contextManagement ?? null
+  const configuredContextMax =
+    contextManagement?.configuredContextWindowMaxTokens ?? null
+  const configuredContextMaxSource =
+    contextManagement?.contextWindowMaxSource ?? null
   const rawLiveUsed = activeConn?.usage?.used ?? null
   const rawLiveSize = activeConn?.usage?.size ?? null
   // Treat live used=0 as "no data" so we fall back to sessionStats —
@@ -73,22 +78,39 @@ export function StatusBarTokens() {
     rawLiveUsed != null && rawLiveUsed > 0 ? rawLiveUsed : null
   const liveContextMax =
     rawLiveSize != null && rawLiveSize > 0 ? rawLiveSize : null
+  const historicalContextUsed = sessionStats?.context_window_used_tokens ?? null
+  const historicalContextMax = sessionStats?.context_window_max_tokens ?? null
+  const hasActiveConnectionContextMax =
+    activeConn != null && configuredContextMax != null
 
-  const contextUsed =
-    liveContextUsed ?? sessionStats?.context_window_used_tokens ?? null
-  const contextMax =
-    liveContextMax ?? sessionStats?.context_window_max_tokens ?? null
+  const contextUsed = liveContextUsed ?? historicalContextUsed
+  const contextMax = hasActiveConnectionContextMax
+    ? configuredContextMax
+    : (liveContextMax ?? historicalContextMax)
   const contextPercentRaw =
-    (liveContextUsed != null && liveContextMax != null && liveContextMax > 0
-      ? (liveContextUsed / liveContextMax) * 100
-      : sessionStats?.context_window_usage_percent) ??
     (contextUsed != null && contextMax != null && contextMax > 0
       ? (contextUsed / contextMax) * 100
-      : null)
+      : sessionStats?.context_window_usage_percent) ?? null
   const contextPercent =
     contextPercentRaw == null
       ? null
       : Math.max(0, Math.min(100, contextPercentRaw))
+  const contextSource = liveContextUsed != null ? "live" : "history"
+  const contextMaxSource = hasActiveConnectionContextMax
+    ? "configured"
+    : liveContextMax != null
+      ? "live"
+      : historicalContextMax != null
+        ? "history"
+        : "unknown"
+  const contextLevel =
+    contextPercent == null
+      ? "unknown"
+      : contextPercent > 90
+        ? "critical"
+        : contextPercent >= 70
+          ? "high"
+          : "normal"
   const hasContext = contextPercent != null
   const hasUsage = usage != null
   const fallbackTotal = hasUsage
@@ -118,13 +140,27 @@ export function StatusBarTokens() {
   }
 
   const hasTokenSection = rows.length > 0
+  const compactionSupport = contextManagement?.compactionSupport ?? "unknown"
+  const autoCompactionEnabled = contextManagement?.autoCompactionEnabled
+  const autoCompactionThreshold = contextManagement?.autoCompactionThreshold
+  const configuredModel = contextManagement?.configuredModel ?? null
+  const runtimeConfig = contextManagement?.runtimeConfig ?? null
+  const selectorModel = runtimeConfig?.selectorModel ?? null
 
-  if (!hasContext && !hasTokenSection) return null
+  if (!hasContext && !hasTokenSection && !contextManagement) return null
 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button className="flex items-center gap-1 hover:text-foreground transition-colors">
+        <button
+          className={`flex items-center gap-1 transition-colors hover:text-foreground ${
+            contextLevel === "critical"
+              ? "text-destructive"
+              : contextLevel === "high"
+                ? "text-amber-600 dark:text-amber-400"
+                : ""
+          }`}
+        >
           {hasContext ? (
             <>
               <svg
@@ -168,7 +204,7 @@ export function StatusBarTokens() {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="end" className="w-56 gap-2 p-3 text-xs">
+      <PopoverContent side="top" align="end" className="w-72 gap-2 p-3 text-xs">
         {hasContext ? (
           <div
             className={`space-y-1 ${
@@ -183,7 +219,13 @@ export function StatusBarTokens() {
             </div>
             <div className="relative h-1.5 overflow-hidden rounded-full bg-muted">
               <div
-                className="absolute inset-y-0 left-0 bg-foreground/70"
+                className={`absolute inset-y-0 left-0 ${
+                  contextLevel === "critical"
+                    ? "bg-destructive"
+                    : contextLevel === "high"
+                      ? "bg-amber-500"
+                      : "bg-foreground/70"
+                }`}
                 style={{ width: `${contextPercent ?? 0}%` }}
               />
             </div>
@@ -193,6 +235,111 @@ export function StatusBarTokens() {
                 {contextUsed == null || contextMax == null
                   ? "--"
                   : `${formatTokenCount(contextUsed)} / ${formatTokenCount(contextMax)}`}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs leading-none text-muted-foreground">
+              <span>{t("contextSource")}</span>
+              <span>{t(`source.${contextSource}`)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs leading-none text-muted-foreground">
+              <span>{t("contextMaxSource")}</span>
+              <span>{t(`maxSource.${contextMaxSource}`)}</span>
+            </div>
+            <div
+              className={`text-xs leading-snug ${
+                contextLevel === "critical"
+                  ? "text-destructive"
+                  : contextLevel === "high"
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground"
+              }`}
+            >
+              {t(`contextLevel.${contextLevel}`)}
+            </div>
+          </div>
+        ) : null}
+        {contextManagement ? (
+          <div
+            className={`space-y-1 ${
+              hasContext || hasTokenSection
+                ? "mb-0.5 border-b border-border pb-0.5"
+                : ""
+            }`}
+          >
+            <div className="text-xs leading-none font-medium">
+              {t("contextManagement")}
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("agentType")}</span>
+              <span>
+                {activeConn?.agentType ?? runtimeConfig?.agentType ?? "--"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("configuredModel")}</span>
+              <span
+                className="max-w-36 truncate text-right"
+                title={configuredModel ?? undefined}
+              >
+                {configuredModel ?? t("unknown")}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("autoCompactionThreshold")}</span>
+              <span>
+                {autoCompactionThreshold == null
+                  ? t("unknown")
+                  : formatPercent(autoCompactionThreshold)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("autoCompaction")}</span>
+              <span>
+                {autoCompactionEnabled == null
+                  ? t("unknown")
+                  : autoCompactionEnabled
+                    ? t("enabled")
+                    : t("disabled")}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("configuredContextWindowMax")}</span>
+              <span
+                className="max-w-36 truncate text-right"
+                title={
+                  configuredContextMax == null
+                    ? undefined
+                    : `${configuredContextMax.toLocaleString()} · ${
+                        configuredContextMaxSource
+                          ? t(
+                              `configuredContextWindowMaxSourceState.${configuredContextMaxSource}`
+                            )
+                          : t("unknown")
+                      }`
+                }
+              >
+                {configuredContextMax == null
+                  ? t("unknown")
+                  : `${formatTokenCount(configuredContextMax)} · ${
+                      configuredContextMaxSource
+                        ? t(
+                            `configuredContextWindowMaxSourceState.${configuredContextMaxSource}`
+                          )
+                        : t("unknown")
+                    }`}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("compactionSupport")}</span>
+              <span>{t(`compactionSupportState.${compactionSupport}`)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("selectorModel")}</span>
+              <span
+                className="max-w-36 truncate text-right"
+                title={selectorModel ?? undefined}
+              >
+                {selectorModel ?? t("unknown")}
               </span>
             </div>
           </div>
