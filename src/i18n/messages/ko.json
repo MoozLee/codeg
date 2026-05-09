@@ -2458,6 +2458,45 @@
       "imported": "가져오기 완료",
       "failed": "가져오기 실패",
       "close": "닫기"
+    },
+    "marketplace": {
+      "openMarketplace": "펫 마켓",
+      "title": "펫 마켓",
+      "description": "codex-pets.net 의 공개 펫을 둘러보고 로컬에 설치합니다.",
+      "search": "펫 검색",
+      "kindFilter": {
+        "all": "전체",
+        "object": "오브젝트",
+        "animal": "동물",
+        "person": "인물",
+        "creature": "생물"
+      },
+      "sortFilter": {
+        "latest": "최신",
+        "popular": "인기",
+        "views": "조회수순"
+      },
+      "refresh": "새로고침",
+      "install": "설치",
+      "installing": "설치 중",
+      "reinstall": "다시 설치",
+      "reinstallConfirm": "로컬 펫 \"{name}\" 을(를) 덮어쓰시겠습니까? 기존 데이터가 교체됩니다.",
+      "cancel": "취소",
+      "stats": {
+        "views": "조회수",
+        "downloads": "다운로드",
+        "likes": "좋아요"
+      },
+      "page": "{page} / {total} 페이지",
+      "prev": "이전",
+      "next": "다음",
+      "empty": "조건에 맞는 펫이 없습니다.",
+      "successInstalled": "\"{name}\" 을(를) 설치했습니다",
+      "errors": {
+        "loadFailed": "마켓을 불러오지 못했습니다",
+        "installFailed": "설치에 실패했습니다",
+        "alreadyInstalled": "해당 펫이 이미 존재합니다"
+      }
     }
   }
 }

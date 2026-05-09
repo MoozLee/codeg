@@ -2458,6 +2458,45 @@
       "imported": "تم الاستيراد بنجاح",
       "failed": "فشل الاستيراد",
       "close": "إغلاق"
+    },
+    "marketplace": {
+      "openMarketplace": "متجر الحيوانات الأليفة",
+      "title": "متجر الحيوانات الأليفة",
+      "description": "تصفّح الحيوانات الأليفة العامة من codex-pets.net وثبّتها محلياً.",
+      "search": "ابحث عن حيوان أليف",
+      "kindFilter": {
+        "all": "الكل",
+        "object": "كائن",
+        "animal": "حيوان",
+        "person": "شخصية",
+        "creature": "مخلوق"
+      },
+      "sortFilter": {
+        "latest": "الأحدث",
+        "popular": "الأكثر شيوعاً",
+        "views": "الأكثر مشاهدة"
+      },
+      "refresh": "تحديث",
+      "install": "تثبيت",
+      "installing": "جاري التثبيت",
+      "reinstall": "إعادة التثبيت",
+      "reinstallConfirm": "هل تريد استبدال الحيوان الأليف المحلي \"{name}\"؟ ستُستبدل البيانات الحالية.",
+      "cancel": "إلغاء",
+      "stats": {
+        "views": "المشاهدات",
+        "downloads": "التنزيلات",
+        "likes": "الإعجابات"
+      },
+      "page": "صفحة {page} من {total}",
+      "prev": "السابق",
+      "next": "التالي",
+      "empty": "لا يوجد حيوان أليف مطابق.",
+      "successInstalled": "تم تثبيت \"{name}\"",
+      "errors": {
+        "loadFailed": "تعذّر تحميل المتجر",
+        "installFailed": "فشل التثبيت",
+        "alreadyInstalled": "هذا الحيوان موجود بالفعل"
+      }
     }
   }
 }

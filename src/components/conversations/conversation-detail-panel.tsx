@@ -1536,7 +1536,7 @@ export function ConversationDetailPanel({
         className={cn(
           canTile
             ? cn(
-                "relative h-full min-w-[28rem] flex-1 overflow-hidden",
+                "relative h-full min-w-[24rem] flex-1 overflow-hidden",
                 index > 0 && "border-l border-border"
               )
             : active

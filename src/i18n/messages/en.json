@@ -2458,6 +2458,45 @@
       "imported": "Imported successfully",
       "failed": "Import failed",
       "close": "Close"
+    },
+    "marketplace": {
+      "openMarketplace": "Pet marketplace",
+      "title": "Pet marketplace",
+      "description": "Browse public pets from codex-pets.net and install them locally.",
+      "search": "Search pets",
+      "kindFilter": {
+        "all": "All",
+        "object": "Object",
+        "animal": "Animal",
+        "person": "Person",
+        "creature": "Creature"
+      },
+      "sortFilter": {
+        "latest": "Latest",
+        "popular": "Popular",
+        "views": "Most viewed"
+      },
+      "refresh": "Refresh",
+      "install": "Install",
+      "installing": "Installing",
+      "reinstall": "Reinstall",
+      "reinstallConfirm": "Replace local pet \"{name}\"? Existing data will be overwritten.",
+      "cancel": "Cancel",
+      "stats": {
+        "views": "Views",
+        "downloads": "Downloads",
+        "likes": "Likes"
+      },
+      "page": "Page {page} of {total}",
+      "prev": "Previous",
+      "next": "Next",
+      "empty": "No pets match this filter.",
+      "successInstalled": "Installed \"{name}\"",
+      "errors": {
+        "loadFailed": "Failed to load marketplace",
+        "installFailed": "Failed to install pet",
+        "alreadyInstalled": "Pet already exists locally"
+      }
     }
   }
 }

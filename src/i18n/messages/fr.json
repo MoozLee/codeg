@@ -2458,6 +2458,45 @@
       "imported": "Import réussi",
       "failed": "Import échoué",
       "close": "Fermer"
+    },
+    "marketplace": {
+      "openMarketplace": "Marketplace de mascottes",
+      "title": "Marketplace de mascottes",
+      "description": "Parcourez les mascottes publiques de codex-pets.net et installez-les localement.",
+      "search": "Rechercher des mascottes",
+      "kindFilter": {
+        "all": "Toutes",
+        "object": "Objet",
+        "animal": "Animal",
+        "person": "Personne",
+        "creature": "Créature"
+      },
+      "sortFilter": {
+        "latest": "Récents",
+        "popular": "Populaires",
+        "views": "Vues"
+      },
+      "refresh": "Actualiser",
+      "install": "Installer",
+      "installing": "Installation",
+      "reinstall": "Réinstaller",
+      "reinstallConfirm": "Remplacer la mascotte locale « {name} » ? Les données existantes seront écrasées.",
+      "cancel": "Annuler",
+      "stats": {
+        "views": "Vues",
+        "downloads": "Téléchargements",
+        "likes": "J’aime"
+      },
+      "page": "Page {page} sur {total}",
+      "prev": "Précédent",
+      "next": "Suivant",
+      "empty": "Aucune mascotte ne correspond.",
+      "successInstalled": "« {name} » installée",
+      "errors": {
+        "loadFailed": "Impossible de charger le marketplace",
+        "installFailed": "Échec de l’installation",
+        "alreadyInstalled": "La mascotte existe déjà localement"
+      }
     }
   }
 }

@@ -2458,6 +2458,45 @@
       "imported": "匯入完成",
       "failed": "匯入失敗",
       "close": "關閉"
+    },
+    "marketplace": {
+      "openMarketplace": "寵物市集",
+      "title": "寵物市集",
+      "description": "瀏覽 codex-pets.net 上的公共寵物,一鍵安裝到本機。",
+      "search": "搜尋寵物",
+      "kindFilter": {
+        "all": "全部",
+        "object": "物品",
+        "animal": "動物",
+        "person": "人物",
+        "creature": "生物"
+      },
+      "sortFilter": {
+        "latest": "最新",
+        "popular": "熱門",
+        "views": "最多瀏覽"
+      },
+      "refresh": "重新整理",
+      "install": "安裝",
+      "installing": "安裝中",
+      "reinstall": "重新安裝",
+      "reinstallConfirm": "確認覆蓋本機寵物 \"{name}\" 嗎？現有資料將被取代。",
+      "cancel": "取消",
+      "stats": {
+        "views": "瀏覽",
+        "downloads": "下載",
+        "likes": "讚"
+      },
+      "page": "第 {page} / {total} 頁",
+      "prev": "上一頁",
+      "next": "下一頁",
+      "empty": "沒有符合的寵物。",
+      "successInstalled": "已安裝 \"{name}\"",
+      "errors": {
+        "loadFailed": "載入市集失敗",
+        "installFailed": "安裝失敗",
+        "alreadyInstalled": "該寵物已存在"
+      }
     }
   }
 }

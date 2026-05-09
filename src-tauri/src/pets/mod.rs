@@ -17,6 +17,7 @@
 //! and the spritesheet is a 1536×1872 RGBA WebP (PNG also accepted).
 
 pub mod codex_import;
+pub mod marketplace;
 
 use std::fs;
 use std::io::Write;

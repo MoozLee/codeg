@@ -70,3 +70,16 @@ export const IDLE_FLOURISH_OPTIONS: readonly PetState[] = [
   "waving",
   "jumping",
 ] as const
+
+// Backend-driven one-shot animations (turn_complete, git commit/push,
+// merge abort, agent install, manual `pet_celebrate`). Sized to play a
+// few full loops so the user actually registers the cue, with `failed`
+// kept short to avoid lingering on a frowning sprite.
+export const PET_ONESHOT_LOOPS: Record<
+  "jumping" | "waving" | "failed",
+  number
+> = {
+  jumping: 3,
+  waving: 3,
+  failed: 2,
+}

@@ -14,8 +14,12 @@ use crate::commands::pet::{
     PetUpdateMetaParams,
 };
 use crate::models::pet::{
-    ImportCodexPetsRequest, ImportCodexPetsResult, ImportablePet, NewPetInput, PetDetail,
-    PetSpriteAsset, PetSummary, PetWindowConfig, PetWindowStatePatch,
+    ImportCodexPetsRequest, ImportCodexPetsResult, ImportablePet, NewPetInput, PetCelebrationKind,
+    PetDetail, PetSpriteAsset, PetSummary, PetWindowConfig, PetWindowStatePatch,
+};
+use crate::pets::marketplace::{
+    MarketplaceInstallRequest, MarketplaceInstallResponse, MarketplaceListParams,
+    MarketplaceListResponse,
 };
 
 pub async fn pet_list() -> Result<Json<Vec<PetSummary>>, AppCommandError> {
@@ -104,6 +108,34 @@ pub async fn pet_save_window_state(
     Json(patch): Json<PetWindowStatePatch>,
 ) -> Result<Json<PetWindowConfig>, AppCommandError> {
     pet_commands::pet_save_window_state_core(&state.db.conn, patch)
+        .await
+        .map(Json)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PetCelebrateParams {
+    pub kind: PetCelebrationKind,
+}
+
+pub async fn pet_celebrate(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<PetCelebrateParams>,
+) -> Result<Json<()>, AppCommandError> {
+    pet_commands::pet_celebrate_core(&state.emitter, params.kind);
+    Ok(Json(()))
+}
+
+pub async fn pet_marketplace_list(
+    Json(params): Json<MarketplaceListParams>,
+) -> Result<Json<MarketplaceListResponse>, AppCommandError> {
+    pet_commands::pet_marketplace_list_core(params).await.map(Json)
+}
+
+pub async fn pet_marketplace_install(
+    Json(request): Json<MarketplaceInstallRequest>,
+) -> Result<Json<MarketplaceInstallResponse>, AppCommandError> {
+    pet_commands::pet_marketplace_install_core(request)
         .await
         .map(Json)
 }

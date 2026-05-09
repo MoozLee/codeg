@@ -11,8 +11,13 @@ import {
 } from "@/lib/pet/sprite-url"
 import { disposeTauriListener } from "@/lib/tauri-listener"
 import { isDesktop } from "@/lib/transport"
-import { PET_FRAME_DURATIONS_MS, type PetState } from "@/lib/pet/animation"
+import {
+  PET_FRAME_DURATIONS_MS,
+  PET_ONESHOT_LOOPS,
+  type PetState,
+} from "@/lib/pet/animation"
 import { usePetState } from "../_hooks/usePetState"
+import { usePetOneShot } from "../_hooks/usePetOneShot"
 import { usePetDrag } from "../_hooks/usePetDrag"
 import { PetSprite } from "./PetSprite"
 import { PetMenu } from "./PetMenu"
@@ -38,6 +43,14 @@ function sumDurations(state: PetState): number {
   return PET_FRAME_DURATIONS_MS[state].reduce((acc, d) => acc + d, 0)
 }
 
+// Oneshot animations from the backend (`pet://oneshot`) reuse the same
+// "hold for N loops then unstick" model as user interactions. Loop counts
+// live in `PET_ONESHOT_LOOPS` so designers can tune them without touching
+// component code.
+function oneShotDuration(state: "jumping" | "waving" | "failed"): number {
+  return sumDurations(state) * PET_ONESHOT_LOOPS[state] + INTERACTION_SLACK_MS
+}
+
 export function PetWindow({ petId }: PetWindowProps) {
   const t = useTranslations("Pet")
   const [pet, setPet] = useState<PetDetail | null>(null)
@@ -45,6 +58,7 @@ export function PetWindow({ petId }: PetWindowProps) {
   const [scale, setScale] = useState<number>(1)
   const [error, setError] = useState<string | null>(null)
   const agentState = usePetState()
+  const oneShot = usePetOneShot()
 
   // Interaction-driven state takes priority over the agent-driven state so
   // a drag, hover, or click immediately wins over the ambient ACP animation.
@@ -150,6 +164,17 @@ export function PetWindow({ petId }: PetWindowProps) {
       disposeTauriListener(unlistenLeave, "Pet")
     }
   }, [playOneShot, cancelInteraction])
+
+  // Backend-driven oneshot animations. Skipped while the user is actively
+  // pressing the mouse (drag / click-and-hold) so we don't yank a sprite
+  // out from under their finger; the backend event is fire-and-forget
+  // anyway, missing one mid-drag is fine. Reacts to `oneShot.key` rather
+  // than `oneShot.kind` so two same-kind events back-to-back replay.
+  useEffect(() => {
+    if (!oneShot) return
+    if (pointerDownRef.current) return
+    playOneShot(oneShot.kind, oneShotDuration(oneShot.kind))
+  }, [oneShot, playOneShot])
 
   useEffect(() => {
     return () => {

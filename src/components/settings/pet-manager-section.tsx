@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ChevronDown,
@@ -9,6 +9,7 @@ import {
   PawPrint,
   Pencil,
   Plus,
+  Store,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -49,17 +50,20 @@ import {
 } from "@/lib/pet/animation"
 import { PetEditor } from "./pet-editor"
 import { PetImporter } from "./pet-importer"
+import { PetMarketplaceDialog } from "./pet-marketplace-dialog"
 
 const SPRITE_PREVIEW_CONCURRENCY = 4
 
 export function PetManagerSection() {
   const t = useTranslations("Pet.manager")
+  const tMarket = useTranslations("Pet.marketplace")
   const [pets, setPets] = useState<PetSummary[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorTarget, setEditorTarget] = useState<PetSummary | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false)
   const [codexAvailable, setCodexAvailable] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<PetSummary | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -171,6 +175,8 @@ export function PetManagerSection() {
 
   const summonDisabled = !isDesktop() || !activeId
 
+  const installedIds = useMemo(() => new Set(pets.map((p) => p.id)), [pets])
+
   return (
     <Collapsible
       open={expanded}
@@ -241,6 +247,16 @@ export function PetManagerSection() {
                 aria-label={t("importFromCodex")}
               >
                 <Import className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-xs"
+                onClick={() => setMarketplaceOpen(true)}
+                title={tMarket("openMarketplace")}
+                aria-label={tMarket("openMarketplace")}
+              >
+                <Store className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
@@ -362,6 +378,13 @@ export function PetManagerSection() {
             setImportOpen(false)
             await refresh()
           }}
+        />
+
+        <PetMarketplaceDialog
+          open={marketplaceOpen}
+          onOpenChange={setMarketplaceOpen}
+          installedIds={installedIds}
+          onInstalled={refresh}
         />
 
         <AlertDialog

@@ -150,6 +150,14 @@ async fn async_main() {
         state.event_broadcaster.clone(),
     ));
 
+    // Spawn the desktop pet state mapper so server-mode browsers viewing
+    // /pet receive `pet://state` and `pet://oneshot` over the WebSocket
+    // bridge, just like the Tauri webview does in desktop mode.
+    tokio::spawn(codeg_lib::pet_state_mapper::pet_state_subscriber_task(
+        state.event_broadcaster.clone(),
+        state.emitter.clone(),
+    ));
+
     // Spawn the idle sweep so connections abandoned without an explicit
     // disconnect (e.g. browser tab closed, panic survivors) are reaped.
     // Override the 60-second default via `CODEG_ACP_IDLE_TIMEOUT_SECS`

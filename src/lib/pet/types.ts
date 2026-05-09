@@ -78,3 +78,48 @@ export interface ImportSkipped {
 export interface PetCodexImportAvailability {
   available: boolean
 }
+
+export interface MarketplacePet {
+  id: string
+  displayName: string
+  description: string
+  kind?: string
+  tags: string[]
+  ownerName?: string
+  ownerHandle?: string
+  viewCount: number
+  downloadCount: number
+  likeCount: number
+  uploadedAt?: string
+  posterUrl?: string
+  previewUrl?: string
+  downloadUrl: string
+  alreadyInstalled: boolean
+}
+
+export interface MarketplaceListParams {
+  page?: number
+  pageSize?: number
+  query?: string
+  kind?: string
+  sort?: string
+  tags?: string[]
+}
+
+export interface MarketplaceListResponse {
+  pets: MarketplacePet[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
+
+export interface MarketplaceInstallRequest {
+  id: string
+  downloadUrl: string
+  overwrite?: boolean
+}
+
+export interface MarketplaceInstallResponse {
+  pet: PetSummary
+}

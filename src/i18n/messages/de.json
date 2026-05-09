@@ -2458,6 +2458,45 @@
       "imported": "Erfolgreich importiert",
       "failed": "Import fehlgeschlagen",
       "close": "Schließen"
+    },
+    "marketplace": {
+      "openMarketplace": "Pet-Marketplace",
+      "title": "Pet-Marketplace",
+      "description": "Öffentliche Pets von codex-pets.net durchsuchen und lokal installieren.",
+      "search": "Pets suchen",
+      "kindFilter": {
+        "all": "Alle",
+        "object": "Objekt",
+        "animal": "Tier",
+        "person": "Person",
+        "creature": "Kreatur"
+      },
+      "sortFilter": {
+        "latest": "Neueste",
+        "popular": "Beliebt",
+        "views": "Aufrufe"
+      },
+      "refresh": "Aktualisieren",
+      "install": "Installieren",
+      "installing": "Wird installiert",
+      "reinstall": "Neu installieren",
+      "reinstallConfirm": "Lokales Pet \"{name}\" überschreiben? Vorhandene Daten werden ersetzt.",
+      "cancel": "Abbrechen",
+      "stats": {
+        "views": "Aufrufe",
+        "downloads": "Downloads",
+        "likes": "Likes"
+      },
+      "page": "Seite {page} von {total}",
+      "prev": "Zurück",
+      "next": "Weiter",
+      "empty": "Keine Pets entsprechen dem Filter.",
+      "successInstalled": "\"{name}\" installiert",
+      "errors": {
+        "loadFailed": "Marketplace konnte nicht geladen werden",
+        "installFailed": "Installation fehlgeschlagen",
+        "alreadyInstalled": "Pet existiert bereits lokal"
+      }
     }
   }
 }

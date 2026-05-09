@@ -7,6 +7,10 @@ import type {
   ImportablePet,
   ImportCodexPetsRequest,
   ImportCodexPetsResult,
+  MarketplaceInstallRequest,
+  MarketplaceInstallResponse,
+  MarketplaceListParams,
+  MarketplaceListResponse,
   NewPetInput,
   PetCodexImportAvailability,
   PetDetail,
@@ -65,6 +69,18 @@ export async function isCodexImportAvailable(): Promise<PetCodexImportAvailabili
   return getTransport().call("pet_codex_import_available")
 }
 
+export async function listMarketplacePets(
+  params: MarketplaceListParams
+): Promise<MarketplaceListResponse> {
+  return getTransport().call("pet_marketplace_list", { ...params })
+}
+
+export async function installMarketplacePet(
+  request: MarketplaceInstallRequest
+): Promise<MarketplaceInstallResponse> {
+  return getTransport().call("pet_marketplace_install", { ...request })
+}
+
 export async function getPetSettings(): Promise<PetWindowConfig> {
   return getTransport().call("pet_get_settings")
 }
@@ -79,6 +95,19 @@ export async function savePetWindowState(
   patch: PetWindowStatePatch
 ): Promise<PetWindowConfig> {
   return getTransport().call("pet_save_window_state", { ...patch })
+}
+
+// Manual oneshot trigger for events the backend can't observe directly
+// (e.g. merge-completed, which is emitted only from the renderer). The
+// backend forwards the request as a `pet://oneshot` event so the pet
+// window animates regardless of which transport the user is on.
+//
+// Mirrors Rust `PetCelebrationKind`: only the three transient cues that
+// the renderer actually plays are accepted at the API boundary.
+export type PetCelebrationKind = "jumping" | "waving" | "failed"
+
+export async function petCelebrate(kind: PetCelebrationKind): Promise<void> {
+  return getTransport().call("pet_celebrate", { kind })
 }
 
 // Tauri-only — these are noops in web mode (the standalone server cannot

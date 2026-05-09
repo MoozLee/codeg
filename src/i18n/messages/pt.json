@@ -2458,6 +2458,45 @@
       "imported": "Importação concluída",
       "failed": "Falha no import",
       "close": "Fechar"
+    },
+    "marketplace": {
+      "openMarketplace": "Mercado de pets",
+      "title": "Mercado de pets",
+      "description": "Explore pets públicos do codex-pets.net e instale-os localmente.",
+      "search": "Buscar pets",
+      "kindFilter": {
+        "all": "Todos",
+        "object": "Objeto",
+        "animal": "Animal",
+        "person": "Pessoa",
+        "creature": "Criatura"
+      },
+      "sortFilter": {
+        "latest": "Recentes",
+        "popular": "Populares",
+        "views": "Mais vistos"
+      },
+      "refresh": "Atualizar",
+      "install": "Instalar",
+      "installing": "Instalando",
+      "reinstall": "Reinstalar",
+      "reinstallConfirm": "Sobrescrever o pet local \"{name}\"? Os dados existentes serão substituídos.",
+      "cancel": "Cancelar",
+      "stats": {
+        "views": "Visualizações",
+        "downloads": "Downloads",
+        "likes": "Curtidas"
+      },
+      "page": "Página {page} de {total}",
+      "prev": "Anterior",
+      "next": "Próxima",
+      "empty": "Nenhum pet corresponde.",
+      "successInstalled": "\"{name}\" instalado",
+      "errors": {
+        "loadFailed": "Falha ao carregar o mercado",
+        "installFailed": "Falha ao instalar o pet",
+        "alreadyInstalled": "O pet já existe localmente"
+      }
     }
   }
 }

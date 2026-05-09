@@ -2458,6 +2458,45 @@
       "imported": "取り込みに成功",
       "failed": "取り込みに失敗",
       "close": "閉じる"
+    },
+    "marketplace": {
+      "openMarketplace": "ペットマーケット",
+      "title": "ペットマーケット",
+      "description": "codex-pets.net の公開ペットを参照し、ローカルにインストールします。",
+      "search": "ペットを検索",
+      "kindFilter": {
+        "all": "すべて",
+        "object": "オブジェクト",
+        "animal": "動物",
+        "person": "人物",
+        "creature": "生き物"
+      },
+      "sortFilter": {
+        "latest": "新着",
+        "popular": "人気",
+        "views": "閲覧数順"
+      },
+      "refresh": "更新",
+      "install": "インストール",
+      "installing": "インストール中",
+      "reinstall": "再インストール",
+      "reinstallConfirm": "ローカルのペット \"{name}\" を上書きしますか？既存のデータは置き換えられます。",
+      "cancel": "キャンセル",
+      "stats": {
+        "views": "閲覧",
+        "downloads": "ダウンロード",
+        "likes": "いいね"
+      },
+      "page": "{page} / {total} ページ",
+      "prev": "前へ",
+      "next": "次へ",
+      "empty": "条件に一致するペットがありません。",
+      "successInstalled": "\"{name}\" をインストールしました",
+      "errors": {
+        "loadFailed": "マーケットの読み込みに失敗しました",
+        "installFailed": "インストールに失敗しました",
+        "alreadyInstalled": "そのペットは既に存在します"
+      }
     }
   }
 }

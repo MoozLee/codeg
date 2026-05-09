@@ -1,22 +1,34 @@
-//! Background task that aggregates ACP events into a single `PetState`
-//! stream consumed by the desktop pet renderer.
+//! Background task that aggregates broadcaster events into two pet streams:
 //!
-//! Subscribes to the same broadcaster the lifecycle subscriber uses
-//! (`acp://event` channel), maintains a small in-memory aggregate of
-//! cross-connection signals, and pushes `pet://state` whenever the
-//! computed state actually changes.
+//! * `pet://state` — the *ambient* `PetState` derived from cross-connection
+//!   ACP signals (idle/waiting/running/review/failed). De-duplicated; only
+//!   emitted when the computed state changes.
+//! * `pet://oneshot` — *transient* feedback animations triggered by discrete
+//!   events (turn_complete, git commit/push, merge abort, agent install,
+//!   manual `pet_celebrate` calls). Always emitted; the renderer plays one
+//!   loop and falls back to the current ambient state.
+//!
+//! Subscribes to the same broadcaster the lifecycle subscriber uses and
+//! consumes multiple channels via a single `tokio::select!` loop.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Deserialize;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
+use tokio::task::JoinHandle;
 
 use crate::acp::types::{AcpEvent, ConnectionStatus, EventEnvelope};
 use crate::db::entities::conversation::ConversationStatus;
 use crate::models::pet::PetState;
 use crate::web::event_bridge::{emit_event, EventEmitter, WebEvent, WebEventBroadcaster};
+
+/// How long the ambient `Failed` state stays visible before automatically
+/// fading back to whatever the rest of the snapshot would compute. Restarts
+/// each time a fresh error event arrives.
+const PET_FAILED_RECOVERY_MS: u64 = 4_000;
 
 /// Aggregate snapshot of cross-connection ACP signals, derived from the
 /// stream of `AcpEvent`s. Pure data — `compute_pet_state` is the sole
@@ -116,7 +128,7 @@ pub fn compute_pet_state(snapshot: &PetGlobalState) -> PetState {
     PetState::Idle
 }
 
-fn is_pet_relevant_acp_event(payload: &serde_json::Value) -> bool {
+fn is_acp_event_relevant(payload: &serde_json::Value) -> bool {
     let Some(kind) = payload.get("type").and_then(|v| v.as_str()) else {
         return false;
     };
@@ -130,6 +142,65 @@ fn is_pet_relevant_acp_event(payload: &serde_json::Value) -> bool {
     )
 }
 
+/// Map a `TurnComplete.stop_reason` to a oneshot animation, if any. Mirrors
+/// the same classification `acp::lifecycle` uses to flip conversation rows
+/// to `PendingReview` vs `Cancelled`, so a turn that the lifecycle treats
+/// as "successful" plays a celebration here.
+fn classify_turn_complete(stop_reason: &str) -> Option<PetState> {
+    match stop_reason {
+        "end_turn" => Some(PetState::Jumping),
+        "refusal" | "max_tokens" | "max_turn_requests" | "unknown" | "empty" => {
+            Some(PetState::Failed)
+        }
+        // `cancelled` and any future reason: stay silent.
+        _ => None,
+    }
+}
+
+/// Map an `app://agent-install` event payload to a oneshot animation.
+/// `started` / `log` are noisy progress signals; only the terminal kinds
+/// `completed` / `failed` produce a reaction.
+fn classify_agent_install(payload: &serde_json::Value) -> Option<PetState> {
+    let kind = payload.get("kind").and_then(|v| v.as_str())?;
+    match kind {
+        "completed" => Some(PetState::Jumping),
+        "failed" => Some(PetState::Failed),
+        _ => None,
+    }
+}
+
+fn emit_oneshot(emitter: &EventEmitter, kind: PetState) {
+    emit_event(emitter, "pet://oneshot", kind);
+}
+
+/// Schedule (or restart) the auto-recovery timer that will clear the
+/// `erroring` set after `PET_FAILED_RECOVERY_MS`. Aborts any in-flight
+/// timer first so successive errors keep the failed animation visible
+/// for the full window after the *latest* error.
+fn schedule_failed_recovery(
+    clear_task: &mut Option<JoinHandle<()>>,
+    clear_tx: &mpsc::Sender<()>,
+) {
+    cancel_failed_recovery(clear_task);
+    let tx = clear_tx.clone();
+    *clear_task = Some(tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(PET_FAILED_RECOVERY_MS)).await;
+        // `try_send` instead of awaiting: the channel is sized for the
+        // worst case (8 messages) and the main loop is the only consumer,
+        // so the only way send would block is a stuck consumer — in which
+        // case adding more messages can't help. A drop here just means
+        // the failed animation lingers slightly longer than the window,
+        // which is benign.
+        let _ = tx.try_send(());
+    }));
+}
+
+fn cancel_failed_recovery(clear_task: &mut Option<JoinHandle<()>>) {
+    if let Some(t) = clear_task.take() {
+        t.abort();
+    }
+}
+
 /// Spawn-friendly subscriber loop. Mirrors `lifecycle_subscriber_task`'s
 /// "subscribe synchronously, return future" shape so the broadcast buffer
 /// covers the gap between `subscribe()` and the first `recv()`.
@@ -138,45 +209,135 @@ pub fn pet_state_subscriber_task(
     emitter: EventEmitter,
 ) -> impl Future<Output = ()> + Send + 'static {
     let mut rx = broadcaster.subscribe();
+    let (clear_tx, mut clear_rx) = mpsc::channel::<()>(8);
     async move {
         let mut snapshot = PetGlobalState::default();
         let mut last_state = PetState::Idle;
+        let mut clear_task: Option<JoinHandle<()>> = None;
         // Push an initial "idle" snapshot so the renderer doesn't start blank.
         emit_event(&emitter, "pet://state", last_state);
 
         loop {
-            match rx.recv().await {
-                Ok(WebEvent { channel, payload }) => {
-                    if channel != "acp://event" {
-                        continue;
+            tokio::select! {
+                event = rx.recv() => {
+                    match event {
+                        Ok(WebEvent { channel, payload }) => {
+                            let payload_value = payload.as_ref();
+                            let mut recompute_ambient = false;
+
+                            match channel.as_str() {
+                                "acp://event" => {
+                                    if !is_acp_event_relevant(payload_value) {
+                                        continue;
+                                    }
+                                    let envelope: EventEnvelope =
+                                        match EventEnvelope::deserialize(payload_value) {
+                                            Ok(env) => env,
+                                            Err(err) => {
+                                                eprintln!(
+                                                    "[Pet] dropping malformed acp://event envelope: {err}"
+                                                );
+                                                continue;
+                                            }
+                                        };
+
+                                    // Fire the turn_complete oneshot *before*
+                                    // applying — the apply step removes the
+                                    // connection from `prompting`, but the
+                                    // celebration should reference the turn
+                                    // that just ended either way.
+                                    if let AcpEvent::TurnComplete { stop_reason, .. } =
+                                        &envelope.payload
+                                    {
+                                        if let Some(kind) = classify_turn_complete(stop_reason) {
+                                            emit_oneshot(&emitter, kind);
+                                        }
+                                    }
+
+                                    let was_erroring = !snapshot.erroring.is_empty();
+                                    snapshot.apply(&envelope);
+                                    let now_erroring = !snapshot.erroring.is_empty();
+
+                                    let triggered_error = matches!(
+                                        envelope.payload,
+                                        AcpEvent::Error { .. }
+                                            | AcpEvent::StatusChanged {
+                                                status: ConnectionStatus::Error,
+                                            }
+                                    );
+                                    if triggered_error && now_erroring {
+                                        schedule_failed_recovery(&mut clear_task, &clear_tx);
+                                    } else if was_erroring && !now_erroring {
+                                        // erroring went empty without us
+                                        // firing the recovery timer — e.g.
+                                        // Connected/Disconnected events that
+                                        // pruned the last erroring conn —
+                                        // so cancel the pending sleep to
+                                        // avoid a phantom recompute later.
+                                        cancel_failed_recovery(&mut clear_task);
+                                    }
+                                    recompute_ambient = true;
+                                }
+                                "folder://git-commit-succeeded"
+                                | "folder://git-push-succeeded" => {
+                                    emit_oneshot(&emitter, PetState::Jumping);
+                                }
+                                "folder://merge-aborted" => {
+                                    emit_oneshot(&emitter, PetState::Failed);
+                                }
+                                "app://agent-install" => {
+                                    if let Some(kind) = classify_agent_install(payload_value) {
+                                        emit_oneshot(&emitter, kind);
+                                    }
+                                }
+                                _ => continue,
+                            }
+
+                            if recompute_ambient {
+                                let next = compute_pet_state(&snapshot);
+                                if next != last_state {
+                                    last_state = next;
+                                    emit_event(&emitter, "pet://state", next);
+                                }
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            // Broadcast buffer overrun — we can't reliably
+                            // reconstruct state from the missed events, so
+                            // reset to Idle and rely on the next batch of
+                            // StatusChanged/Connected events to reseed the
+                            // snapshot. A persistent lag without follow-up
+                            // events would leave the pet stuck on idle even
+                            // if connections are still active; surface it
+                            // so it shows up in operator logs.
+                            eprintln!(
+                                "[Pet] event subscriber lagged, dropped {skipped} events; resetting to idle"
+                            );
+                            snapshot = PetGlobalState::default();
+                            cancel_failed_recovery(&mut clear_task);
+                            if last_state != PetState::Idle {
+                                last_state = PetState::Idle;
+                                emit_event(&emitter, "pet://state", last_state);
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            cancel_failed_recovery(&mut clear_task);
+                            break;
+                        }
                     }
-                    let payload_value = payload.as_ref();
-                    if !is_pet_relevant_acp_event(payload_value) {
-                        continue;
-                    }
-                    let envelope: EventEnvelope = match EventEnvelope::deserialize(payload_value) {
-                        Ok(env) => env,
-                        Err(_) => continue,
-                    };
-                    snapshot.apply(&envelope);
+                }
+                Some(_) = clear_rx.recv() => {
+                    // Recovery timer fired — drop the failed-state lock and
+                    // recompute the ambient state from whatever else is
+                    // currently active.
+                    snapshot.erroring.clear();
+                    clear_task = None;
                     let next = compute_pet_state(&snapshot);
                     if next != last_state {
                         last_state = next;
                         emit_event(&emitter, "pet://state", next);
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    // We can't reliably reconstruct state after lagging — but
-                    // it is recoverable: the next StatusChanged event will
-                    // reseed the relevant fields. Conservatively reset the
-                    // snapshot to Idle so we don't surface phantom errors.
-                    snapshot = PetGlobalState::default();
-                    if last_state != PetState::Idle {
-                        last_state = PetState::Idle;
-                        emit_event(&emitter, "pet://state", last_state);
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     }
@@ -292,7 +453,7 @@ mod tests {
             "conversation_status_changed",
         ] {
             assert!(
-                is_pet_relevant_acp_event(&serde_json::json!({ "type": kind })),
+                is_acp_event_relevant(&serde_json::json!({ "type": kind })),
                 "expected {kind} to be pet-relevant"
             );
         }
@@ -306,10 +467,308 @@ mod tests {
             "session_started",
         ] {
             assert!(
-                !is_pet_relevant_acp_event(&serde_json::json!({ "type": kind })),
+                !is_acp_event_relevant(&serde_json::json!({ "type": kind })),
                 "expected {kind} to be ignored"
             );
         }
-        assert!(!is_pet_relevant_acp_event(&serde_json::json!({})));
+        assert!(!is_acp_event_relevant(&serde_json::json!({})));
+    }
+
+    #[test]
+    fn classify_turn_complete_maps_known_reasons() {
+        assert_eq!(classify_turn_complete("end_turn"), Some(PetState::Jumping));
+        assert_eq!(classify_turn_complete("refusal"), Some(PetState::Failed));
+        assert_eq!(classify_turn_complete("max_tokens"), Some(PetState::Failed));
+        assert_eq!(
+            classify_turn_complete("max_turn_requests"),
+            Some(PetState::Failed)
+        );
+        assert_eq!(classify_turn_complete("unknown"), Some(PetState::Failed));
+        assert_eq!(classify_turn_complete("empty"), Some(PetState::Failed));
+        assert_eq!(classify_turn_complete("cancelled"), None);
+        assert_eq!(classify_turn_complete("future_reason"), None);
+    }
+
+    #[test]
+    fn classify_agent_install_terminal_kinds_only() {
+        assert_eq!(
+            classify_agent_install(&serde_json::json!({ "kind": "completed" })),
+            Some(PetState::Jumping)
+        );
+        assert_eq!(
+            classify_agent_install(&serde_json::json!({ "kind": "failed" })),
+            Some(PetState::Failed)
+        );
+        assert_eq!(
+            classify_agent_install(&serde_json::json!({ "kind": "started" })),
+            None
+        );
+        assert_eq!(
+            classify_agent_install(&serde_json::json!({ "kind": "log" })),
+            None
+        );
+        assert_eq!(classify_agent_install(&serde_json::json!({})), None);
+    }
+
+    #[tokio::test]
+    async fn subscriber_emits_oneshot_for_git_commit_succeeded() {
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+
+        // Subscribe BEFORE spawning so we don't miss the initial idle emit.
+        let mut rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+
+        // Drain the initial `pet://state = idle` emit.
+        let _ = rx.recv().await;
+
+        broadcaster.send(
+            "folder://git-commit-succeeded",
+            &serde_json::json!({ "folder_id": 1, "committed_files": 3 }),
+        );
+
+        let evt = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("oneshot should fire within 1s")
+            .expect("recv");
+        // Skip our own re-broadcast of the input event by reading until we see oneshot.
+        let evt = if evt.channel == "folder://git-commit-succeeded" {
+            tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect("oneshot should fire within 1s")
+                .expect("recv")
+        } else {
+            evt
+        };
+        assert_eq!(evt.channel, "pet://oneshot");
+        assert_eq!(evt.payload.as_ref(), &serde_json::json!("jumping"));
+    }
+
+    #[tokio::test]
+    async fn subscriber_emits_oneshot_for_merge_aborted() {
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        let _ = rx.recv().await; // initial idle
+
+        broadcaster.send(
+            "folder://merge-aborted",
+            &serde_json::json!({ "folder_id": 7 }),
+        );
+
+        let evt = read_until_oneshot(&mut rx).await;
+        assert_eq!(evt.channel, "pet://oneshot");
+        assert_eq!(evt.payload.as_ref(), &serde_json::json!("failed"));
+    }
+
+    #[tokio::test]
+    async fn subscriber_emits_oneshot_for_agent_install_completed() {
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        let _ = rx.recv().await;
+
+        broadcaster.send(
+            "app://agent-install",
+            &serde_json::json!({
+                "task_id": "t1",
+                "kind": "completed",
+                "payload": "",
+            }),
+        );
+
+        let evt = read_until_oneshot(&mut rx).await;
+        assert_eq!(evt.payload.as_ref(), &serde_json::json!("jumping"));
+    }
+
+    #[tokio::test]
+    async fn subscriber_emits_oneshot_for_turn_complete_end_turn() {
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        let _ = rx.recv().await;
+
+        broadcaster.send(
+            "acp://event",
+            &EventEnvelope {
+                seq: 1,
+                connection_id: "c1".into(),
+                payload: AcpEvent::TurnComplete {
+                    session_id: "s".into(),
+                    stop_reason: "end_turn".into(),
+                    agent_type: "claude_code".into(),
+                },
+            },
+        );
+
+        let evt = read_until_oneshot(&mut rx).await;
+        assert_eq!(evt.payload.as_ref(), &serde_json::json!("jumping"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failed_state_recovers_after_timeout() {
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        // initial idle
+        let initial = rx.recv().await.unwrap();
+        assert_eq!(initial.channel, "pet://state");
+        assert_eq!(initial.payload.as_ref(), &serde_json::json!("idle"));
+
+        // Drive the snapshot into Failed.
+        broadcaster.send(
+            "acp://event",
+            &EventEnvelope {
+                seq: 1,
+                connection_id: "c1".into(),
+                payload: AcpEvent::Error {
+                    message: "boom".into(),
+                    agent_type: "claude_code".into(),
+                    code: None,
+                },
+            },
+        );
+        let failed = read_state_event(&mut rx).await;
+        assert_eq!(failed.payload.as_ref(), &serde_json::json!("failed"));
+
+        // Advance past the recovery window.
+        tokio::time::advance(Duration::from_millis(PET_FAILED_RECOVERY_MS + 100)).await;
+
+        let recovered = read_state_event(&mut rx).await;
+        assert_eq!(recovered.payload.as_ref(), &serde_json::json!("idle"));
+    }
+
+    async fn read_until_oneshot(rx: &mut broadcast::Receiver<WebEvent>) -> WebEvent {
+        loop {
+            let evt = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect("oneshot should fire within 1s")
+                .expect("recv");
+            if evt.channel == "pet://oneshot" {
+                return evt;
+            }
+        }
+    }
+
+    async fn read_state_event(rx: &mut broadcast::Receiver<WebEvent>) -> WebEvent {
+        loop {
+            let evt = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+                .await
+                .expect("state event should fire")
+                .expect("recv");
+            if evt.channel == "pet://state" {
+                return evt;
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn second_error_extends_recovery_window() {
+        // Two errors arriving 3 s apart — the second should reset the
+        // recovery clock so `failed` stays visible for ~4 s after the
+        // *latest* error, not 4 s from the first.
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        let _ = rx.recv().await; // initial idle
+
+        let send_error = |conn: &str| {
+            broadcaster.send(
+                "acp://event",
+                &EventEnvelope {
+                    seq: 1,
+                    connection_id: conn.into(),
+                    payload: AcpEvent::Error {
+                        message: "boom".into(),
+                        agent_type: "claude_code".into(),
+                        code: None,
+                    },
+                },
+            );
+        };
+
+        send_error("c1");
+        let failed = read_state_event(&mut rx).await;
+        assert_eq!(failed.payload.as_ref(), &serde_json::json!("failed"));
+
+        // Halfway through the window, fire a second error. If the timer
+        // were not restarted, recovery would happen at +4 s relative to
+        // the first error.
+        tokio::time::advance(Duration::from_millis(PET_FAILED_RECOVERY_MS / 2)).await;
+        send_error("c2");
+
+        // Advance to the *original* deadline; nothing should fire because
+        // the timer was reset.
+        tokio::time::advance(Duration::from_millis(PET_FAILED_RECOVERY_MS / 2 + 50)).await;
+        // Drain any inbound events; we shouldn't see a state event yet.
+        let mut saw_recovery = false;
+        for _ in 0..5 {
+            match tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+                Ok(Ok(evt)) if evt.channel == "pet://state" => {
+                    if evt.payload.as_ref() == &serde_json::json!("idle") {
+                        saw_recovery = true;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            !saw_recovery,
+            "second error should have extended the recovery window"
+        );
+
+        // Advance past the *second* deadline.
+        tokio::time::advance(Duration::from_millis(PET_FAILED_RECOVERY_MS / 2 + 100)).await;
+        let recovered = read_state_event(&mut rx).await;
+        assert_eq!(recovered.payload.as_ref(), &serde_json::json!("idle"));
+    }
+
+    #[tokio::test]
+    async fn pet_celebrate_core_emits_oneshot() {
+        use crate::commands::pet::pet_celebrate_core;
+        use crate::models::pet::PetCelebrationKind;
+
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let mut rx = broadcaster.subscribe();
+
+        pet_celebrate_core(&emitter, PetCelebrationKind::Jumping);
+
+        let evt = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("oneshot should fire within 1s")
+            .expect("recv");
+        assert_eq!(evt.channel, "pet://oneshot");
+        assert_eq!(evt.payload.as_ref(), &serde_json::json!("jumping"));
+
+        pet_celebrate_core(&emitter, PetCelebrationKind::Failed);
+        let evt = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("oneshot should fire within 1s")
+            .expect("recv");
+        assert_eq!(evt.payload.as_ref(), &serde_json::json!("failed"));
+    }
+
+    #[test]
+    fn pet_celebration_kind_serializes_to_snake_case() {
+        use crate::models::pet::PetCelebrationKind;
+        assert_eq!(
+            serde_json::to_value(PetCelebrationKind::Jumping).unwrap(),
+            serde_json::json!("jumping")
+        );
+        assert_eq!(
+            serde_json::from_value::<PetCelebrationKind>(serde_json::json!("waving")).unwrap(),
+            PetCelebrationKind::Waving
+        );
+        assert!(
+            serde_json::from_value::<PetCelebrationKind>(serde_json::json!("running")).is_err(),
+            "ambient state must not deserialize as a celebration kind"
+        );
     }
 }

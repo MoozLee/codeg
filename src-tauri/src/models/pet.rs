@@ -166,6 +166,30 @@ pub struct ImportSkipped {
     pub reason: String,
 }
 
+/// Subset of `PetState` rows that the backend ever broadcasts on the
+/// `pet://oneshot` channel: the celebration / failure cues that the pet
+/// renderer plays as transient overlays on top of the ambient state.
+/// Frontend `usePetOneShot` filters identically; we narrow the type at
+/// the API boundary so callers can't accidentally trigger an ambient
+/// row (e.g. `running`) as a one-shot.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PetCelebrationKind {
+    Jumping,
+    Waving,
+    Failed,
+}
+
+impl From<PetCelebrationKind> for PetState {
+    fn from(kind: PetCelebrationKind) -> Self {
+        match kind {
+            PetCelebrationKind::Jumping => PetState::Jumping,
+            PetCelebrationKind::Waving => PetState::Waving,
+            PetCelebrationKind::Failed => PetState::Failed,
+        }
+    }
+}
+
 /// Persisted UI state for the pet feature. JSON-serialized into the
 /// `app_metadata` KV table under `pet.config`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,36 +238,6 @@ pub struct PetWindowStatePatch {
     pub scale: Option<f64>,
     pub always_on_top: Option<bool>,
     pub enabled: Option<bool>,
-}
-
-/// Internal hint emitted by the ACP/event subsystem and consumed by the
-/// pet state mapper. Public so unit tests can construct hints directly.
-/// Currently unused — `pet_state_mapper` consumes raw `AcpEvent`s and
-/// derives state from the broadcast — but kept as a stable shape for
-/// future Phase 2 refactoring (git-workflow signals, manual triggers).
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PetStateHint {
-    /// A connection began streaming output for an in-flight prompt.
-    PromptStart,
-    /// A streaming prompt completed (success).
-    PromptEnd,
-    /// A connection raised an error.
-    Error,
-    /// A connection asks the user to grant a permission.
-    PermissionPending,
-    /// A pending permission has been resolved.
-    PermissionResolved,
-    /// A turn ended in a state that wants user review (e.g. plan / diff).
-    ReviewPending,
-    /// Review consumed.
-    ReviewResolved,
-    /// A connection was added (new ACP session).
-    ConnectionAdded,
-    /// A connection was removed (disconnect / reap).
-    ConnectionRemoved,
-    /// Reset all transient flags to a clean Idle state. Used on startup.
-    Reset,
 }
 
 #[cfg(test)]
