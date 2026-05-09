@@ -37,6 +37,7 @@ import { useOpenConversation } from "@/hooks/use-open-conversation"
 import {
   importLocalConversations,
   openProjectBootWindow,
+  openWorkspaceWindow,
   updateConversationTitle,
   updateConversationStatus,
   updateFolderColor,
@@ -165,6 +166,7 @@ const FolderHeader = memo(function FolderHeader({
   onToggle,
   onRemoveFromWorkspace,
   onNewConversation,
+  onNewConversationInWindow,
   onImport,
   onManageConversations,
   onChangeColor,
@@ -181,6 +183,7 @@ const FolderHeader = memo(function FolderHeader({
   onToggle: (folderId: number) => void
   onRemoveFromWorkspace: (folderId: number) => void
   onNewConversation: (folderId: number) => void
+  onNewConversationInWindow: (folderId: number) => void
   onImport: (folderId: number) => void
   onManageConversations: (folderId: number) => void
   onChangeColor: (folderId: number, color: string) => void
@@ -188,6 +191,8 @@ const FolderHeader = memo(function FolderHeader({
   dragControls: DragControls
   t: ReturnType<typeof useTranslations>
 }) {
+  const tActions = useTranslations("SkillsSettings.actions")
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -285,6 +290,10 @@ const FolderHeader = memo(function FolderHeader({
           <Plus className="h-4 w-4" />
           {t("newConversation")}
         </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onNewConversationInWindow(folderId)}>
+          <Plus className="h-4 w-4" />
+          {tActions("openInWindow")}
+        </ContextMenuItem>
         <ContextMenuItem
           disabled={importing}
           onSelect={() => onImport(folderId)}
@@ -355,11 +364,13 @@ interface FolderGroupItemProps {
   onToggle: (folderId: number) => void
   onRemoveFromWorkspace: (folderId: number) => void
   onNewConversationForFolder: (folderId: number) => void
+  onNewConversationInWindowForFolder: (folderId: number) => void
   onImport: (folderId: number) => void
   onManageConversations: (folderId: number) => void
   onChangeColor: (folderId: number, color: string) => void
   onSelect: (id: number, agentType: string) => void
   onDoubleClick: (id: number, agentType: string) => void
+  onOpenInWindow: (id: number, agentType: string) => void
   onRename: (id: number, newTitle: string) => Promise<void>
   onDelete: (id: number, agentType: string) => Promise<void>
   onStatusChange: (id: number, status: ConversationStatus) => Promise<void>
@@ -388,11 +399,13 @@ function FolderGroupItem({
   onToggle,
   onRemoveFromWorkspace,
   onNewConversationForFolder,
+  onNewConversationInWindowForFolder,
   onImport,
   onManageConversations,
   onChangeColor,
   onSelect,
   onDoubleClick,
+  onOpenInWindow,
   onRename,
   onDelete,
   onStatusChange,
@@ -461,6 +474,7 @@ function FolderGroupItem({
             onToggle={handleToggle}
             onRemoveFromWorkspace={onRemoveFromWorkspace}
             onNewConversation={onNewConversationForFolder}
+            onNewConversationInWindow={onNewConversationInWindowForFolder}
             onImport={onImport}
             onManageConversations={onManageConversations}
             onChangeColor={onChangeColor}
@@ -501,7 +515,7 @@ function FolderGroupItem({
                 onRename={onRename}
                 onDelete={onDelete}
                 onStatusChange={onStatusChange}
-                onOpenInWindow={onDoubleClick}
+                onOpenInWindow={onOpenInWindow}
                 onNewConversation={onNewConversation}
               />
             ))
@@ -530,6 +544,7 @@ export function SidebarConversationList({
   ref?: Ref<SidebarConversationListHandle>
 }) {
   const t = useTranslations("Folder.sidebar")
+  const tActions = useTranslations("SkillsSettings.actions")
   const tCommon = useTranslations("Folder.common")
   const tFolderDropdown = useTranslations("Folder.folderNameDropdown")
   useZoomLevel()
@@ -816,6 +831,22 @@ export function SidebarConversationList({
         conversationId: id,
         agentType: agentType as DbConversationSummary["agent_type"],
         pin: true,
+      })
+    },
+    [conversations, openConversation]
+  )
+
+  const handleOpenConversationInWindow = useCallback(
+    (id: number, agentType: string) => {
+      const conv = conversations.find(
+        (c) => c.id === id && c.agent_type === agentType
+      )
+      if (!conv) return
+      void openConversation({
+        folderId: conv.folder_id,
+        conversationId: id,
+        agentType: agentType as DbConversationSummary["agent_type"],
+        pin: true,
         explicitWindow: true,
       })
     },
@@ -861,6 +892,18 @@ export function SidebarConversationList({
     openNewConversationTab(activeFolder.id, activeFolder.path)
   }, [activeFolder, openNewConversationTab])
 
+  const handleNewConversationInWindow = useCallback(() => {
+    if (!activeFolder) return
+    void openWorkspaceWindow(
+      {
+        kind: "draft",
+        folderId: activeFolder.id,
+        workingDir: activeFolder.path,
+      },
+      "force-new-window"
+    )
+  }, [activeFolder])
+
   const handleNewConversationForFolder = useCallback(
     (folderId: number) => {
       const folder = folderIndex.get(folderId)
@@ -868,6 +911,22 @@ export function SidebarConversationList({
       openNewConversationTab(folderId, folder.path)
     },
     [folderIndex, openNewConversationTab]
+  )
+
+  const handleNewConversationInWindowForFolder = useCallback(
+    (folderId: number) => {
+      const folder = folderIndex.get(folderId)
+      if (!folder) return
+      void openWorkspaceWindow(
+        {
+          kind: "draft",
+          folderId,
+          workingDir: folder.path,
+        },
+        "force-new-window"
+      )
+    },
+    [folderIndex]
   )
 
   const handleImportForFolder = useCallback(
@@ -1095,11 +1154,15 @@ export function SidebarConversationList({
                         onNewConversationForFolder={
                           handleNewConversationForFolder
                         }
+                        onNewConversationInWindowForFolder={
+                          handleNewConversationInWindowForFolder
+                        }
                         onImport={handleImportForFolder}
                         onManageConversations={handleManageConversations}
                         onChangeColor={handleChangeFolderColor}
                         onSelect={handleSelect}
                         onDoubleClick={handleDoubleClick}
+                        onOpenInWindow={handleOpenConversationInWindow}
                         onRename={handleRename}
                         onDelete={handleDelete}
                         onStatusChange={handleStatusChange}
@@ -1122,6 +1185,13 @@ export function SidebarConversationList({
             >
               <Plus className="h-4 w-4" />
               {t("newConversation")}
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={handleNewConversationInWindow}
+              disabled={!activeFolder}
+            >
+              <Plus className="h-4 w-4" />
+              {tActions("openInWindow")}
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={handleOpenFolderAction}>

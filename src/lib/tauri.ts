@@ -903,10 +903,29 @@ export async function openCommitWindow(folderId: number): Promise<void> {
   return invoke("open_commit_window", { folderId })
 }
 
-export async function openConversationWindow(
+export async function focusConversationWindowIfOpen(
   conversationId: number
+): Promise<boolean> {
+  return invoke("focus_conversation_window_if_open", { conversationId })
+}
+
+export async function openConversationWindow(
+  conversationId: number,
+  forceNewWindow = false
 ): Promise<{ focusedExisting: boolean }> {
-  return invoke("open_conversation_window", { conversationId })
+  return invoke("open_conversation_window", { conversationId, forceNewWindow })
+}
+
+export async function registerConversationWindowOwner(
+  conversationId: number
+): Promise<void> {
+  return invoke("register_conversation_window_owner", { conversationId })
+}
+
+export async function syncConversationWindowOwnership(
+  conversationIds: number[]
+): Promise<void> {
+  return invoke("sync_conversation_window_ownership", { conversationIds })
 }
 
 export async function getSystemConversationOpenSettings(): Promise<{

@@ -28,6 +28,7 @@ interface TabItemProps {
   onCloseAll: () => void
   onPin: (tabId: string) => void
   onToggleTile: () => void
+  onOpenInWindow?: (tab: TabItemData) => void
 }
 
 export const TabItem = memo(function TabItem({
@@ -42,8 +43,10 @@ export const TabItem = memo(function TabItem({
   onCloseAll,
   onPin,
   onToggleTile,
+  onOpenInWindow,
 }: TabItemProps) {
   const t = useTranslations("Folder.tabs")
+  const tActions = useTranslations("SkillsSettings.actions")
   const isDragging = useRef(false)
   const itemRef = useRef<HTMLDivElement>(null)
 
@@ -156,6 +159,14 @@ export const TabItem = memo(function TabItem({
             {t("closeOthers")}
           </ContextMenuItem>
           <ContextMenuSeparator />
+          {tab.conversationId != null && onOpenInWindow ? (
+            <>
+              <ContextMenuItem onSelect={() => onOpenInWindow(tab)}>
+                {tActions("openInWindow")}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          ) : null}
           <ContextMenuItem onSelect={onToggleTile}>
             {isTileMode ? t("untileDisplay") : t("tileDisplay")}
           </ContextMenuItem>

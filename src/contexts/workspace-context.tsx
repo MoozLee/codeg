@@ -25,6 +25,11 @@ import {
 } from "@/lib/api"
 import { languageFromPath } from "@/lib/language-detect"
 import {
+  readScopedStorageItem,
+  writeScopedStorageItem,
+  type TabPersistenceMode,
+} from "@/contexts/tab-shared"
+import {
   loadPersistedWorkspaceMode,
   savePersistedWorkspaceMode,
 } from "@/lib/workspace-mode-storage"
@@ -204,13 +209,27 @@ async function withTimeout<T>(
 
 interface WorkspaceProviderProps {
   children: ReactNode
+  persistenceMode?: TabPersistenceMode
 }
 
-export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
+export function WorkspaceProvider({
+  children,
+  persistenceMode = "shared",
+}: WorkspaceProviderProps) {
   const t = useTranslations("Folder.workspaceContext")
   const { activeFolder, activeFolderId } = useActiveFolder()
   const folderPath = activeFolder?.path
   const storageKey = "workspace:mode"
+  const loadPersistedModeForScope = useCallback((): WorkspaceMode | null => {
+    if (persistenceMode === "shared") {
+      return loadPersistedWorkspaceMode(storageKey) as WorkspaceMode | null
+    }
+
+    const raw = readScopedStorageItem(persistenceMode, storageKey)
+    return raw === "conversation" || raw === "fusion" || raw === "files"
+      ? raw
+      : null
+  }, [persistenceMode, storageKey])
   /* activeFolderId used in effect below to reset file tabs on folder switch */
   void activeFolderId
   const [mode, setModeState] = useState<WorkspaceMode>(DEFAULT_WORKSPACE_MODE)
@@ -235,7 +254,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   }, [fileTabs])
 
   useEffect(() => {
-    const storedMode = loadPersistedWorkspaceMode(storageKey)
+    const storedMode = loadPersistedModeForScope()
     const nextMode = (storedMode ?? DEFAULT_WORKSPACE_MODE) as WorkspaceMode
     // Hydrate from localStorage after mount to keep SSR/CSR markup consistent.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -244,10 +263,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setActivePaneState(nextMode)
     }
     setRestored(true)
-  }, [storageKey])
+  }, [loadPersistedModeForScope])
 
-  // Clear file tabs when the active folder changes — files are not persisted
-  // across folder switches in the workspace model.
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     setFileTabs([])
@@ -259,8 +276,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
   useEffect(() => {
     if (!restored) return
-    savePersistedWorkspaceMode(storageKey, mode)
-  }, [mode, restored, storageKey])
+
+    if (persistenceMode === "shared") {
+      savePersistedWorkspaceMode(storageKey, mode)
+      return
+    }
+
+    writeScopedStorageItem(persistenceMode, storageKey, mode)
+  }, [mode, persistenceMode, restored, storageKey])
 
   const setModeSafe = useCallback((nextMode: WorkspaceMode) => {
     setModeState(nextMode)

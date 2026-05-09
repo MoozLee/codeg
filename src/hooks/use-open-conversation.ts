@@ -2,12 +2,13 @@
 
 import { useCallback } from "react"
 import {
-  openConversationWindow,
+  focusConversationWindowIfOpen,
   getSystemConversationOpenSettings,
+  openWorkspaceWindow,
+  registerConversationWindowOwner,
 } from "@/lib/api"
 import type { AgentType } from "@/lib/types"
 import { useTabContext } from "@/contexts/tab-context"
-import { isDesktop } from "@/lib/platform"
 
 interface OpenConversationParams {
   folderId: number
@@ -18,7 +19,8 @@ interface OpenConversationParams {
 }
 
 export function useOpenConversation() {
-  const { openTab, closeConversationTab, tabs } = useTabContext()
+  const { openTab, closeConversationTab, tabs, tabPersistenceMode } =
+    useTabContext()
 
   return useCallback(
     async ({
@@ -28,60 +30,81 @@ export function useOpenConversation() {
       pin = true,
       explicitWindow = false,
     }: OpenConversationParams) => {
-      const openInWorkspaceTab = () => {
+      const focusExistingOwnerWindow = async () => {
+        return await focusConversationWindowIfOpen(conversationId)
+      }
+
+      const openInWorkspaceTab = async () => {
         openTab(folderId, conversationId, agentType, pin, undefined)
+        if (tabPersistenceMode === "shared") {
+          await registerConversationWindowOwner(conversationId)
+        }
         return { focusedExisting: false }
       }
 
       const openInDedicatedWindow = async () => {
-        const result = await openConversationWindow(conversationId)
-        if (explicitWindow) {
+        const result = await openWorkspaceWindow(
+          {
+            kind: "conversation",
+            folderId,
+            conversationId,
+            agentType,
+          },
+          "force-new-window"
+        )
+        if (tabPersistenceMode === "shared") {
           closeConversationTab(folderId, conversationId, agentType)
         }
-        return result
+        return result as { focusedExisting: boolean }
       }
 
-      if (isDesktop()) {
-        const { Window } = await import("@tauri-apps/api/window")
-        const existing = await Window.getByLabel(
-          `conversation-${conversationId}`
-        )
-        if (existing) {
-          await existing.unminimize().catch(() => {})
-          await existing.setFocus().catch(() => {})
-          if (explicitWindow) {
-            closeConversationTab(folderId, conversationId, agentType)
-          }
+      const alreadyOpenInCurrentWindow = tabs.some(
+        (tab) =>
+          tab.folderId === folderId &&
+          tab.conversationId === conversationId &&
+          tab.agentType === agentType
+      )
+
+      if (tabPersistenceMode === "window-local") {
+        const focusedExistingWindow = await focusExistingOwnerWindow()
+        if (focusedExistingWindow) {
           return { focusedExisting: true }
         }
+        if (alreadyOpenInCurrentWindow) {
+          return await openInWorkspaceTab()
+        }
+        return openInDedicatedWindow()
       }
 
       if (explicitWindow) {
         return openInDedicatedWindow()
       }
 
-      const alreadyOpenInWorkspaceTab = tabs.some(
-        (tab) =>
-          tab.folderId === folderId &&
-          tab.conversationId === conversationId &&
-          tab.agentType === agentType
-      )
-      if (alreadyOpenInWorkspaceTab) {
-        return openInWorkspaceTab()
+      if (alreadyOpenInCurrentWindow) {
+        return await openInWorkspaceTab()
+      }
+
+      const focusedExistingWindow = await focusExistingOwnerWindow()
+      if (focusedExistingWindow) {
+        return { focusedExisting: true }
       }
 
       const settings = await getSystemConversationOpenSettings()
-      const mainWorkspaceConversationCount = tabs.length
+      const mainWorkspaceConversationCount =
+        tabPersistenceMode === "shared"
+          ? tabs.filter((tab) => tab.conversationId != null).length
+          : 0
       const thresholdReached =
         settings.threshold != null &&
+        tabPersistenceMode === "shared" &&
         mainWorkspaceConversationCount >= settings.threshold
 
       if (thresholdReached || settings.defaultTarget === "window") {
         return openInDedicatedWindow()
       }
 
-      return openInWorkspaceTab()
+      return await openInWorkspaceTab()
     },
-    [closeConversationTab, openTab, tabs]
+    [closeConversationTab, openTab, tabPersistenceMode, tabs]
   )
 }

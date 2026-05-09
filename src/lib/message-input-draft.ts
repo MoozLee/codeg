@@ -1,10 +1,19 @@
 "use client"
 
+import {
+  readScopedStorageItem,
+  removeScopedStorageItem,
+  writeScopedStorageItem,
+  type TabPersistenceMode,
+} from "@/contexts/tab-shared"
+
 interface PersistedDraftState {
   text: string
 }
 
 const STORAGE_PREFIX = "codeg:message-input-draft:v1"
+const SHARED_PERSISTENCE_MODE: TabPersistenceMode = "shared"
+const WINDOW_LOCAL_DRAFT_PREFIX = "window-local:"
 const draftTextCache = new Map<string, string>()
 const pendingPersistDrafts = new Map<string, string>()
 let idlePersistHandle: number | null = null
@@ -12,6 +21,23 @@ let persistenceListenersBound = false
 
 function storageKeyForDraftKey(draftKey: string): string {
   return `${STORAGE_PREFIX}:${draftKey}`
+}
+
+function resolveDraftScope(draftKey: string): {
+  persistenceMode: TabPersistenceMode
+  scopedDraftKey: string
+} {
+  if (draftKey.startsWith(WINDOW_LOCAL_DRAFT_PREFIX)) {
+    return {
+      persistenceMode: "window-local",
+      scopedDraftKey: draftKey.slice(WINDOW_LOCAL_DRAFT_PREFIX.length),
+    }
+  }
+
+  return {
+    persistenceMode: SHARED_PERSISTENCE_MODE,
+    scopedDraftKey: draftKey,
+  }
 }
 
 function flushPendingDraftPersistence(): void {
@@ -26,14 +52,12 @@ function flushPendingDraftPersistence(): void {
   idlePersistHandle = null
 
   for (const [draftKey, text] of entries) {
-    try {
-      localStorage.setItem(
-        storageKeyForDraftKey(draftKey),
-        JSON.stringify({ text })
-      )
-    } catch {
-      // Ignore storage quota/permission failures.
-    }
+    const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
+    writeScopedStorageItem(
+      persistenceMode,
+      storageKeyForDraftKey(scopedDraftKey),
+      JSON.stringify({ text })
+    )
   }
 }
 
@@ -86,8 +110,12 @@ export function buildConversationDraftStorageKey(
   return `conv:${conversationId}`
 }
 
-export function buildNewConversationDraftStorageKey(): string {
-  return "new"
+export function buildNewConversationDraftStorageKey(
+  persistenceMode: TabPersistenceMode = SHARED_PERSISTENCE_MODE
+): string {
+  return persistenceMode === "window-local"
+    ? `${WINDOW_LOCAL_DRAFT_PREFIX}new`
+    : "new"
 }
 
 export function loadMessageInputDraft(draftKey: string): string | null {
@@ -95,8 +123,13 @@ export function loadMessageInputDraft(draftKey: string): string | null {
   if (typeof cached === "string") return cached
   if (typeof window === "undefined") return null
 
+  const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
+
   try {
-    const raw = localStorage.getItem(storageKeyForDraftKey(draftKey))
+    const raw = readScopedStorageItem(
+      persistenceMode,
+      storageKeyForDraftKey(scopedDraftKey)
+    )
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<PersistedDraftState>
     if (typeof parsed.text !== "string") return null
@@ -126,9 +159,9 @@ export function clearMessageInputDraft(draftKey: string): void {
   pendingPersistDrafts.delete(draftKey)
   if (typeof window === "undefined") return
 
-  try {
-    localStorage.removeItem(storageKeyForDraftKey(draftKey))
-  } catch {
-    /* ignore */
-  }
+  const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
+  removeScopedStorageItem(
+    persistenceMode,
+    storageKeyForDraftKey(scopedDraftKey)
+  )
 }

@@ -1,14 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
 use std::sync::Mutex;
 
 use sea_orm::DatabaseConnection;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::app_error::AppCommandError;
-use crate::db::service::{app_metadata_service, conversation_service};
+use crate::db::service::{app_metadata_service, conversation_service, tab_service};
 use crate::db::AppDatabase;
 use crate::models::FolderDetail;
 
@@ -86,7 +86,8 @@ pub struct CommitWindowState {
 }
 
 pub struct ConversationWindowState {
-    conversation_by_label: Mutex<HashMap<String, i32>>,
+    conversations_by_label: Mutex<HashMap<String, HashSet<i32>>>,
+    label_by_conversation: Mutex<HashMap<i32, String>>,
 }
 
 /// Detect macOS system dark mode via `defaults read`.
@@ -306,19 +307,63 @@ impl Default for CommitWindowState {
 impl ConversationWindowState {
     pub fn new() -> Self {
         Self {
-            conversation_by_label: Mutex::new(HashMap::new()),
+            conversations_by_label: Mutex::new(HashMap::new()),
+            label_by_conversation: Mutex::new(HashMap::new()),
         }
     }
 
     fn set_open(&self, label: String, conversation_id: i32) {
-        if let Ok(mut conversations) = self.conversation_by_label.lock() {
-            conversations.insert(label, conversation_id);
+        let previous_label = self
+            .label_by_conversation
+            .lock()
+            .ok()
+            .and_then(|labels| labels.get(&conversation_id).cloned());
+
+        if let Some(previous_label) = previous_label.as_deref() {
+            if previous_label != label {
+                if let Ok(mut conversations) = self.conversations_by_label.lock() {
+                    if let Some(ids) = conversations.get_mut(previous_label) {
+                        ids.remove(&conversation_id);
+                        if ids.is_empty() {
+                            conversations.remove(previous_label);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Ok(mut conversations) = self.conversations_by_label.lock() {
+            conversations
+                .entry(label.clone())
+                .or_default()
+                .insert(conversation_id);
+        }
+        if let Ok(mut labels) = self.label_by_conversation.lock() {
+            labels.insert(conversation_id, label);
         }
     }
 
+    fn label_for_conversation(&self, conversation_id: i32) -> Option<String> {
+        self.label_by_conversation
+            .lock()
+            .ok()
+            .and_then(|labels| labels.get(&conversation_id).cloned())
+    }
+
     fn clear_by_label(&self, label: &str) {
-        if let Ok(mut conversations) = self.conversation_by_label.lock() {
-            conversations.remove(label);
+        let removed_conversations = self
+            .conversations_by_label
+            .lock()
+            .ok()
+            .and_then(|mut conversations| conversations.remove(label));
+        if let Some(conversation_ids) = removed_conversations {
+            if let Ok(mut labels) = self.label_by_conversation.lock() {
+                for conversation_id in conversation_ids {
+                    if labels.get(&conversation_id).is_some_and(|stored| stored == label) {
+                        labels.remove(&conversation_id);
+                    }
+                }
+            }
         }
     }
 }
@@ -366,6 +411,29 @@ fn resolve_settings_target(section: Option<&str>, agent_type: Option<&str>) -> S
 }
 
 #[cfg(feature = "tauri-runtime")]
+fn focus_conversation_owner_window(
+    app: &AppHandle,
+    owner_label: &str,
+    conversation_id: i32,
+) -> Result<(), AppCommandError> {
+    let owner = app
+        .get_webview_window(owner_label)
+        .ok_or_else(|| AppCommandError::not_found(format!("Window {owner_label} not found")))?;
+    post_window_setup(&owner);
+    let _ = owner.unminimize();
+    let _ = owner.emit(
+        "conversation-window-focus-target",
+        serde_json::json!({
+            "conversationId": conversation_id,
+            "ownerLabel": owner_label,
+        }),
+    );
+    owner
+        .set_focus()
+        .map_err(|e| AppCommandError::window("Failed to focus conversation window", e.to_string()))
+}
+
+#[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn open_folder_window(
     app: AppHandle,
@@ -399,22 +467,75 @@ pub async fn open_folder_window(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn open_conversation_window(
+pub async fn focus_conversation_window_if_open(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     db: tauri::State<'_, AppDatabase>,
     state: tauri::State<'_, ConversationWindowState>,
     conversation_id: i32,
+) -> Result<bool, AppCommandError> {
+    let caller_label = window.label().to_string();
+
+    if let Some(existing_label) = state.label_for_conversation(conversation_id) {
+        if existing_label == caller_label {
+            return Ok(false);
+        }
+        if focus_conversation_owner_window(&app, &existing_label, conversation_id).is_ok() {
+            return Ok(true);
+        }
+        state.clear_by_label(&existing_label);
+    }
+
+    if caller_label != "main" && app.get_webview_window("main").is_some() {
+        let main_owns_conversation = tab_service::list_all_tabs(&db.conn)
+            .await
+            .map_err(AppCommandError::from)?
+            .into_iter()
+            .any(|tab| tab.conversation_id == Some(conversation_id));
+
+        if main_owns_conversation {
+            state.set_open("main".to_string(), conversation_id);
+            focus_conversation_owner_window(&app, "main", conversation_id)?;
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn open_conversation_window(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    db: tauri::State<'_, AppDatabase>,
+    state: tauri::State<'_, ConversationWindowState>,
+    conversation_id: i32,
+    force_new_window: bool,
 ) -> Result<serde_json::Value, AppCommandError> {
     let label = format!("conversation-{conversation_id}");
+    let caller_label = window.label().to_string();
 
-    if let Some(existing) = app.get_webview_window(&label) {
-        post_window_setup(&existing);
-        let _ = existing.unminimize();
-        existing.set_focus().map_err(|e| {
-            AppCommandError::window("Failed to focus conversation window", e.to_string())
-        })?;
-        state.set_open(label, conversation_id);
-        return Ok(serde_json::json!({ "focusedExisting": true }));
+    if let Some(existing_label) = state.label_for_conversation(conversation_id) {
+        let should_focus_existing =
+            existing_label != caller_label || !force_new_window || label == caller_label;
+        if should_focus_existing {
+            if focus_conversation_owner_window(&app, &existing_label, conversation_id).is_ok() {
+                state.set_open(existing_label, conversation_id);
+                return Ok(serde_json::json!({ "focusedExisting": true }));
+            }
+            state.clear_by_label(&existing_label);
+        } else if app.get_webview_window(&existing_label).is_none() {
+            state.clear_by_label(&existing_label);
+        }
+    }
+
+    if let Some(_existing) = app.get_webview_window(&label) {
+        if label != caller_label || !force_new_window {
+            focus_conversation_owner_window(&app, &label, conversation_id)?;
+            state.set_open(label, conversation_id);
+            return Ok(serde_json::json!({ "focusedExisting": true }));
+        }
     }
 
     let summary = conversation_service::get_by_id(&db.conn, conversation_id)
@@ -427,7 +548,13 @@ pub async fn open_conversation_window(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| format!("Conversation {}", summary.id));
 
-    let url = WebviewUrl::App(format!("conversation?conversationId={conversation_id}").into());
+    let url = WebviewUrl::App(
+        format!(
+            "workspace?tabPersistence=window-local&open=conversation&folderId={}&conversationId={}&agent={}",
+            summary.folder_id, summary.id, summary.agent_type
+        )
+        .into(),
+    );
     let builder = WebviewWindowBuilder::new(&app, &label, url)
         .title(format!("{title} - codeg"))
         .inner_size(980.0, 760.0)
@@ -578,6 +705,34 @@ pub fn restore_window_after_commit(
 
 pub fn cleanup_conversation_window(state: &ConversationWindowState, window_label: &str) {
     state.clear_by_label(window_label);
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn register_conversation_window_owner(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, ConversationWindowState>,
+    conversation_id: i32,
+) -> Result<(), AppCommandError> {
+    state.set_open(window.label().to_string(), conversation_id);
+    Ok(())
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn sync_conversation_window_ownership(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, ConversationWindowState>,
+    conversation_ids: Vec<i32>,
+) -> Result<(), AppCommandError> {
+    let label = window.label().to_string();
+
+    state.clear_by_label(&label);
+    for conversation_id in conversation_ids {
+        state.set_open(label.clone(), conversation_id);
+    }
+
+    Ok(())
 }
 
 pub struct MergeWindowState {
