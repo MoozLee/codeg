@@ -1,9 +1,27 @@
+"use client"
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  ArrowUpToLine,
+  BrainCog,
+  CheckIcon,
+  Coins,
+  CopyIcon,
+  Timer,
+} from "lucide-react"
+import { useLocale, useTranslations } from "next-intl"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { useMessageScroll } from "@/components/message/message-scroll-context"
+import { cn, copyTextToClipboard } from "@/lib/utils"
 import type { TurnUsage } from "@/lib/types"
 
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
+function formatTokenCount(n: number, formatter: Intl.NumberFormat): string {
+  return formatter.format(n)
 }
 
 function formatDuration(ms: number): string {
@@ -16,37 +34,205 @@ interface TurnStatsProps {
   duration_ms?: number | null
   model?: string | null
   models?: string[]
+  previousUserIndex?: number | null
+  isResponseComplete?: boolean
+  copyText?: string
 }
+
+const iconButtonClass =
+  "inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 
 export function TurnStats({
   usage,
   duration_ms,
   model,
   models,
+  previousUserIndex,
+  isResponseComplete = true,
+  copyText = "",
 }: TurnStatsProps) {
-  if (!usage && !duration_ms) return null
+  const locale = useLocale()
+  const t = useTranslations("Folder.chat.messageList")
+  const scroll = useMessageScroll()
+  const [isCopied, setIsCopied] = useState(false)
+  const timeoutRef = useRef<number>(0)
+  const compactNumberFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(locale, {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }),
+    [locale]
+  )
 
   const displayModels = models?.length ? models : model ? [model] : []
+  const hasCopy = copyText.trim().length > 0
+  const hasUsage = Boolean(usage)
+  const hasDuration = typeof duration_ms === "number" && duration_ms > 0
+  const hasJump =
+    isResponseComplete &&
+    hasUsage &&
+    typeof previousUserIndex === "number" &&
+    Boolean(scroll?.scrollToIndex)
 
-  const parts: string[] = []
-  if (displayModels.length > 0) parts.push(displayModels.join(", "))
-  if (usage) {
-    parts.push(`${formatTokenCount(usage.input_tokens)} input`)
-    parts.push(`${formatTokenCount(usage.output_tokens)} output`)
-    if (usage.cache_read_input_tokens > 0)
-      parts.push(
-        `${formatTokenCount(usage.cache_read_input_tokens)} cache read`
-      )
-    if (usage.cache_creation_input_tokens > 0)
-      parts.push(
-        `${formatTokenCount(usage.cache_creation_input_tokens)} cache write`
-      )
-  }
-  if (duration_ms) parts.push(formatDuration(duration_ms))
+  const handleJump = useCallback(() => {
+    if (typeof previousUserIndex !== "number") return
+    scroll?.scrollToIndex(previousUserIndex, { align: "start", smooth: true })
+  }, [previousUserIndex, scroll])
+
+  const handleCopy = useCallback(async () => {
+    if (isCopied || !hasCopy) return
+    window.clearTimeout(timeoutRef.current)
+    const ok = await copyTextToClipboard(copyText)
+    if (!ok) return
+    setIsCopied(true)
+    timeoutRef.current = window.setTimeout(() => setIsCopied(false), 2000)
+  }, [copyText, hasCopy, isCopied])
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(timeoutRef.current)
+    },
+    []
+  )
+
+  if (!hasCopy && !hasUsage && !hasDuration && !hasJump) return null
 
   return (
-    <div className="text-xs text-muted-foreground mt-2">
-      {"[ " + parts.join(" · ") + " ]"}
+    <div className="mt-2 -ms-[0.3125rem] flex items-center justify-start gap-1 text-xs text-muted-foreground">
+      <TooltipProvider delayDuration={150}>
+        {hasCopy && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className={iconButtonClass}
+                aria-label={isCopied ? t("copied") : t("copyMessage")}
+              >
+                {isCopied ? (
+                  <CheckIcon aria-hidden="true" className="h-3.5 w-3.5" />
+                ) : (
+                  <CopyIcon aria-hidden="true" className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {isCopied ? t("copied") : t("copyMessage")}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {displayModels.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(iconButtonClass, "cursor-help")}
+                aria-label={t("model")}
+              >
+                <BrainCog aria-hidden="true" className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs break-words">
+              <span className="font-medium" translate="no">
+                {displayModels.join(", ")}
+              </span>
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {hasUsage && usage && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(iconButtonClass, "cursor-help")}
+                aria-label={t("tokenStats")}
+              >
+                <Coins aria-hidden="true" className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs">
+              <div className="flex flex-col gap-0.5">
+                <div className="flex justify-between gap-3">
+                  <span>{t("tokenInput")}</span>
+                  <span className="font-mono tabular-nums">
+                    {formatTokenCount(
+                      usage.input_tokens,
+                      compactNumberFormatter
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span>{t("tokenOutput")}</span>
+                  <span className="font-mono tabular-nums">
+                    {formatTokenCount(
+                      usage.output_tokens,
+                      compactNumberFormatter
+                    )}
+                  </span>
+                </div>
+                {usage.cache_read_input_tokens > 0 && (
+                  <div className="flex justify-between gap-3">
+                    <span>{t("tokenCacheRead")}</span>
+                    <span className="font-mono tabular-nums">
+                      {formatTokenCount(
+                        usage.cache_read_input_tokens,
+                        compactNumberFormatter
+                      )}
+                    </span>
+                  </div>
+                )}
+                {usage.cache_creation_input_tokens > 0 && (
+                  <div className="flex justify-between gap-3">
+                    <span>{t("tokenCacheWrite")}</span>
+                    <span className="font-mono tabular-nums">
+                      {formatTokenCount(
+                        usage.cache_creation_input_tokens,
+                        compactNumberFormatter
+                      )}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {hasDuration && duration_ms != null && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(iconButtonClass, "cursor-help")}
+                aria-label={t("duration")}
+              >
+                <Timer aria-hidden="true" className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              <span className="font-mono tabular-nums">
+                {formatDuration(duration_ms)}
+              </span>
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {hasJump && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleJump}
+                className={iconButtonClass}
+                aria-label={t("jumpToPreviousUserMessage")}
+              >
+                <ArrowUpToLine aria-hidden="true" className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {t("jumpToPreviousUserMessage")}
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </TooltipProvider>
     </div>
   )
 }

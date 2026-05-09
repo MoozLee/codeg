@@ -1896,7 +1896,15 @@
         "copyMessage": "复制",
         "copied": "已复制",
         "downloadImage": "下载图片",
-        "downloadFailed": "下载失败：{message}"
+        "downloadFailed": "下载失败：{message}",
+        "model": "模型",
+        "tokenStats": "Token 使用情况",
+        "tokenInput": "输入",
+        "tokenOutput": "输出",
+        "tokenCacheRead": "缓存读取",
+        "tokenCacheWrite": "缓存写入",
+        "duration": "耗时",
+        "jumpToPreviousUserMessage": "跳转到上一条用户消息"
       },
       "liveTurnStats": {
         "thinking": "思考中...",
@@ -2411,7 +2419,7 @@
       "active": "当前活跃",
       "edit": "编辑",
       "delete": "删除",
-      "deleteConfirm": "确认删除此宠物?会从磁盘上一并移除。",
+      "deleteConfirm": "确认删除宠物 \"{name}\" 吗？会从磁盘上一并移除。",
       "summon": "召唤宠物窗口",
       "openCodexHelp": "Codex 宠物需位于 ~/.codex/pets/ 目录下,但未找到。",
       "specRequirement": "精灵图必须是 1536x1872 像素的带透明通道 PNG 或 WebP。",
@@ -2434,7 +2442,9 @@
         "addFailed": "添加宠物失败",
         "updateFailed": "更新宠物失败",
         "deleteFailed": "删除宠物失败",
-        "loadFailed": "加载宠物列表失败"
+        "loadFailed": "加载宠物列表失败",
+        "setActiveFailed": "设置活跃宠物失败",
+        "summonFailed": "召唤宠物窗口失败"
       }
     },
     "import": {

@@ -99,6 +99,22 @@ export async function recordPetWindowPosition(
   return getTransport().call("pet_window_record_position", { x, y })
 }
 
+export interface PetMenuLabels {
+  scale: string
+  openManager: string
+  close: string
+}
+
+/** Pop up the native right-click context menu. Tauri-only; in web mode the
+ * pet route doesn't render a context menu at all (no window to manage). */
+export async function showPetContextMenu(
+  labels: PetMenuLabels,
+  x: number,
+  y: number
+): Promise<void> {
+  return getTransport().call("pet_show_context_menu", { labels, x, y })
+}
+
 // Slug a free-form display name into a pet id. Mirrors the backend's
 // validate_pet_id rules: lowercase ASCII, digits, '-' and '_'. Used as a
 // suggestion when adding a pet — the user can override.

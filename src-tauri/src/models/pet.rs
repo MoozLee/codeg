@@ -186,7 +186,7 @@ pub struct PetWindowConfig {
 }
 
 fn default_scale() -> f64 {
-    1.0
+    0.75
 }
 
 fn default_always_on_top() -> bool {
@@ -200,7 +200,7 @@ impl Default for PetWindowConfig {
             active_pet_id: None,
             x: None,
             y: None,
-            scale: 1.0,
+            scale: 0.75,
             always_on_top: true,
         }
     }

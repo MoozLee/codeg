@@ -412,6 +412,18 @@ pub async fn spawn_agent_connection(
 
     let agent = build_agent(agent_type, &runtime_env).await?;
 
+    // Forward only the codeg git credential helper keys into the terminal
+    // runtime — not the agent's API tokens or model provider credentials.
+    // This makes `git fetch`/`git push` issued through the ACP
+    // `terminal/create` tool authenticate via the same helper path the
+    // agent process uses, while keeping unrelated secrets scoped to the
+    // agent and out of arbitrary shell commands it runs.
+    let terminal_base_env: BTreeMap<String, String> = runtime_env
+        .iter()
+        .filter(|(k, _)| k.starts_with("GIT_CONFIG_"))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
     let (cmd_tx, cmd_rx) = mpsc::channel::<ConnectionCommand>(32);
     let conn_id = connection_id.clone();
     let emitter_clone = emitter.clone();
@@ -453,6 +465,7 @@ pub async fn spawn_agent_connection(
             cmd_rx,
             emitter_clone.clone(),
             Arc::clone(&state_clone),
+            terminal_base_env,
         )
         .await;
 
@@ -934,9 +947,13 @@ async fn run_connection(
     mut cmd_rx: mpsc::Receiver<ConnectionCommand>,
     emitter: EventEmitter,
     state: Arc<RwLock<SessionState>>,
+    terminal_base_env: BTreeMap<String, String>,
 ) -> Result<(), AcpError> {
     let pending_perms: PendingPermissions = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-    let terminal_runtime = Arc::new(TerminalRuntime::new());
+    // `terminal_base_env` already filtered to just the credential helper
+    // keys upstream — see `spawn_agent_connection` for the rationale and
+    // why we don't forward the full agent runtime_env here.
+    let terminal_runtime = Arc::new(TerminalRuntime::with_base_env(terminal_base_env));
     let cwd = resolve_working_dir(working_dir.as_deref());
     let cwd_string = cwd.to_string_lossy().to_string();
     let file_system_runtime = Arc::new(FileSystemRuntime::new(cwd.clone()));

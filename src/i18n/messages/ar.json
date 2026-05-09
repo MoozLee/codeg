@@ -1896,7 +1896,15 @@
         "copyMessage": "نسخ",
         "copied": "تم النسخ",
         "downloadImage": "تنزيل الصورة",
-        "downloadFailed": "فشل التنزيل: {message}"
+        "downloadFailed": "فشل التنزيل: {message}",
+        "model": "النموذج",
+        "tokenStats": "استخدام الرموز",
+        "tokenInput": "الإدخال",
+        "tokenOutput": "الإخراج",
+        "tokenCacheRead": "قراءة التخزين المؤقت",
+        "tokenCacheWrite": "كتابة التخزين المؤقت",
+        "duration": "المدة",
+        "jumpToPreviousUserMessage": "الانتقال إلى رسالة المستخدم"
       },
       "liveTurnStats": {
         "thinking": "جارٍ التفكير...",
@@ -2411,7 +2419,7 @@
       "active": "نشط",
       "edit": "تعديل",
       "delete": "حذف",
-      "deleteConfirm": "حذف هذا الحيوان؟ سيُحذف من القرص.",
+      "deleteConfirm": "حذف الحيوان «{name}»؟ سيُحذف من القرص.",
       "summon": "استدعاء نافذة الحيوان",
       "openCodexHelp": "يجب أن توجد حيوانات Codex داخل ~/.codex/pets/. لم يُعثر على شيء.",
       "specRequirement": "يجب أن يكون السبرايت PNG أو WebP بحجم 1536x1872 مع شفافية.",
@@ -2434,7 +2442,9 @@
         "addFailed": "فشل الإضافة",
         "updateFailed": "فشل التحديث",
         "deleteFailed": "فشل الحذف",
-        "loadFailed": "فشل تحميل قائمة الحيوانات"
+        "loadFailed": "فشل تحميل قائمة الحيوانات",
+        "setActiveFailed": "فشل تعيين الحيوان النشط",
+        "summonFailed": "فشل فتح نافذة الحيوان"
       }
     },
     "import": {

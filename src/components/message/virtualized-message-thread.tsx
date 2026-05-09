@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, type Ref } from "react"
+import { useCallback, useMemo, useRef, type Ref } from "react"
 import type { CSSProperties, ReactNode, RefObject } from "react"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
 import { useStickToBottomContext } from "use-stick-to-bottom"
@@ -9,6 +9,10 @@ import {
   type MessageThreadContentProps,
 } from "@/components/ai-elements/message-thread"
 import { cn } from "@/lib/utils"
+import {
+  MessageScrollProvider,
+  type MessageScrollContextValue,
+} from "@/components/message/message-scroll-context"
 
 interface VirtualizedMessageThreadProps<T> {
   /** Data to virtualise — each entry becomes one virtual row. */
@@ -60,6 +64,18 @@ export function VirtualizedMessageThread<T>({
   virtualizerRef,
 }: VirtualizedMessageThreadProps<T>) {
   const { scrollRef } = useStickToBottomContext()
+  const virtualizerHandleRef = useRef<VirtualizerHandle>(null)
+
+  const scrollToIndex = useCallback<MessageScrollContextValue["scrollToIndex"]>(
+    (index, opts) => {
+      virtualizerHandleRef.current?.scrollToIndex(index, opts)
+    },
+    []
+  )
+  const scrollContextValue = useMemo<MessageScrollContextValue>(
+    () => ({ scrollToIndex }),
+    [scrollToIndex]
+  )
 
   // Pre-compute the three possible padding styles so every render reuses
   // the same object references (avoids allocating per-item on each frame).
@@ -80,33 +96,49 @@ export function VirtualizedMessageThread<T>({
     return styles.middle
   }
 
+  const mergedRef = useCallback(
+    (handle: VirtualizerHandle | null) => {
+      (virtualizerHandleRef as React.MutableRefObject<VirtualizerHandle | null>).current = handle
+      if (virtualizerRef) {
+        if (typeof virtualizerRef === "function") {
+          virtualizerRef(handle)
+        } else {
+          (virtualizerRef as React.MutableRefObject<VirtualizerHandle | null>).current = handle
+        }
+      }
+    },
+    [virtualizerRef]
+  )
+
   return (
-    <MessageThreadContent
-      className={cn("mx-0 max-w-none p-0", contentClassName)}
-      scrollClassName="scrollbar-thin overscroll-contain [overflow-anchor:none]"
-      {...contentProps}
-    >
-      {items.length === 0 ? (
-        (emptyState ?? null)
-      ) : (
-        <Virtualizer
-          ref={virtualizerRef}
-          scrollRef={scrollRef as unknown as RefObject<HTMLElement | null>}
-          itemSize={itemSize}
-          bufferSize={bufferSize}
-        >
-          {items.map((item, index) => (
-            <div
-              key={getItemKey(item, index)}
-              style={itemStyle(index, items.length)}
-            >
-              <div className={cn("mx-auto max-w-3xl px-4", className)}>
-                {renderItem(item, index)}
+    <MessageScrollProvider value={scrollContextValue}>
+      <MessageThreadContent
+        className={cn("mx-0 max-w-none p-0", contentClassName)}
+        scrollClassName="scrollbar-thin overscroll-contain [overflow-anchor:none]"
+        {...contentProps}
+      >
+        {items.length === 0 ? (
+          (emptyState ?? null)
+        ) : (
+          <Virtualizer
+            ref={mergedRef}
+            scrollRef={scrollRef as unknown as RefObject<HTMLElement | null>}
+            itemSize={itemSize}
+            bufferSize={bufferSize}
+          >
+            {items.map((item, index) => (
+              <div
+                key={getItemKey(item, index)}
+                style={itemStyle(index, items.length)}
+              >
+                <div className={cn("mx-auto max-w-3xl px-4", className)}>
+                  {renderItem(item, index)}
+                </div>
               </div>
-            </div>
-          ))}
-        </Virtualizer>
-      )}
-    </MessageThreadContent>
+            ))}
+          </Virtualizer>
+        )}
+      </MessageThreadContent>
+    </MessageScrollProvider>
   )
 }

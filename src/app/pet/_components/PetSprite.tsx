@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import {
   SPRITE_BACKGROUND_SIZE,
   backgroundPositionFor,
@@ -8,7 +9,7 @@ import {
 import { usePetAnimator } from "../_hooks/usePetAnimator"
 
 export interface PetSpriteProps {
-  spritesheetDataUrl: string
+  spritesheetUrl: string
   state: PetState
   scale: number
   /** Aria-label for screen readers. */
@@ -19,12 +20,16 @@ const FRAME_WIDTH = 192
 const FRAME_HEIGHT = 208
 
 export function PetSprite({
-  spritesheetDataUrl,
+  spritesheetUrl,
   state,
   scale,
   label,
 }: PetSpriteProps) {
   const { row, col } = usePetAnimator(state)
+  const backgroundImage = useMemo(
+    () => `url("${spritesheetUrl}")`,
+    [spritesheetUrl]
+  )
 
   return (
     <div
@@ -33,7 +38,7 @@ export function PetSprite({
       style={{
         width: `${FRAME_WIDTH * scale}px`,
         height: `${FRAME_HEIGHT * scale}px`,
-        backgroundImage: `url("${spritesheetDataUrl}")`,
+        backgroundImage,
         backgroundRepeat: "no-repeat",
         backgroundSize: SPRITE_BACKGROUND_SIZE,
         backgroundPosition: backgroundPositionFor(row, col),

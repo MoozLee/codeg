@@ -89,6 +89,23 @@ pub async fn acp_connect(
     )
     .await;
 
+    // Inject the codeg git credential helper so git invocations issued by
+    // the agent (or its child shells) authenticate against the GitHub
+    // accounts configured in Settings → Version Control, mirroring what
+    // the built-in terminal already does.
+    if let Some(cred_env) =
+        crate::commands::terminal::prepare_credential_env(&state.data_dir)
+    {
+        for (key, value) in cred_env {
+            runtime_env.insert(key, value);
+        }
+    }
+
+    if params.agent_type == AgentType::OpenClaw && params.session_id.is_none() {
+        runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
+    }
+
+
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
     // can prompt the user to install it from Agent Settings.

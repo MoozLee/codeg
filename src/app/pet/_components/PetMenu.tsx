@@ -1,110 +1,121 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
-import { closePetWindow, savePetWindowState } from "@/lib/pet/api"
+import {
+  closePetWindow,
+  savePetWindowState,
+  showPetContextMenu,
+} from "@/lib/pet/api"
+import { disposeTauriListener } from "@/lib/tauri-listener"
+import { isDesktop } from "@/lib/transport"
 
 export interface PetMenuProps {
-  scale: number
   onScaleChange: (scale: number) => void
   onOpenSettings: () => void
 }
 
-const SCALE_STEPS: ReadonlyArray<number> = [0.5, 1, 1.5, 2]
+type MenuAction =
+  | { type: "scale"; value: number }
+  | { type: "open_manager" }
+  | { type: "close" }
 
-export function PetMenu({
-  scale,
-  onScaleChange,
-  onOpenSettings,
-}: PetMenuProps) {
+/**
+ * Right-click controller. Renders no UI of its own — the menu itself is
+ * native (built in Rust via `pet_show_context_menu` and dispatched through
+ * Tauri's menu-event bus). HTML popups got clipped to the tiny pet window
+ * and were unclosable when they overflowed; the OS-level menu sidesteps
+ * both problems and gives us free Escape/click-outside dismiss.
+ */
+export function PetMenu({ onScaleChange, onOpenSettings }: PetMenuProps) {
   const t = useTranslations("Pet")
-  const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(
-    null
-  )
-  const containerRef = useRef<HTMLDivElement | null>(null)
 
+  // Stash the latest callbacks in a ref so the menu-action listener (set up
+  // once at mount) always calls into the current closures without having
+  // to re-subscribe on every render. PetWindow rerenders on each animation
+  // tick and recreates `openManager` inline, so a deps-based effect would
+  // tear down and rebuild the Tauri listener constantly — a window during
+  // which a menu-action event would be silently dropped.
+  const callbacksRef = useRef({ onScaleChange, onOpenSettings })
   useEffect(() => {
+    callbacksRef.current = { onScaleChange, onOpenSettings }
+  }, [onScaleChange, onOpenSettings])
+
+  // Stash translations the same way: the right-click listener pulls fresh
+  // labels at popup time without needing to rebind.
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
+
+  // 1) Hook the right-click and forward to the native menu.
+  useEffect(() => {
+    if (!isDesktop()) return
     function onContextMenu(e: MouseEvent) {
       e.preventDefault()
-      setPosition({ x: e.clientX, y: e.clientY })
-      setOpen(true)
-    }
-    function onClickOutside(e: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
+      const x = e.clientX
+      const y = e.clientY
+      const tNow = tRef.current
+      void showPetContextMenu(
+        {
+          scale: tNow("menu.scale"),
+          openManager: tNow("menu.openManager"),
+          close: tNow("menu.close"),
+        },
+        x,
+        y
+      ).catch((err) => {
+        console.warn("[Pet] failed to show context menu:", err)
+      })
     }
     document.addEventListener("contextmenu", onContextMenu)
-    document.addEventListener("mousedown", onClickOutside)
     return () => {
       document.removeEventListener("contextmenu", onContextMenu)
-      document.removeEventListener("mousedown", onClickOutside)
     }
   }, [])
 
-  if (!open || !position) return null
-
-  return (
-    <div
-      ref={containerRef}
-      className="pointer-events-auto fixed z-50 min-w-44 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-      style={{ left: position.x, top: position.y }}
-    >
-      <div className="px-2 pt-1 pb-1 text-xs text-muted-foreground">
-        {t("menu.scale")}
-      </div>
-      <div className="flex gap-1 px-2 pb-2">
-        {SCALE_STEPS.map((step) => (
-          <button
-            key={step}
-            type="button"
-            className={`rounded border px-2 py-0.5 text-xs ${
-              Math.abs(step - scale) < 0.01
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border text-foreground hover:bg-accent"
-            }`}
-            onClick={async () => {
-              try {
-                await savePetWindowState({ scale: step })
-                onScaleChange(step)
-              } finally {
-                setOpen(false)
-              }
-            }}
-          >
-            {step}×
-          </button>
-        ))}
-      </div>
-      <div className="my-1 h-px bg-border" />
-      <button
-        type="button"
-        className="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
-        onClick={() => {
-          setOpen(false)
-          onOpenSettings()
-        }}
-      >
-        {t("menu.openManager")}
-      </button>
-      <button
-        type="button"
-        className="w-full rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
-        onClick={async () => {
-          setOpen(false)
-          try {
-            await closePetWindow()
-          } catch (err) {
-            console.warn("[Pet] close failed:", err)
+  // 2) Listen for actions emitted by the native menu's event handler.
+  //    Mount-once subscription — see callbacksRef rationale above.
+  useEffect(() => {
+    if (!isDesktop()) return
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    void (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event")
+        const off = await listen<MenuAction>("pet://menu-action", (event) => {
+          const action = event.payload
+          if (!action) return
+          const { onScaleChange, onOpenSettings } = callbacksRef.current
+          if (action.type === "scale") {
+            const next = action.value
+            void savePetWindowState({ scale: next })
+              .then(() => onScaleChange(next))
+              .catch((err) => {
+                console.warn("[Pet] scale change failed:", err)
+              })
+          } else if (action.type === "open_manager") {
+            onOpenSettings()
+          } else if (action.type === "close") {
+            void closePetWindow().catch((err) => {
+              console.warn("[Pet] close failed:", err)
+            })
           }
-        }}
-      >
-        {t("menu.close")}
-      </button>
-    </div>
-  )
+        })
+        if (cancelled) {
+          disposeTauriListener(off, "Pet")
+        } else {
+          unlisten = off
+        }
+      } catch (err) {
+        console.warn("[Pet] menu-action subscription failed:", err)
+      }
+    })()
+    return () => {
+      cancelled = true
+      disposeTauriListener(unlisten, "Pet")
+    }
+  }, [])
+
+  return null
 }

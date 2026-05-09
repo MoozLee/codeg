@@ -4,7 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2 } from "lucide-react"
 import { getPet, getPetSettings, readPetSpritesheet } from "@/lib/pet/api"
-import type { PetDetail, PetSpriteAsset } from "@/lib/pet/types"
+import type { PetDetail } from "@/lib/pet/types"
+import {
+  createPetSpriteObjectUrl,
+  revokePetSpriteObjectUrl,
+} from "@/lib/pet/sprite-url"
 import { disposeTauriListener } from "@/lib/tauri-listener"
 import { isDesktop } from "@/lib/transport"
 import { PET_FRAME_DURATIONS_MS, type PetState } from "@/lib/pet/animation"
@@ -37,7 +41,7 @@ function sumDurations(state: PetState): number {
 export function PetWindow({ petId }: PetWindowProps) {
   const t = useTranslations("Pet")
   const [pet, setPet] = useState<PetDetail | null>(null)
-  const [asset, setAsset] = useState<PetSpriteAsset | null>(null)
+  const [spritesheetUrl, setSpritesheetUrl] = useState<string | null>(null)
   const [scale, setScale] = useState<number>(1)
   const [error, setError] = useState<string | null>(null)
   const agentState = usePetState()
@@ -81,8 +85,15 @@ export function PetWindow({ petId }: PetWindowProps) {
   // way of any active interaction (drag, click-and-hold). Listening on
   // `window` rather than the root div catches pointerup even when it
   // happens off-window mid-drag.
+  //
+  // Only the primary (left) button matters here — drag is left-only, and
+  // right-click is consumed by the native context menu, which eats the
+  // paired `pointerup`. If we tracked all buttons we'd get stuck "down"
+  // after every right-click and hover-waving would silently break until
+  // the user clicked again to clear it.
   useEffect(() => {
-    const onDown = () => {
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return
       pointerDownRef.current = true
     }
     const onUp = () => {
@@ -155,7 +166,10 @@ export function PetWindow({ petId }: PetWindowProps) {
 
   useEffect(() => {
     let cancelled = false
+    let objectUrl: string | null = null
     setError(null)
+    setPet(null)
+    setSpritesheetUrl(null)
 
     async function load() {
       try {
@@ -164,9 +178,13 @@ export function PetWindow({ petId }: PetWindowProps) {
           readPetSpritesheet(petId),
           getPetSettings(),
         ])
-        if (cancelled) return
+        objectUrl = createPetSpriteObjectUrl(sprite)
+        if (cancelled) {
+          revokePetSpriteObjectUrl(objectUrl)
+          return
+        }
         setPet(detail)
-        setAsset(sprite)
+        setSpritesheetUrl(objectUrl)
         setScale(config.scale ?? 1)
       } catch (err) {
         if (!cancelled) setError(toMessage(err))
@@ -176,6 +194,7 @@ export function PetWindow({ petId }: PetWindowProps) {
     void load()
     return () => {
       cancelled = true
+      revokePetSpriteObjectUrl(objectUrl)
     }
   }, [petId])
 
@@ -226,7 +245,7 @@ export function PetWindow({ petId }: PetWindowProps) {
     )
   }
 
-  if (!pet || !asset) {
+  if (!pet || !spritesheetUrl) {
     return (
       <div
         className="flex h-screen w-screen items-center justify-center"
@@ -237,8 +256,6 @@ export function PetWindow({ petId }: PetWindowProps) {
     )
   }
 
-  const dataUrl = `data:${asset.mime};base64,${asset.dataBase64}`
-
   return (
     <div
       className="relative flex h-screen w-screen select-none items-center justify-center"
@@ -246,16 +263,12 @@ export function PetWindow({ petId }: PetWindowProps) {
       onPointerDown={drag.onPointerDown}
     >
       <PetSprite
-        spritesheetDataUrl={dataUrl}
+        spritesheetUrl={spritesheetUrl}
         state={renderState}
         scale={scale}
         label={pet.displayName}
       />
-      <PetMenu
-        scale={scale}
-        onScaleChange={setScale}
-        onOpenSettings={openManager}
-      />
+      <PetMenu onScaleChange={setScale} onOpenSettings={openManager} />
     </div>
   )
 }

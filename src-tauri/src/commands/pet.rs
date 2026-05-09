@@ -319,6 +319,7 @@ pub async fn pet_set_active(
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn pet_save_window_state(
+    app: tauri::AppHandle,
     db: tauri::State<'_, AppDatabase>,
     x: Option<f64>,
     y: Option<f64>,
@@ -326,7 +327,8 @@ pub async fn pet_save_window_state(
     always_on_top: Option<bool>,
     enabled: Option<bool>,
 ) -> Result<PetWindowConfig, AppCommandError> {
-    pet_save_window_state_core(
+    let scale_changed = scale.is_some();
+    let new_config = pet_save_window_state_core(
         &db.conn,
         PetWindowStatePatch {
             x,
@@ -336,5 +338,18 @@ pub async fn pet_save_window_state(
             enabled,
         },
     )
-    .await
+    .await?;
+
+    // Keep the OS window in lockstep with the persisted scale. Without this,
+    // changing scale via the right-click menu would shrink/grow the sprite
+    // inside an unchanged transparent window — a 0.5x sprite floating in a
+    // 1x window's worth of dead pixels that still capture clicks.
+    if scale_changed {
+        if let Some(window) = tauri::Manager::get_webview_window(&app, "pet") {
+            let s = new_config.scale;
+            let _ = window.set_size(tauri::LogicalSize::new(192.0_f64 * s, 208.0_f64 * s));
+        }
+    }
+
+    Ok(new_config)
 }

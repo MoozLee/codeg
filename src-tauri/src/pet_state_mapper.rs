@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 
+use serde::Deserialize;
 use tokio::sync::broadcast;
 
 use crate::acp::types::{AcpEvent, ConnectionStatus, EventEnvelope};
@@ -115,6 +116,20 @@ pub fn compute_pet_state(snapshot: &PetGlobalState) -> PetState {
     PetState::Idle
 }
 
+fn is_pet_relevant_acp_event(payload: &serde_json::Value) -> bool {
+    let Some(kind) = payload.get("type").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    matches!(
+        kind,
+        "status_changed"
+            | "error"
+            | "permission_request"
+            | "turn_complete"
+            | "conversation_status_changed"
+    )
+}
+
 /// Spawn-friendly subscriber loop. Mirrors `lifecycle_subscriber_task`'s
 /// "subscribe synchronously, return future" shape so the broadcast buffer
 /// covers the gap between `subscribe()` and the first `recv()`.
@@ -135,7 +150,11 @@ pub fn pet_state_subscriber_task(
                     if channel != "acp://event" {
                         continue;
                     }
-                    let envelope: EventEnvelope = match serde_json::from_value((*payload).clone()) {
+                    let payload_value = payload.as_ref();
+                    if !is_pet_relevant_acp_event(payload_value) {
+                        continue;
+                    }
+                    let envelope: EventEnvelope = match EventEnvelope::deserialize(payload_value) {
                         Ok(env) => env,
                         Err(_) => continue,
                     };
@@ -261,5 +280,36 @@ mod tests {
             },
         ));
         assert_eq!(compute_pet_state(&s), PetState::Idle);
+    }
+
+    #[test]
+    fn event_filter_accepts_only_pet_relevant_events() {
+        for kind in [
+            "status_changed",
+            "error",
+            "permission_request",
+            "turn_complete",
+            "conversation_status_changed",
+        ] {
+            assert!(
+                is_pet_relevant_acp_event(&serde_json::json!({ "type": kind })),
+                "expected {kind} to be pet-relevant"
+            );
+        }
+
+        for kind in [
+            "content_delta",
+            "thinking",
+            "tool_call",
+            "tool_call_update",
+            "usage_update",
+            "session_started",
+        ] {
+            assert!(
+                !is_pet_relevant_acp_event(&serde_json::json!({ "type": kind })),
+                "expected {kind} to be ignored"
+            );
+        }
+        assert!(!is_pet_relevant_acp_event(&serde_json::json!({})));
     }
 }

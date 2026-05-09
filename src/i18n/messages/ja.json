@@ -1896,7 +1896,15 @@
         "copyMessage": "コピー",
         "copied": "コピー済み",
         "downloadImage": "画像をダウンロード",
-        "downloadFailed": "ダウンロードに失敗しました: {message}"
+        "downloadFailed": "ダウンロードに失敗しました: {message}",
+        "model": "モデル",
+        "tokenStats": "トークン使用量",
+        "tokenInput": "入力",
+        "tokenOutput": "出力",
+        "tokenCacheRead": "キャッシュ読取",
+        "tokenCacheWrite": "キャッシュ書込",
+        "duration": "所要時間",
+        "jumpToPreviousUserMessage": "前のユーザーメッセージへ"
       },
       "liveTurnStats": {
         "thinking": "考え中...",
@@ -2411,7 +2419,7 @@
       "active": "アクティブ",
       "edit": "編集",
       "delete": "削除",
-      "deleteConfirm": "このペットを削除しますか?ディスクからも削除されます。",
+      "deleteConfirm": "ペット「{name}」を削除しますか?ディスクからも削除されます。",
       "summon": "ペットウィンドウを呼び出す",
       "openCodexHelp": "Codex ペットは ~/.codex/pets/ 配下に配置する必要があります。見つかりません。",
       "specRequirement": "スプライトシートは 1536x1872 ピクセル、透過 PNG / WebP 形式である必要があります。",
@@ -2434,7 +2442,9 @@
         "addFailed": "ペットの追加に失敗しました",
         "updateFailed": "ペットの更新に失敗しました",
         "deleteFailed": "ペットの削除に失敗しました",
-        "loadFailed": "ペット一覧の取得に失敗しました"
+        "loadFailed": "ペット一覧の取得に失敗しました",
+        "setActiveFailed": "アクティブなペットの設定に失敗しました",
+        "summonFailed": "ペットウィンドウの召喚に失敗しました"
       }
     },
     "import": {

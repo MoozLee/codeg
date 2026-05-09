@@ -1896,7 +1896,15 @@
         "copyMessage": "Copiar",
         "copied": "Copiado",
         "downloadImage": "Descargar imagen",
-        "downloadFailed": "Descarga fallida: {message}"
+        "downloadFailed": "Descarga fallida: {message}",
+        "model": "Modelo",
+        "tokenStats": "Uso de tokens",
+        "tokenInput": "Entrada",
+        "tokenOutput": "Salida",
+        "tokenCacheRead": "Lectura de caché",
+        "tokenCacheWrite": "Escritura de caché",
+        "duration": "Duración",
+        "jumpToPreviousUserMessage": "Ir al mensaje del usuario"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",
@@ -2411,7 +2419,7 @@
       "active": "Activa",
       "edit": "Editar",
       "delete": "Eliminar",
-      "deleteConfirm": "¿Eliminar esta mascota? Se borrará del disco.",
+      "deleteConfirm": "¿Eliminar la mascota «{name}»? Se borrará del disco.",
       "summon": "Invocar ventana de la mascota",
       "openCodexHelp": "Las mascotas de Codex deben estar en ~/.codex/pets/. No se encontraron.",
       "specRequirement": "El sprite debe ser PNG o WebP de 1536x1872 con transparencia.",
@@ -2434,7 +2442,9 @@
         "addFailed": "Error al añadir la mascota",
         "updateFailed": "Error al actualizar",
         "deleteFailed": "Error al eliminar",
-        "loadFailed": "Error al cargar mascotas"
+        "loadFailed": "Error al cargar mascotas",
+        "setActiveFailed": "Error al activar mascota",
+        "summonFailed": "Error al invocar la ventana de mascota"
       }
     },
     "import": {

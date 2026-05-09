@@ -1896,7 +1896,15 @@
         "copyMessage": "Copier",
         "copied": "Copié",
         "downloadImage": "Télécharger l'image",
-        "downloadFailed": "Échec du téléchargement : {message}"
+        "downloadFailed": "Échec du téléchargement : {message}",
+        "model": "Modèle",
+        "tokenStats": "Utilisation des tokens",
+        "tokenInput": "Entrée",
+        "tokenOutput": "Sortie",
+        "tokenCacheRead": "Lecture du cache",
+        "tokenCacheWrite": "Écriture du cache",
+        "duration": "Durée",
+        "jumpToPreviousUserMessage": "Aller au message utilisateur"
       },
       "liveTurnStats": {
         "thinking": "Réflexion...",
@@ -2411,7 +2419,7 @@
       "active": "Active",
       "edit": "Modifier",
       "delete": "Supprimer",
-      "deleteConfirm": "Supprimer cette mascotte ? Elle sera retirée du disque.",
+      "deleteConfirm": "Supprimer la mascotte « {name} » ? Elle sera retirée du disque.",
       "summon": "Invoquer la fenêtre de la mascotte",
       "openCodexHelp": "Les mascottes Codex doivent être dans ~/.codex/pets/. Aucune trouvée.",
       "specRequirement": "Le sprite doit être un PNG/WebP 1536x1872 avec transparence.",
@@ -2434,7 +2442,9 @@
         "addFailed": "Ajout impossible",
         "updateFailed": "Mise à jour impossible",
         "deleteFailed": "Suppression impossible",
-        "loadFailed": "Chargement impossible"
+        "loadFailed": "Chargement impossible",
+        "setActiveFailed": "Activation impossible",
+        "summonFailed": "Ouverture de la fenêtre impossible"
       }
     },
     "import": {

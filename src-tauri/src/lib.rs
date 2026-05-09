@@ -246,6 +246,32 @@ mod tauri_app {
 
                 Ok(())
             })
+            .on_menu_event(|app, event| {
+                // Dispatch native pet context-menu actions. Items live under
+                // the `pet:` id namespace; everything else (tray menus, future
+                // app menus) flows past untouched. We re-emit a webview event
+                // rather than acting in Rust so the existing frontend
+                // commands (pet_save_window_state, open_settings_window,
+                // close_pet_window) stay the single source of truth — the
+                // native menu is just a different *trigger*.
+                let id = event.id().as_ref().to_string();
+                if !id.starts_with(windows::PET_MENU_ID_PREFIX) {
+                    return;
+                }
+                let payload: serde_json::Value =
+                    if let Some(scale) = windows::pet_menu_scale_from_id(&id) {
+                        serde_json::json!({ "type": "scale", "value": scale })
+                    } else if id == windows::PET_MENU_ID_OPEN_MANAGER {
+                        serde_json::json!({ "type": "open_manager" })
+                    } else if id == windows::PET_MENU_ID_CLOSE {
+                        serde_json::json!({ "type": "close" })
+                    } else {
+                        // Header / unknown — nothing to do.
+                        return;
+                    };
+                use tauri::Emitter;
+                let _ = app.emit_to("pet", "pet://menu-action", payload);
+            })
             .on_window_event(|window, event| {
                 let label = window.label().to_string();
 
@@ -467,6 +493,7 @@ mod tauri_app {
                 windows::open_pet_window,
                 windows::close_pet_window,
                 windows::pet_window_record_position,
+                windows::pet_show_context_menu,
                 windows::update_traffic_light_position,
                 windows::update_appearance_mode,
                 pet_commands::pet_list,

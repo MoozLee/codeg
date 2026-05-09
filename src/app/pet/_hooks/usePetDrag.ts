@@ -65,6 +65,8 @@ export function usePetDrag(opts: UsePetDragOptions): UsePetDragResult {
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rafRef = useRef<number | null>(null)
   const pendingPosRef = useRef<{ x: number; y: number } | null>(null)
+  const positionInFlightRef = useRef(false)
+  const persistAfterFlushRef = useRef(false)
   const setPositionFnRef = useRef<
     ((x: number, y: number) => Promise<void>) | null
   >(null)
@@ -90,12 +92,39 @@ export function usePetDrag(opts: UsePetDragOptions): UsePetDragResult {
   }, [])
 
   useEffect(() => {
+    let disposed = false
+
+    function persistWhenSettled() {
+      if (!persistAfterFlushRef.current || disposed) return
+
+      if (positionInFlightRef.current || rafRef.current !== null) {
+        return
+      }
+
+      if (pendingPosRef.current) {
+        rafRef.current = requestAnimationFrame(flushPosition)
+        return
+      }
+
+      persistAfterFlushRef.current = false
+      void persistPosition()
+    }
+
     function flushPosition() {
+      rafRef.current = null
+      if (positionInFlightRef.current) return
       const p = pendingPosRef.current
       pendingPosRef.current = null
-      rafRef.current = null
       if (!p || !setPositionFnRef.current) return
-      void setPositionFnRef.current(p.x, p.y)
+      positionInFlightRef.current = true
+      void setPositionFnRef.current(p.x, p.y).finally(() => {
+        positionInFlightRef.current = false
+        if (disposed) return
+        if (pendingPosRef.current && rafRef.current === null) {
+          rafRef.current = requestAnimationFrame(flushPosition)
+        }
+        persistWhenSettled()
+      })
     }
 
     function onPointerMove(e: PointerEvent) {
@@ -145,7 +174,7 @@ export function usePetDrag(opts: UsePetDragOptions): UsePetDragResult {
       const physX = (winStart.x + dxLog) * scaleFactorRef.current
       const physY = (winStart.y + dyLog) * scaleFactorRef.current
       pendingPosRef.current = { x: Math.round(physX), y: Math.round(physY) }
-      if (rafRef.current === null) {
+      if (rafRef.current === null && !positionInFlightRef.current) {
         rafRef.current = requestAnimationFrame(flushPosition)
       }
     }
@@ -170,7 +199,8 @@ export function usePetDrag(opts: UsePetDragOptions): UsePetDragResult {
 
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
       persistTimerRef.current = setTimeout(() => {
-        void persistPosition()
+        persistAfterFlushRef.current = true
+        persistWhenSettled()
       }, PERSIST_DEBOUNCE_MS)
     }
 
@@ -178,12 +208,15 @@ export function usePetDrag(opts: UsePetDragOptions): UsePetDragResult {
     window.addEventListener("pointerup", onPointerUp)
     window.addEventListener("pointercancel", onPointerUp)
     return () => {
+      disposed = true
       window.removeEventListener("pointermove", onPointerMove)
       window.removeEventListener("pointerup", onPointerUp)
       window.removeEventListener("pointercancel", onPointerUp)
       if (dirIdleTimerRef.current) clearTimeout(dirIdleTimerRef.current)
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      persistAfterFlushRef.current = false
+      pendingPosRef.current = null
     }
   }, [persistPosition])
 

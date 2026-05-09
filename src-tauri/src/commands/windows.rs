@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering as AtomicOrdering};
 use std::sync::Mutex;
 
 use sea_orm::DatabaseConnection;
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::app_error::AppCommandError;
 use crate::db::service::{app_metadata_service, conversation_service, tab_service};
@@ -1018,6 +1018,14 @@ const PET_HOVER_LEAVE_EVENT: &str = "pet://hover-leave";
 const PET_BASE_WIDTH: f64 = 192.0;
 const PET_BASE_HEIGHT: f64 = 208.0;
 
+/// Process-global "cursor is currently inside the pet window" flag, owned by
+/// the hover watcher but readable/writable by the context-menu command so
+/// that dismissing the native menu can force a fresh `enter` event. Without
+/// this, the cursor never appears to "leave" while the menu is up — the
+/// watcher's transition detector then misses the post-dismiss enter and
+/// the user has to wiggle off-pet-and-back to re-trigger waving.
+static PET_HOVER_WAS_INSIDE: AtomicBool = AtomicBool::new(false);
+
 /// Apply the pet-window-specific platform style. Deliberately separate from
 /// `apply_platform_window_style`: that helper sets a solid background color
 /// for the main / settings / git windows, which would defeat the
@@ -1140,7 +1148,10 @@ fn spawn_pet_hover_watcher(app: AppHandle) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(80));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut was_inside = false;
+        // Start fresh: prior pet sessions may have left the flag set to
+        // true, and we must guarantee an enter event next time the cursor
+        // actually crosses the bounds.
+        PET_HOVER_WAS_INSIDE.store(false, AtomicOrdering::Relaxed);
         let mut bounds: Option<(f64, f64, f64, f64)> = None;
         let mut ticks_since_refresh: u8 = BOUNDS_REFRESH_TICKS;
         loop {
@@ -1175,14 +1186,17 @@ fn spawn_pet_hover_watcher(app: AppHandle) {
             let Ok(cursor) = app.cursor_position() else {
                 continue;
             };
-            let inside =
-                cursor.x >= x_min && cursor.x < x_max && cursor.y >= y_min && cursor.y < y_max;
+            let inside = cursor.x >= x_min
+                && cursor.x < x_max
+                && cursor.y >= y_min
+                && cursor.y < y_max;
+            let was_inside = PET_HOVER_WAS_INSIDE.load(AtomicOrdering::Relaxed);
             if inside && !was_inside {
                 let _ = app.emit(PET_HOVER_ENTER_EVENT, ());
             } else if !inside && was_inside {
                 let _ = app.emit(PET_HOVER_LEAVE_EVENT, ());
             }
-            was_inside = inside;
+            PET_HOVER_WAS_INSIDE.store(inside, AtomicOrdering::Relaxed);
         }
     });
 }
@@ -1231,6 +1245,153 @@ pub async fn pet_window_record_position(
     )
     .await?;
     Ok(())
+}
+
+// ─── Pet right-click context menu (native) ──────────────────────────────
+//
+// The pet window is intentionally tiny (a single sprite frame × user scale,
+// e.g. 144×156 logical px at 0.75x). An HTML-rendered popup gets clipped to
+// those bounds — items don't fit, and the user can't click "outside" because
+// there is no outside inside the window. Popping a real OS menu via Tauri's
+// `popup_menu_at` sidesteps the clip entirely and gets us native dismiss
+// (Escape, click-elsewhere) for free. Item ids carry the action; the global
+// `on_menu_event` listener wired up in `lib.rs` dispatches them.
+
+/// Stable id namespace for pet menu items.
+pub const PET_MENU_ID_PREFIX: &str = "pet:";
+pub const PET_MENU_ID_OPEN_MANAGER: &str = "pet:open_manager";
+pub const PET_MENU_ID_CLOSE: &str = "pet:close";
+pub const PET_MENU_SCALE_PREFIX: &str = "pet:scale:";
+/// Selectable scale steps. Display label is locale-independent (just digits +
+/// "×"), so we don't translate it. The id `suffix` survives a round-trip
+/// through the OS menu and back into our event dispatcher.
+const PET_MENU_SCALE_STEPS: &[(f64, &str, &str)] = &[
+    (0.5, "0.5×", "05"),
+    (0.75, "0.75×", "075"),
+    (1.0, "1×", "1"),
+    (1.5, "1.5×", "15"),
+    (2.0, "2×", "2"),
+];
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PetMenuLabels {
+    pub scale: String,
+    pub open_manager: String,
+    pub close: String,
+}
+
+/// Map a menu item id back to its scale value. Used by the global menu event
+/// dispatcher in `lib.rs` so the suffix→value table lives in one place.
+pub fn pet_menu_scale_from_id(id: &str) -> Option<f64> {
+    let suffix = id.strip_prefix(PET_MENU_SCALE_PREFIX)?;
+    PET_MENU_SCALE_STEPS
+        .iter()
+        .find_map(|(value, _, s)| if *s == suffix { Some(*value) } else { None })
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn pet_show_context_menu(
+    app: AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    labels: PetMenuLabels,
+    x: f64,
+    y: f64,
+) -> Result<(), AppCommandError> {
+    use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem, PredefinedMenuItem};
+
+    let pet_window = app
+        .get_webview_window(PET_WINDOW_LABEL)
+        .ok_or_else(|| AppCommandError::window("Pet window not open", String::new()))?;
+
+    let config = crate::commands::pet::pet_get_settings_core(&db.conn).await?;
+    let current = config.scale;
+
+    let menu_err =
+        |stage: &str, e: tauri::Error| AppCommandError::window(stage, e.to_string());
+
+    // Disabled header acts as a "Scale" section label. macOS renders this as
+    // dimmed gray text, Linux/Windows as a non-clickable item — close enough
+    // to a section heading without depending on platform-specific section
+    // APIs that don't exist in Tauri's cross-platform menu wrapper.
+    let header = MenuItem::with_id(
+        &app,
+        format!("{PET_MENU_ID_PREFIX}header"),
+        &labels.scale,
+        false,
+        None::<&str>,
+    )
+    .map_err(|e| menu_err("Failed to build pet menu header", e))?;
+    let sep1 = PredefinedMenuItem::separator(&app)
+        .map_err(|e| menu_err("Failed to build pet menu separator", e))?;
+    let sep2 = PredefinedMenuItem::separator(&app)
+        .map_err(|e| menu_err("Failed to build pet menu separator", e))?;
+
+    let mut scale_items = Vec::with_capacity(PET_MENU_SCALE_STEPS.len());
+    for (value, label, suffix) in PET_MENU_SCALE_STEPS {
+        let id = format!("{PET_MENU_SCALE_PREFIX}{suffix}");
+        let checked = (current - *value).abs() < 0.01;
+        let item = CheckMenuItem::with_id(&app, id, *label, true, checked, None::<&str>)
+            .map_err(|e| menu_err("Failed to build pet menu scale item", e))?;
+        scale_items.push(item);
+    }
+
+    let open_mgr = MenuItem::with_id(
+        &app,
+        PET_MENU_ID_OPEN_MANAGER,
+        &labels.open_manager,
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| menu_err("Failed to build pet menu manager item", e))?;
+    let close_item = MenuItem::with_id(
+        &app,
+        PET_MENU_ID_CLOSE,
+        &labels.close,
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| menu_err("Failed to build pet menu close item", e))?;
+
+    let mut builder = MenuBuilder::new(&app).item(&header).item(&sep1);
+    for item in &scale_items {
+        builder = builder.item(item);
+    }
+    let menu = builder
+        .item(&sep2)
+        .item(&open_mgr)
+        .item(&close_item)
+        .build()
+        .map_err(|e| menu_err("Failed to build pet menu", e))?;
+
+    pet_window
+        .popup_menu_at(&menu, LogicalPosition::new(x, y))
+        .map_err(|e| menu_err("Failed to popup pet menu", e))?;
+
+    // Hover transition state needs a manual reset after the menu
+    // dismisses — see `reset_pet_hover_after_native_menu`'s docs.
+    reset_pet_hover_after_native_menu();
+
+    Ok(())
+}
+
+/// Force the hover watcher to re-emit `enter` next tick if the cursor
+/// is still over the pet.
+///
+/// `popup_menu_at` is modal on macOS / Windows, so this runs strictly
+/// after the user has dismissed the menu. The cursor almost certainly
+/// never appeared to leave the pet window from the watcher's view —
+/// right-click happens *at* the pet, and the OS menu is just an
+/// overlay sitting on top, so the polled cursor stays inside the
+/// window's bounds the whole time. Without this reset, the watcher's
+/// `was_inside == true` flag suppresses the next genuine hover-enter
+/// and the wave animation silently stops working until the user moves
+/// off-pet and back. Storing `false` makes the very next 80 ms tick
+/// re-emit `enter` if the cursor is still over the pet, restoring
+/// waving on the spot.
+fn reset_pet_hover_after_native_menu() {
+    PET_HOVER_WAS_INSIDE.store(false, AtomicOrdering::Relaxed);
 }
 
 /// Store the current zoom level and persist it to DB so the next launch
