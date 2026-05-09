@@ -1,3 +1,4 @@
+import { buildWorkspaceBootstrapUrl } from "@/contexts/tab-shared"
 import { getTransport } from "./transport"
 import type {
   AgentType,
@@ -1197,18 +1198,138 @@ export interface OpenConversationWindowResult {
   focusedExisting: boolean
 }
 
-export async function openConversationWindow(
-  conversationId: number
-): Promise<OpenConversationWindowResult> {
-  if (getTransport().isDesktop()) {
-    return getTransport().call("open_conversation_window", { conversationId })
+export type WorkspaceWindowOpenStrategy = "reuse-secondary" | "force-new-window"
+
+export type WorkspaceWindowOpenTarget =
+  | {
+      kind: "conversation"
+      folderId: number
+      conversationId: number
+      agentType: AgentType
+    }
+  | {
+      kind: "draft"
+      folderId: number
+      workingDir?: string | null
+      agentType?: AgentType | null
+    }
+
+export async function openWorkspaceWindow(
+  target: WorkspaceWindowOpenTarget,
+  strategy: WorkspaceWindowOpenStrategy
+): Promise<OpenConversationWindowResult | void> {
+  if (target.kind === "conversation") {
+    const forceNewWindow = strategy === "force-new-window"
+    if (getTransport().isDesktop()) {
+      return getTransport().call("open_conversation_window", {
+        conversationId: target.conversationId,
+        forceNewWindow,
+      })
+    }
+
+    const path = buildWorkspaceBootstrapUrl({
+      kind: "conversation",
+      folderId: target.folderId,
+      conversationId: target.conversationId,
+      agentType: target.agentType,
+    })
+    window.open(path, `conversation-${target.conversationId}`)
+    return { focusedExisting: false }
   }
-  const result = await getTransport().call<{ path: string }>(
-    "open_conversation_window",
-    { conversationId }
+
+  const path = buildWorkspaceBootstrapUrl({
+    kind: "draft",
+    folderId: target.folderId,
+    workingDir: target.workingDir ?? null,
+    agentType: target.agentType ?? null,
+  })
+  window.open(path, `conversation-draft-${target.folderId}`)
+}
+
+export async function focusConversationWindowIfOpen(
+  conversationId: number
+): Promise<boolean> {
+  if (!getTransport().isDesktop()) {
+    return false
+  }
+  return getTransport().call("focus_conversation_window_if_open", {
+    conversationId,
+  })
+}
+
+export async function openConversationWindow(
+  conversationId: number,
+  params?: {
+    folderId?: number
+    agentType?: AgentType
+    forceNewWindow?: boolean
+  }
+): Promise<OpenConversationWindowResult> {
+  if (params?.folderId == null || params?.agentType == null) {
+    if (getTransport().isDesktop()) {
+      return getTransport().call("open_conversation_window", {
+        conversationId,
+        forceNewWindow: params?.forceNewWindow ?? false,
+      })
+    }
+    const result = await getTransport().call<{ path: string }>(
+      "open_conversation_window",
+      {
+        conversationId,
+        forceNewWindow: params?.forceNewWindow ?? false,
+      }
+    )
+    window.open(result.path, `conversation-${conversationId}`)
+    return { focusedExisting: false }
+  }
+
+  return (await openWorkspaceWindow(
+    {
+      kind: "conversation",
+      folderId: params.folderId,
+      conversationId,
+      agentType: params.agentType,
+    },
+    params.forceNewWindow ? "force-new-window" : "reuse-secondary"
+  )) as OpenConversationWindowResult
+}
+
+export async function openDraftConversationWindow(params: {
+  folderId: number
+  workingDir?: string | null
+  agentType?: AgentType | null
+}): Promise<void> {
+  await openWorkspaceWindow(
+    {
+      kind: "draft",
+      folderId: params.folderId,
+      workingDir: params.workingDir ?? null,
+      agentType: params.agentType ?? null,
+    },
+    "force-new-window"
   )
-  window.open(result.path, `conversation-${conversationId}`)
-  return { focusedExisting: false }
+}
+
+export async function registerConversationWindowOwner(
+  conversationId: number
+): Promise<void> {
+  if (!getTransport().isDesktop()) {
+    return
+  }
+  await getTransport().call("register_conversation_window_owner", {
+    conversationId,
+  })
+}
+
+export async function syncConversationWindowOwnership(
+  conversationIds: number[]
+): Promise<void> {
+  if (!getTransport().isDesktop()) {
+    return
+  }
+  await getTransport().call("sync_conversation_window_ownership", {
+    conversationIds,
+  })
 }
 
 export async function getSystemConversationOpenSettings(): Promise<{

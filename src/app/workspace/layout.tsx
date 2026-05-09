@@ -50,6 +50,7 @@ import { FileWorkspaceTabBar } from "@/components/files/file-workspace-tab-bar"
 import { FileWorkspacePanel } from "@/components/files/file-workspace-panel"
 import { AppToaster } from "@/components/ui/app-toaster"
 import { DeepLinkBootstrap } from "@/components/workspace/deep-link-bootstrap"
+import { parseWorkspaceBootstrap } from "@/contexts/tab-shared"
 import {
   ResizableHandle,
   ResizablePanel,
@@ -770,6 +771,14 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
 }
 
 function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
+  const bootstrapState = useMemo(
+    () =>
+      parseWorkspaceBootstrap(
+        typeof window === "undefined" ? "" : window.location.search
+      ),
+    []
+  )
+
   return (
     <AppWorkspaceProvider>
       <ActiveFolderProvider>
@@ -779,8 +788,13 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
               <AcpConnectionsProvider>
                 <ConversationStatusEventBridge />
                 <ConversationRuntimeProvider>
-                  <WorkspaceProvider>
-                    <TabProvider>
+                  <WorkspaceProvider
+                    persistenceMode={bootstrapState.tabPersistenceMode}
+                  >
+                    <TabProvider
+                      persistenceMode={bootstrapState.tabPersistenceMode}
+                      bootstrapState={bootstrapState}
+                    >
                       <WorkspaceDocumentTitle />
                       <TabKeysSync />
                       <DeepLinkBootstrap />

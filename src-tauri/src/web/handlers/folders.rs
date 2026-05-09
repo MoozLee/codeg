@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
 use crate::commands::folders as folder_commands;
-use crate::db::service::folder_service;
+use crate::db::service::{conversation_service, folder_service};
 use crate::models::*;
 
 #[derive(Deserialize)]
@@ -313,10 +313,18 @@ pub struct OpenConversationWindowParams {
 }
 
 pub async fn open_conversation_window(
+    Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<OpenConversationWindowParams>,
 ) -> Result<Json<SettingsNavigationResult>, AppCommandError> {
+    let summary = conversation_service::get_by_id(&state.db.conn, params.conversation_id)
+        .await
+        .map_err(AppCommandError::from)?;
+
     Ok(Json(SettingsNavigationResult {
-        path: format!("/conversation?conversationId={}", params.conversation_id),
+        path: format!(
+            "/workspace?tabPersistence=window-local&open=conversation&folderId={}&conversationId={}&agent={}",
+            summary.folder_id, summary.id, summary.agent_type
+        ),
     }))
 }
 

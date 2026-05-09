@@ -2028,12 +2028,17 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                   cfgConn.connectionId,
                   resolved.id,
                   resolved.kind.current_value
-                ).catch((err: unknown) =>
+                ).catch((err: unknown) => {
+                  const message =
+                    err instanceof Error ? err.message : String(err)
+                  if (message.includes("connection not found")) {
+                    return
+                  }
                   console.error(
                     "[ACP] Failed to sync saved config option to backend:",
                     err
                   )
-                )
+                })
               }
             }
           }

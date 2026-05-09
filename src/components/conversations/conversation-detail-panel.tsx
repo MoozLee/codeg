@@ -39,7 +39,12 @@ import { ConversationShell } from "@/components/chat/conversation-shell"
 import { AgentSelector } from "@/components/chat/agent-selector"
 import { ChatInput } from "@/components/chat/chat-input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { acpFork, createConversation, openSettingsWindow } from "@/lib/api"
+import {
+  acpFork,
+  createConversation,
+  openSettingsWindow,
+  openWorkspaceWindow,
+} from "@/lib/api"
 import { useConversationRuntime } from "@/contexts/conversation-runtime-context"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import {
@@ -1299,6 +1304,18 @@ export function ConversationDetailPanel({
     openNewConversationTab(folder.id, folder.path)
   }, [allowNewConversation, folder, openNewConversationTab])
 
+  const handleNewConversationInWindow = useCallback(() => {
+    if (!allowNewConversation || !folder) return
+    void openWorkspaceWindow(
+      {
+        kind: "draft",
+        folderId: folder.id,
+        workingDir: folder.path,
+      },
+      "force-new-window"
+    )
+  }, [allowNewConversation, folder])
+
   const handleCloseActiveTab = useCallback(() => {
     if (!activeTabId) return
     closeTab(activeTabId)
@@ -1479,6 +1496,13 @@ export function ConversationDetailPanel({
         <ContextMenuItem
           disabled={!allowNewConversation || !folder?.path}
           onSelect={handleNewConversation}
+        >
+          <Plus className="h-4 w-4" />
+          {t("newConversation")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!allowNewConversation || !folder?.path}
+          onSelect={handleNewConversationInWindow}
         >
           <Plus className="h-4 w-4" />
           {t("newConversation")}
