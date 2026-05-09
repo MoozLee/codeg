@@ -1,7 +1,8 @@
 "use client"
 
 import { Fragment } from "react"
-import { ChevronDown } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { Check, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -20,14 +21,42 @@ import type { SessionConfigOptionInfo } from "@/lib/types"
 
 interface SessionConfigSelectorProps {
   option: SessionConfigOptionInfo
-  onSelect: (configId: string, valueId: string) => void
+  onSelect: (configId: string, value: string | boolean) => void
 }
 
 export function SessionConfigSelector({
   option,
   onSelect,
 }: SessionConfigSelectorProps) {
-  if (option.kind.type !== "select") return null
+  const t = useTranslations("Folder.chat.messageInput")
+
+  if (option.kind.type === "boolean") {
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger title={option.description ?? option.name}>
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {option.name}
+          </span>
+          <span className="max-w-[10rem] shrink-0 truncate text-xs text-muted-foreground">
+            {option.kind.current_value ? t("booleanOn") : t("booleanOff")}
+          </span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-40">
+          <DropdownMenuRadioGroup
+            value={option.kind.current_value ? "true" : "false"}
+            onValueChange={(value) => onSelect(option.id, value === "true")}
+          >
+            <DropdownMenuRadioItem value="true">
+              {t("booleanOn")}
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="false">
+              {t("booleanOff")}
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    )
+  }
 
   const allOptions =
     option.kind.groups.length > 0
@@ -95,7 +124,27 @@ export function InlineSessionConfigSelector({
   option,
   onSelect,
 }: SessionConfigSelectorProps) {
-  if (option.kind.type !== "select") return null
+  const t = useTranslations("Folder.chat.messageInput")
+
+  if (option.kind.type === "boolean") {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        title={option.description ?? option.name}
+        className="min-w-0 text-muted-foreground"
+        onClick={() => onSelect(option.id, !option.kind.current_value)}
+      >
+        <span className="max-w-[10rem] truncate">{option.name}</span>
+        <span className="text-xs">
+          {option.kind.current_value ? t("booleanOn") : t("booleanOff")}
+        </span>
+        {option.kind.current_value ? (
+          <Check className="size-4 shrink-0" />
+        ) : null}
+      </Button>
+    )
+  }
 
   const allOptions =
     option.kind.groups.length > 0

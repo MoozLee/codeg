@@ -118,8 +118,8 @@ pub async fn update_system_font_settings(
     Json(params): Json<UpdateFontSettingsParams>,
 ) -> Result<Json<SystemFontSettings>, AppCommandError> {
     let db = &state.db;
-    let settings = settings_commands::update_system_font_settings_core(&db.conn, params.settings)
-        .await?;
+    let settings =
+        settings_commands::update_system_font_settings_core(&db.conn, params.settings).await?;
     Ok(Json(settings))
 }
 

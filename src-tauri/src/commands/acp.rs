@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::acp::binary_cache;
+#[cfg(feature = "tauri-runtime")]
+use crate::acp::connection::SessionConfigCommandValue;
 use crate::acp::error::AcpError;
 use crate::acp::manager::ConnectionManager;
 use crate::acp::opencode_plugins::{self, PluginCheckSummary};
@@ -1989,6 +1991,12 @@ fn trim_non_empty(value: Option<String>) -> Option<String> {
     })
 }
 
+fn has_non_empty_env_value(env: &BTreeMap<String, String>, key: &str) -> bool {
+    env.get(key)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
 /// Primary env var keys for each agent type: (api_base_url, api_key, model).
 /// Shared by runtime env resolution, model-provider cascade, and config patching.
 fn agent_env_keys(agent_type: AgentType) -> (&'static str, &'static str, &'static str) {
@@ -2015,6 +2023,53 @@ fn serialize_env_map(env: &BTreeMap<String, String>) -> Result<Option<String>, A
     }
 }
 
+fn context_config_debug_enabled() -> bool {
+    matches!(std::env::var("CODEG_DEBUG_CONTEXT_CONFIG"), Ok(value) if value == "1")
+}
+
+fn is_context_config_key(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase();
+    ["model", "compact", "compaction", "context"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+}
+
+fn is_secret_config_key(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase();
+    ["key", "token", "secret", "password", "credential", "auth"]
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+}
+
+fn sanitized_context_env(env: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    env.iter()
+        .filter(|(key, _)| is_context_config_key(key) && !is_secret_config_key(key))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn sanitized_context_json_fields(value: &serde_json::Value) -> BTreeMap<String, serde_json::Value> {
+    let Some(object) = value.as_object() else {
+        return BTreeMap::new();
+    };
+    object
+        .iter()
+        .filter(|(key, value)| {
+            is_context_config_key(key)
+                && !is_secret_config_key(key)
+                && (value.is_string() || value.is_number() || value.is_boolean())
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn debug_context_config(label: &str, agent_type: AgentType, payload: serde_json::Value) {
+    if !context_config_debug_enabled() {
+        return;
+    }
+    eprintln!("[context-config] {label} agent_type={agent_type:?} {payload}");
+}
+
 pub(crate) fn build_runtime_env_from_setting(
     agent_type: AgentType,
     setting: Option<&crate::db::entities::agent_setting::Model>,
@@ -2026,9 +2081,38 @@ pub(crate) fn build_runtime_env_from_setting(
         .unwrap_or_default();
 
     let Some(raw_config_json) = local_config_json else {
+        debug_context_config(
+            "build_runtime_env",
+            agent_type,
+            serde_json::json!({
+                "root_model": null,
+                "config_env_fields": {},
+                "final_runtime_env_fields": sanitized_context_env(&merged),
+            }),
+        );
         return merged;
     };
+    let parsed_config_value = serde_json::from_str::<serde_json::Value>(raw_config_json).ok();
+    let root_model = parsed_config_value
+        .as_ref()
+        .and_then(|value| value.get("model"))
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string);
+    let config_env_debug = parsed_config_value
+        .as_ref()
+        .and_then(|value| value.get("env"))
+        .map(sanitized_context_json_fields)
+        .unwrap_or_default();
     let Ok(config) = serde_json::from_str::<AgentRuntimeConfig>(raw_config_json) else {
+        debug_context_config(
+            "build_runtime_env_parse_failed",
+            agent_type,
+            serde_json::json!({
+                "root_model": root_model,
+                "config_env_fields": config_env_debug,
+                "final_runtime_env_fields": sanitized_context_env(&merged),
+            }),
+        );
         return merged;
     };
 
@@ -2047,11 +2131,21 @@ pub(crate) fn build_runtime_env_from_setting(
     if let Some(value) = trim_non_empty(config.api_key) {
         merged.insert(api_key_key.to_string(), value);
     }
-    if agent_type != AgentType::ClaudeCode {
-        if let Some(value) = trim_non_empty(config.model) {
+    if let Some(value) = trim_non_empty(config.model) {
+        if !has_non_empty_env_value(&merged, model_key) {
             merged.insert(model_key.to_string(), value);
         }
     }
+
+    debug_context_config(
+        "build_runtime_env",
+        agent_type,
+        serde_json::json!({
+            "root_model": root_model,
+            "config_env_fields": config_env_debug,
+            "final_runtime_env_fields": sanitized_context_env(&merged),
+        }),
+    );
 
     merged
 }
@@ -2348,11 +2442,21 @@ pub async fn acp_set_mode(
 pub async fn acp_set_config_option(
     connection_id: String,
     config_id: String,
-    value_id: String,
+    value_id: Option<String>,
+    value: Option<bool>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
+    let value = match (value_id, value) {
+        (Some(value_id), _) => SessionConfigCommandValue::ValueId(value_id),
+        (None, Some(value)) => SessionConfigCommandValue::Boolean(value),
+        (None, None) => {
+            return Err(AcpError::protocol(
+                "Missing session config option value".to_string(),
+            ));
+        }
+    };
     manager
-        .set_config_option(&connection_id, config_id, value_id)
+        .set_config_option(&connection_id, config_id, value)
         .await
 }
 
@@ -2482,11 +2586,39 @@ pub(crate) async fn acp_get_agent_status_core(
         }
     };
 
+    let local_config_json = load_agent_local_config_json(agent_type);
+    let runtime_env =
+        build_runtime_env_from_setting(agent_type, setting.as_ref(), local_config_json.as_deref());
+
+    let config_debug = local_config_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+    debug_context_config(
+        "agent_status_return",
+        agent_type,
+        serde_json::json!({
+            "env_fields": sanitized_context_env(&runtime_env),
+            "root_config_fields": config_debug
+                .as_ref()
+                .map(sanitized_context_json_fields)
+                .unwrap_or_default(),
+            "config_env_fields": config_debug
+                .as_ref()
+                .and_then(|value| value.get("env"))
+                .map(sanitized_context_json_fields)
+                .unwrap_or_default(),
+        }),
+    );
+
     Ok(crate::acp::types::AcpAgentStatus {
         agent_type,
         available,
         enabled: setting.map(|m| m.enabled).unwrap_or(true),
         installed_version,
+        env: runtime_env,
+        config_json: local_config_json,
+        config_file_path: agent_local_config_path(agent_type)
+            .map(|path| path.display().to_string()),
     })
 }
 
@@ -2608,6 +2740,26 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
         } else {
             None
         };
+
+        let config_debug = local_config_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+        debug_context_config(
+            "agent_list_return",
+            agent_type,
+            serde_json::json!({
+                "env_fields": sanitized_context_env(&env),
+                "root_config_fields": config_debug
+                    .as_ref()
+                    .map(sanitized_context_json_fields)
+                    .unwrap_or_default(),
+                "config_env_fields": config_debug
+                    .as_ref()
+                    .and_then(|value| value.get("env"))
+                    .map(sanitized_context_json_fields)
+                    .unwrap_or_default(),
+            }),
+        );
 
         agents.push(AcpAgentInfo {
             agent_type,
@@ -3820,20 +3972,26 @@ enabled = false
     use super::*;
 
     fn unique_test_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("codeg-acp-{name}-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("codeg-acp-{name}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("create test directory");
         dir
     }
 
     #[test]
     fn parses_npm_global_prefix_stdout() {
-        let prefix = npm_global_prefix_from_stdout(b"npm-prefix
-");
+        let prefix = npm_global_prefix_from_stdout(
+            b"npm-prefix
+",
+        );
         assert_eq!(prefix.as_deref(), Some(Path::new("npm-prefix")));
 
-        assert_eq!(npm_global_prefix_from_stdout(b"
-"), None);
+        assert_eq!(
+            npm_global_prefix_from_stdout(
+                b"
+"
+            ),
+            None
+        );
     }
 
     #[test]
@@ -3893,5 +4051,4 @@ enabled = false
         assert_eq!(resolved, None);
         let _ = std::fs::remove_dir_all(prefix);
     }
-
 }

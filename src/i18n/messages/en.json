@@ -1041,7 +1041,70 @@
         "output": "Output",
         "cacheRead": "Cache Read",
         "cacheWrite": "Cache Write",
-        "total": "Total"
+        "total": "Total",
+        "contextSource": "Usage source",
+        "contextMaxSource": "Max source",
+        "source": {
+          "live": "Live usage",
+          "history": "History stats"
+        },
+        "maxSource": {
+          "live": "Live/runtime max",
+          "configured": "Configured window",
+          "history": "History stats",
+          "unknown": "Unknown"
+        },
+        "contextLevel": {
+          "unknown": "Context usage is unknown.",
+          "normal": "Context usage is normal.",
+          "high": "Context usage is high. Consider compacting soon.",
+          "critical": "Context window is near the limit."
+        },
+        "contextManagement": "Context Management",
+        "agentType": "Agent",
+        "connectionId": "Connection ID",
+        "sessionId": "Session ID",
+        "configFile": "Config file",
+        "configuredModel": "Configured model",
+        "configuredModelSource": "Model source",
+        "runtimeModel": "Runtime model",
+        "selectorModel": "ACP selector model",
+        "safeRuntimeFields": "Runtime config fields",
+        "noSafeRuntimeFields": "No safe model/context fields found.",
+        "reloadRuntimeConfig": "Reconnect Agent to reload config",
+        "reloadRuntimeConfigHint": "Disconnect and reconnect the current Agent to read the latest runtime configuration. The session id is preserved when available.",
+        "unknown": "Unknown",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "autoCompaction": "Auto-compaction",
+        "autoCompactionThreshold": "Trigger threshold",
+        "configuredContextWindowMax": "Configured window max",
+        "compactionSupport": "Compaction support",
+        "compactionStatus": "Compaction status",
+        "configuredModelSourceState": {
+          "agent_env": "Runtime env",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root config",
+          "selector": "ACP selector fallback"
+        },
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "Runtime env",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root config"
+        },
+        "compactionSupportState": {
+          "unknown": "Unknown",
+          "unsupported": "Unsupported",
+          "agent_managed": "Agent-managed"
+        },
+        "compactionStatusState": {
+          "idle": "Idle",
+          "triggered": "Triggered",
+          "running": "Running",
+          "completed": "Completed",
+          "failed": "Failed"
+        },
+        "appSideCompactionInactive": "Codeg app-side transcript compaction is not active."
       }
     },
     "auxPanel": {
@@ -1737,7 +1800,9 @@
         "expertSkills": "Expert skills",
         "expertsEmptyForAgent": "This agent has no enabled experts. Enable them in Settings > Experts.",
         "slashSearchPlaceholder": "Search commands...",
-        "slashSearchEmpty": "No matching commands"
+        "slashSearchEmpty": "No matching commands",
+        "booleanOn": "On",
+        "booleanOff": "Off"
       },
       "messageQueue": {
         "addToQueue": "Queue message",

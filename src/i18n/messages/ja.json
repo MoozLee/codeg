@@ -1041,7 +1041,70 @@
         "output": "出力",
         "cacheRead": "キャッシュ読み取り",
         "cacheWrite": "キャッシュ書き込み",
-        "total": "合計"
+        "total": "合計",
+        "contextSource": "使用量ソース",
+        "source": {
+          "live": "ライブ使用量",
+          "history": "履歴統計"
+        },
+        "contextLevel": {
+          "unknown": "コンテキスト使用量は不明です。",
+          "normal": "コンテキスト使用量は正常です。",
+          "high": "コンテキスト使用量が高くなっています。",
+          "critical": "コンテキストウィンドウが上限に近づいています。"
+        },
+        "contextManagement": "コンテキスト管理",
+        "configuredModel": "設定モデル",
+        "runtimeModel": "実行モデル",
+        "unknown": "不明",
+        "enabled": "有効",
+        "disabled": "無効",
+        "autoCompaction": "自動圧縮",
+        "autoCompactionThreshold": "トリガーしきい値",
+        "compactionSupport": "圧縮サポート",
+        "compactionStatus": "圧縮状態",
+        "compactionSupportState": {
+          "unknown": "不明",
+          "unsupported": "未対応",
+          "agent_managed": "Agent 管理"
+        },
+        "compactionStatusState": {
+          "idle": "アイドル",
+          "triggered": "トリガー済み",
+          "running": "実行中",
+          "completed": "完了",
+          "failed": "失敗"
+        },
+        "appSideCompactionInactive": "Codeg のアプリ側 transcript 圧縮は有効ではありません。",
+        "agentType": "Agent",
+        "connectionId": "Connection ID",
+        "sessionId": "Session ID",
+        "configFile": "Config file",
+        "configuredModelSource": "Model source",
+        "selectorModel": "ACP selector model",
+        "safeRuntimeFields": "Runtime config fields",
+        "noSafeRuntimeFields": "No safe model/context fields found.",
+        "reloadRuntimeConfig": "Reconnect Agent to reload config",
+        "reloadRuntimeConfigHint": "Disconnect and reconnect the current Agent to read the latest runtime configuration. The session id is preserved when available.",
+        "configuredModelSourceState": {
+          "agent_env": "Runtime env",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root config",
+          "selector": "ACP selector fallback"
+        },
+        "contextMaxSource": "上限ソース",
+        "maxSource": {
+          "live": "ライブ/ランタイム上限",
+          "configured": "設定済みウィンドウ",
+          "history": "履歴統計",
+          "unknown": "不明"
+        },
+        "configuredContextWindowMax": "設定済みウィンドウ上限",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "ランタイム環境変数",
+          "agent_config_env": "config.env",
+          "agent_root_config": "ルート設定"
+        }
       }
     },
     "auxPanel": {
@@ -1737,7 +1800,9 @@
         "expertSkills": "エキスパートスキル",
         "expertsEmptyForAgent": "このエージェントで有効なエキスパートはありません。「設定 > エキスパート」から有効にしてください。",
         "slashSearchPlaceholder": "コマンドを検索...",
-        "slashSearchEmpty": "一致するコマンドがありません"
+        "slashSearchEmpty": "一致するコマンドがありません",
+        "booleanOn": "オン",
+        "booleanOff": "オフ"
       },
       "messageQueue": {
         "addToQueue": "キューに追加",

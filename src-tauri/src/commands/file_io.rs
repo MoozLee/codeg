@@ -15,10 +15,7 @@ use crate::app_error::AppCommandError;
 /// lets the user pick an existing folder + filename).
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn save_binary_file(
-    path: String,
-    data_base64: String,
-) -> Result<(), AppCommandError> {
+pub async fn save_binary_file(path: String, data_base64: String) -> Result<(), AppCommandError> {
     let bytes = STANDARD
         .decode(data_base64.as_bytes())
         .map_err(|e| AppCommandError::invalid_input(format!("invalid base64 payload: {e}")))?;

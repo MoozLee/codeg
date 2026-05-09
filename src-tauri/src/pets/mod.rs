@@ -192,9 +192,8 @@ fn read_manifest(dir: &Path) -> Result<PetManifest, AppCommandError> {
 fn write_manifest_atomic(dir: &Path, manifest: &PetManifest) -> Result<(), AppCommandError> {
     let final_path = dir.join(PET_MANIFEST_FILENAME);
     let tmp_path = dir.join(format!("{PET_MANIFEST_FILENAME}.tmp"));
-    let json = serde_json::to_string_pretty(manifest).map_err(|e| {
-        AppCommandError::io_error(format!("Failed to serialize pet manifest: {e}"))
-    })?;
+    let json = serde_json::to_string_pretty(manifest)
+        .map_err(|e| AppCommandError::io_error(format!("Failed to serialize pet manifest: {e}")))?;
     {
         let mut f = fs::File::create(&tmp_path).map_err(AppCommandError::io)?;
         f.write_all(json.as_bytes()).map_err(AppCommandError::io)?;
@@ -245,20 +244,13 @@ pub fn list_pets() -> Result<Vec<PetSummary>, AppCommandError> {
         let manifest = match read_manifest(&path) {
             Ok(m) => m,
             Err(err) => {
-                eprintln!(
-                    "[Pets] skipping {}: {}",
-                    path.display(),
-                    err.message
-                );
+                eprintln!("[Pets] skipping {}: {}", path.display(), err.message);
                 continue;
             }
         };
         let spritesheet = path.join(SPRITESHEET_FILENAME);
         if !spritesheet.exists() {
-            eprintln!(
-                "[Pets] skipping {}: spritesheet missing",
-                path.display()
-            );
+            eprintln!("[Pets] skipping {}: spritesheet missing", path.display());
             continue;
         }
         out.push(PetSummary {
@@ -268,7 +260,11 @@ pub fn list_pets() -> Result<Vec<PetSummary>, AppCommandError> {
             spritesheet_path: spritesheet,
         });
     }
-    out.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+    out.sort_by(|a, b| {
+        a.display_name
+            .to_lowercase()
+            .cmp(&b.display_name.to_lowercase())
+    });
     Ok(out)
 }
 
@@ -504,8 +500,7 @@ mod tests {
 
     #[test]
     fn validate_spritesheet_accepts_correct_image() {
-        let mut img =
-            image::RgbaImage::new(SPRITE_SHEET_WIDTH, SPRITE_SHEET_HEIGHT);
+        let mut img = image::RgbaImage::new(SPRITE_SHEET_WIDTH, SPRITE_SHEET_HEIGHT);
         // Random-ish pattern to ensure we clear MIN_SPRITE_BYTES even after
         // PNG compresses it. Writing all-transparent zeroes would otherwise
         // shrink to a tiny payload.

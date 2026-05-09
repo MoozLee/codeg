@@ -126,9 +126,14 @@ export async function acpSetMode(
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ): Promise<void> {
-  return invoke("acp_set_config_option", { connectionId, configId, valueId })
+  return invoke("acp_set_config_option", {
+    connectionId,
+    configId,
+    valueId: typeof value === "string" ? value : null,
+    value: typeof value === "boolean" ? value : null,
+  })
 }
 
 export async function acpCancel(connectionId: string): Promise<void> {

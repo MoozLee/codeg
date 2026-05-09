@@ -2198,6 +2198,7 @@ function patchImportantConfigText(
     // Remove root-level apiBaseUrl/apiKey if present (legacy cleanup)
     delete config.apiBaseUrl
     delete config.apiKey
+    assignOrRemove("model", patch.model)
     assignEnv("ANTHROPIC_BASE_URL", patch.apiBaseUrl)
     assignEnv("ANTHROPIC_AUTH_TOKEN", patch.apiKey)
 

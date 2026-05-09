@@ -1041,7 +1041,70 @@
         "output": "Ausgabe",
         "cacheRead": "Cache lesen",
         "cacheWrite": "Cache schreiben",
-        "total": "Gesamt"
+        "total": "Gesamt",
+        "contextSource": "Nutzungsquelle",
+        "source": {
+          "live": "Live-Nutzung",
+          "history": "Verlaufsstatistik"
+        },
+        "contextLevel": {
+          "unknown": "Kontextnutzung ist unbekannt.",
+          "normal": "Kontextnutzung ist normal.",
+          "high": "Kontextnutzung ist hoch.",
+          "critical": "Das Kontextfenster ist nahe am Limit."
+        },
+        "contextManagement": "Kontextverwaltung",
+        "configuredModel": "Konfiguriertes Modell",
+        "runtimeModel": "Laufzeitmodell",
+        "unknown": "Unbekannt",
+        "enabled": "Aktiviert",
+        "disabled": "Deaktiviert",
+        "autoCompaction": "Automatische Kompaktierung",
+        "autoCompactionThreshold": "Auslöseschwelle",
+        "compactionSupport": "Kompaktierungsunterstützung",
+        "compactionStatus": "Kompaktierungsstatus",
+        "compactionSupportState": {
+          "unknown": "Unbekannt",
+          "unsupported": "Nicht unterstützt",
+          "agent_managed": "Agent-verwaltet"
+        },
+        "compactionStatusState": {
+          "idle": "Leerlauf",
+          "triggered": "Ausgelöst",
+          "running": "Läuft",
+          "completed": "Abgeschlossen",
+          "failed": "Fehlgeschlagen"
+        },
+        "appSideCompactionInactive": "Codeg-App-seitige Transcript-Kompaktierung ist nicht aktiv.",
+        "agentType": "Agent",
+        "connectionId": "Connection ID",
+        "sessionId": "Session ID",
+        "configFile": "Config file",
+        "configuredModelSource": "Model source",
+        "selectorModel": "ACP selector model",
+        "safeRuntimeFields": "Runtime config fields",
+        "noSafeRuntimeFields": "No safe model/context fields found.",
+        "reloadRuntimeConfig": "Reconnect Agent to reload config",
+        "reloadRuntimeConfigHint": "Disconnect and reconnect the current Agent to read the latest runtime configuration. The session id is preserved when available.",
+        "configuredModelSourceState": {
+          "agent_env": "Runtime env",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root config",
+          "selector": "ACP selector fallback"
+        },
+        "contextMaxSource": "Max-Quelle",
+        "maxSource": {
+          "live": "Live-/Runtime-Maximum",
+          "configured": "Konfiguriertes Fenster",
+          "history": "Verlaufsstatistik",
+          "unknown": "Unbekannt"
+        },
+        "configuredContextWindowMax": "Konfiguriertes Fenster-Maximum",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "Runtime-Umgebung",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root-Konfiguration"
+        }
       }
     },
     "auxPanel": {
@@ -1737,7 +1800,9 @@
         "expertSkills": "Expertenfähigkeiten",
         "expertsEmptyForAgent": "Dieser Agent hat keine aktivierten Experten. Aktivieren Sie sie unter Einstellungen > Experten.",
         "slashSearchPlaceholder": "Befehle suchen...",
-        "slashSearchEmpty": "Keine passenden Befehle"
+        "slashSearchEmpty": "Keine passenden Befehle",
+        "booleanOn": "Ein",
+        "booleanOff": "Aus"
       },
       "messageQueue": {
         "addToQueue": "Zur Warteschlange",

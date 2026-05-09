@@ -1,5 +1,7 @@
 mod acp;
-pub use acp::{idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS};
+pub use acp::{
+    idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS,
+};
 pub use network::proxy::init_proxy_from_db;
 mod app_error;
 pub mod app_state;
@@ -39,10 +41,9 @@ mod tauri_app {
     use crate::commands::{
         acp as acp_commands, chat_channel as chat_channel_commands, conversations,
         experts as experts_commands, file_io, folder_commands, folders, mcp as mcp_commands,
-        model_provider as model_provider_commands, notification, pet as pet_commands,
-        project_boot, quick_messages as quick_messages_commands, system_settings,
-        terminal as terminal_commands, version_control, windows,
-        workspace_state as workspace_state_commands,
+        model_provider as model_provider_commands, notification, pet as pet_commands, project_boot,
+        quick_messages as quick_messages_commands, system_settings, terminal as terminal_commands,
+        version_control, windows, workspace_state as workspace_state_commands,
     };
     use crate::terminal::manager::TerminalManager;
     use crate::{db, network, process, web};
@@ -189,10 +190,9 @@ mod tauri_app {
                         .inner()
                         .clone();
                     let emitter = web::event_bridge::EventEmitter::Tauri(app.handle().clone());
-                    tauri::async_runtime::spawn(crate::pet_state_mapper::pet_state_subscriber_task(
-                        broadcaster,
-                        emitter,
-                    ));
+                    tauri::async_runtime::spawn(
+                        crate::pet_state_mapper::pet_state_subscriber_task(broadcaster, emitter),
+                    );
                 }
 
                 // Spawn the LifecycleSubscriber: persists cross-connection DB state
@@ -302,8 +302,9 @@ mod tauri_app {
                     }
                     if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                         if let Some(cm) = app.try_state::<ConnectionManager>() {
-                            let disconnected =
-                                tauri::async_runtime::block_on(cm.disconnect_by_owner_window(&label));
+                            let disconnected = tauri::async_runtime::block_on(
+                                cm.disconnect_by_owner_window(&label),
+                            );
                             eprintln!(
                                 "[ACP] conversation window closing disconnected_connections={}",
                                 disconnected
@@ -322,8 +323,7 @@ mod tauri_app {
                 if label == "pet"
                     && matches!(
                         event,
-                        tauri::WindowEvent::CloseRequested { .. }
-                            | tauri::WindowEvent::Destroyed
+                        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
                     )
                 {
                     // Persist `enabled = false` so the next launch doesn't

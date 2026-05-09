@@ -1041,7 +1041,70 @@
         "output": "إخراج",
         "cacheRead": "قراءة الكاش",
         "cacheWrite": "كتابة الكاش",
-        "total": "الإجمالي"
+        "total": "الإجمالي",
+        "contextSource": "مصدر الاستخدام",
+        "source": {
+          "live": "استخدام مباشر",
+          "history": "إحصاءات تاريخية"
+        },
+        "contextLevel": {
+          "unknown": "استخدام السياق غير معروف.",
+          "normal": "استخدام السياق طبيعي.",
+          "high": "استخدام السياق مرتفع.",
+          "critical": "نافذة السياق قريبة من الحد."
+        },
+        "contextManagement": "إدارة السياق",
+        "configuredModel": "النموذج المضبوط",
+        "runtimeModel": "نموذج التشغيل",
+        "unknown": "غير معروف",
+        "enabled": "مفعّل",
+        "disabled": "معطّل",
+        "autoCompaction": "الضغط التلقائي",
+        "autoCompactionThreshold": "عتبة التشغيل",
+        "compactionSupport": "دعم الضغط",
+        "compactionStatus": "حالة الضغط",
+        "compactionSupportState": {
+          "unknown": "غير معروف",
+          "unsupported": "غير مدعوم",
+          "agent_managed": "يديره Agent"
+        },
+        "compactionStatusState": {
+          "idle": "خامل",
+          "triggered": "تم التشغيل",
+          "running": "قيد التشغيل",
+          "completed": "مكتمل",
+          "failed": "فشل"
+        },
+        "appSideCompactionInactive": "ضغط transcript من جانب Codeg غير نشط.",
+        "agentType": "Agent",
+        "connectionId": "Connection ID",
+        "sessionId": "Session ID",
+        "configFile": "Config file",
+        "configuredModelSource": "Model source",
+        "selectorModel": "ACP selector model",
+        "safeRuntimeFields": "Runtime config fields",
+        "noSafeRuntimeFields": "No safe model/context fields found.",
+        "reloadRuntimeConfig": "Reconnect Agent to reload config",
+        "reloadRuntimeConfigHint": "Disconnect and reconnect the current Agent to read the latest runtime configuration. The session id is preserved when available.",
+        "configuredModelSourceState": {
+          "agent_env": "Runtime env",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root config",
+          "selector": "ACP selector fallback"
+        },
+        "contextMaxSource": "مصدر الحد الأقصى",
+        "maxSource": {
+          "live": "حد مباشر/وقت التشغيل",
+          "configured": "نافذة مكوّنة",
+          "history": "إحصاءات السجل",
+          "unknown": "غير معروف"
+        },
+        "configuredContextWindowMax": "الحد الأقصى للنافذة المكوّنة",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "بيئة وقت التشغيل",
+          "agent_config_env": "config.env",
+          "agent_root_config": "التكوين الجذري"
+        }
       }
     },
     "auxPanel": {
@@ -1737,7 +1800,9 @@
         "expertSkills": "مهارات الخبراء",
         "expertsEmptyForAgent": "لا يحتوي هذا العميل على خبراء مفعّلين. فعّلهم من الإعدادات > الخبراء.",
         "slashSearchPlaceholder": "البحث عن الأوامر...",
-        "slashSearchEmpty": "لا توجد أوامر مطابقة"
+        "slashSearchEmpty": "لا توجد أوامر مطابقة",
+        "booleanOn": "تشغيل",
+        "booleanOff": "إيقاف"
       },
       "messageQueue": {
         "addToQueue": "إضافة للقائمة",

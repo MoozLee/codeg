@@ -139,18 +139,12 @@ pub async fn check_app_update() -> Result<Json<AppUpdateCheckResult>, AppCommand
 
 async fn fetch_latest_manifest() -> Result<LatestManifest, AppCommandError> {
     let client = UPDATE_HTTP_CLIENT.as_ref().map_err(|err| {
-        AppCommandError::network("Failed to initialize update HTTP client")
-            .with_detail(err.clone())
+        AppCommandError::network("Failed to initialize update HTTP client").with_detail(err.clone())
     })?;
 
-    let response = client
-        .get(UPDATE_MANIFEST_URL)
-        .send()
-        .await
-        .map_err(|e| {
-            AppCommandError::network("Failed to fetch update manifest")
-                .with_detail(e.to_string())
-        })?;
+    let response = client.get(UPDATE_MANIFEST_URL).send().await.map_err(|e| {
+        AppCommandError::network("Failed to fetch update manifest").with_detail(e.to_string())
+    })?;
 
     if !response.status().is_success() {
         return Err(AppCommandError::network(format!(

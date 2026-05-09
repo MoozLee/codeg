@@ -1041,7 +1041,70 @@
         "output": "输出",
         "cacheRead": "缓存读取",
         "cacheWrite": "缓存写入",
-        "total": "总计"
+        "total": "总计",
+        "contextSource": "用量来源",
+        "contextMaxSource": "上限来源",
+        "source": {
+          "live": "实时用量",
+          "history": "历史统计"
+        },
+        "maxSource": {
+          "live": "实时/运行时上限",
+          "configured": "配置窗口",
+          "history": "历史统计",
+          "unknown": "未知"
+        },
+        "contextLevel": {
+          "unknown": "上下文用量未知。",
+          "normal": "上下文用量正常。",
+          "high": "上下文用量偏高，建议准备压缩。",
+          "critical": "上下文窗口接近上限。"
+        },
+        "contextManagement": "上下文管理",
+        "agentType": "Agent",
+        "connectionId": "连接 ID",
+        "sessionId": "会话 ID",
+        "configFile": "配置文件",
+        "configuredModel": "配置模型",
+        "configuredModelSource": "模型来源",
+        "runtimeModel": "运行模型",
+        "selectorModel": "ACP 选择器模型",
+        "safeRuntimeFields": "运行时配置字段",
+        "noSafeRuntimeFields": "未找到安全的模型/上下文字段。",
+        "reloadRuntimeConfig": "重连 Agent 以重载配置",
+        "reloadRuntimeConfigHint": "断开并重连当前 Agent 以读取最新运行配置。可用时会保留 session id。",
+        "unknown": "未知",
+        "enabled": "已启用",
+        "disabled": "已禁用",
+        "autoCompaction": "自动压缩",
+        "autoCompactionThreshold": "触发阈值",
+        "configuredContextWindowMax": "配置窗口上限",
+        "compactionSupport": "压缩支持",
+        "compactionStatus": "压缩状态",
+        "configuredModelSourceState": {
+          "agent_env": "运行时环境变量",
+          "agent_config_env": "config.env",
+          "agent_root_config": "顶层配置",
+          "selector": "ACP 选择器兜底"
+        },
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "运行时环境变量",
+          "agent_config_env": "config.env",
+          "agent_root_config": "顶层配置"
+        },
+        "compactionSupportState": {
+          "unknown": "未知",
+          "unsupported": "不支持",
+          "agent_managed": "Agent 管理"
+        },
+        "compactionStatusState": {
+          "idle": "空闲",
+          "triggered": "已触发",
+          "running": "运行中",
+          "completed": "已完成",
+          "failed": "失败"
+        },
+        "appSideCompactionInactive": "Codeg 未启用应用侧会话历史压缩。"
       }
     },
     "auxPanel": {
@@ -1737,7 +1800,9 @@
         "expertSkills": "专家技能",
         "expertsEmptyForAgent": "该智能体没有启用任何专家。请在「设置 > 专家」中启用。",
         "slashSearchPlaceholder": "搜索命令...",
-        "slashSearchEmpty": "没有匹配的命令"
+        "slashSearchEmpty": "没有匹配的命令",
+        "booleanOn": "开",
+        "booleanOff": "关"
       },
       "messageQueue": {
         "addToQueue": "加入队列",

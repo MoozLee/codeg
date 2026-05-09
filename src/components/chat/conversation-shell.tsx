@@ -43,7 +43,7 @@ interface ConversationShellProps {
   selectorsLoading?: boolean
   selectedModeId?: string | null
   onModeChange?: (modeId: string) => void
-  onConfigOptionChange?: (configId: string, valueId: string) => void
+  onConfigOptionChange?: (configId: string, value: string | boolean) => void
   agentType?: AgentType | null
   availableCommands?: AvailableCommandInfo[] | null
   attachmentTabId?: string | null

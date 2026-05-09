@@ -1041,7 +1041,70 @@
         "output": "출력",
         "cacheRead": "캐시 읽기",
         "cacheWrite": "캐시 쓰기",
-        "total": "합계"
+        "total": "합계",
+        "contextSource": "사용량 소스",
+        "source": {
+          "live": "실시간 사용량",
+          "history": "기록 통계"
+        },
+        "contextLevel": {
+          "unknown": "컨텍스트 사용량을 알 수 없습니다.",
+          "normal": "컨텍스트 사용량이 정상입니다.",
+          "high": "컨텍스트 사용량이 높습니다.",
+          "critical": "컨텍스트 창이 한도에 가깝습니다."
+        },
+        "contextManagement": "컨텍스트 관리",
+        "configuredModel": "설정된 모델",
+        "runtimeModel": "런타임 모델",
+        "unknown": "알 수 없음",
+        "enabled": "활성화됨",
+        "disabled": "비활성화됨",
+        "autoCompaction": "자동 압축",
+        "autoCompactionThreshold": "트리거 임계값",
+        "compactionSupport": "압축 지원",
+        "compactionStatus": "압축 상태",
+        "compactionSupportState": {
+          "unknown": "알 수 없음",
+          "unsupported": "지원 안 함",
+          "agent_managed": "Agent 관리"
+        },
+        "compactionStatusState": {
+          "idle": "대기",
+          "triggered": "트리거됨",
+          "running": "실행 중",
+          "completed": "완료",
+          "failed": "실패"
+        },
+        "appSideCompactionInactive": "Codeg 앱 측 transcript 압축은 활성화되어 있지 않습니다.",
+        "agentType": "Agent",
+        "connectionId": "Connection ID",
+        "sessionId": "Session ID",
+        "configFile": "Config file",
+        "configuredModelSource": "Model source",
+        "selectorModel": "ACP selector model",
+        "safeRuntimeFields": "Runtime config fields",
+        "noSafeRuntimeFields": "No safe model/context fields found.",
+        "reloadRuntimeConfig": "Reconnect Agent to reload config",
+        "reloadRuntimeConfigHint": "Disconnect and reconnect the current Agent to read the latest runtime configuration. The session id is preserved when available.",
+        "configuredModelSourceState": {
+          "agent_env": "Runtime env",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root config",
+          "selector": "ACP selector fallback"
+        },
+        "contextMaxSource": "최대값 소스",
+        "maxSource": {
+          "live": "실시간/런타임 최대값",
+          "configured": "구성된 창",
+          "history": "기록 통계",
+          "unknown": "알 수 없음"
+        },
+        "configuredContextWindowMax": "구성된 창 최대값",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "런타임 환경 변수",
+          "agent_config_env": "config.env",
+          "agent_root_config": "루트 설정"
+        }
       }
     },
     "auxPanel": {
@@ -1737,7 +1800,9 @@
         "expertSkills": "전문가 스킬",
         "expertsEmptyForAgent": "이 에이전트에 활성화된 전문가가 없습니다. 설정 > 전문가에서 활성화하세요.",
         "slashSearchPlaceholder": "명령 검색...",
-        "slashSearchEmpty": "일치하는 명령이 없습니다"
+        "slashSearchEmpty": "일치하는 명령이 없습니다",
+        "booleanOn": "켜짐",
+        "booleanOff": "꺼짐"
       },
       "messageQueue": {
         "addToQueue": "대기열에 추가",

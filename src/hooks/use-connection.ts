@@ -38,6 +38,7 @@ export interface UseConnectionReturn {
   modes: SessionModeStateInfo | null
   configOptions: SessionConfigOptionInfo[] | null
   availableCommands: AvailableCommandInfo[] | null
+  contextManagement: ConnectionState["contextManagement"] | null
   liveMessage: LiveMessage | null
   pendingPermission: PendingPermission | null
   pendingQuestion: PendingQuestion | null
@@ -50,12 +51,13 @@ export interface UseConnectionReturn {
     sessionId?: string
   ) => Promise<void>
   disconnect: () => Promise<void>
+  reconnect: () => Promise<void>
   sendPrompt: (
     blocks: PromptInputBlock[],
     opts?: { folderId?: number | null; conversationId?: number | null }
   ) => Promise<void>
   setMode: (modeId: string) => Promise<void>
-  setConfigOption: (configId: string, valueId: string) => Promise<void>
+  setConfigOption: (configId: string, value: string | boolean) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (requestId: string, optionId: string) => Promise<void>
 }
@@ -94,6 +96,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const configOptions =
     connection?.configOptions ?? cached?.configOptions ?? null
   const availableCommands = connection?.availableCommands ?? null
+  const contextManagement = connection?.contextManagement ?? null
   const liveMessage = connection?.liveMessage ?? null
   const pendingPermission = connection?.pendingPermission ?? null
   const pendingQuestion = connection?.pendingQuestion ?? null
@@ -112,6 +115,11 @@ export function useConnection(contextKey: string): UseConnectionReturn {
     [actions, contextKey]
   )
 
+  const reconnect = useCallback(
+    () => actions.reconnect(contextKey),
+    [actions, contextKey]
+  )
+
   const sendPrompt = useCallback(
     (
       blocks: PromptInputBlock[],
@@ -126,8 +134,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   )
 
   const setConfigOption = useCallback(
-    (configId: string, valueId: string) =>
-      actions.setConfigOption(contextKey, configId, valueId),
+    (configId: string, value: string | boolean) =>
+      actions.setConfigOption(contextKey, configId, value),
     [actions, contextKey]
   )
 
@@ -154,6 +162,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       modes,
       configOptions,
       availableCommands,
+      contextManagement,
       liveMessage,
       pendingPermission,
       pendingQuestion,
@@ -162,6 +171,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       loadError,
       connect,
       disconnect,
+      reconnect,
       sendPrompt,
       setMode,
       setConfigOption,
@@ -179,6 +189,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       modes,
       configOptions,
       availableCommands,
+      contextManagement,
       liveMessage,
       pendingPermission,
       pendingQuestion,
@@ -187,6 +198,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       loadError,
       connect,
       disconnect,
+      reconnect,
       sendPrompt,
       setMode,
       setConfigOption,

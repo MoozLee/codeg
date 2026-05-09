@@ -60,11 +60,7 @@ impl AppCommandError {
 
     /// Attach a localized rendering hint. The frontend prefers this over
     /// `message` when displaying the error to the user. `params` may be empty.
-    pub fn with_i18n(
-        mut self,
-        key: impl Into<String>,
-        params: BTreeMap<String, String>,
-    ) -> Self {
+    pub fn with_i18n(mut self, key: impl Into<String>, params: BTreeMap<String, String>) -> Self {
         self.i18n_key = Some(key.into());
         if !params.is_empty() {
             self.i18n_params = Some(params);

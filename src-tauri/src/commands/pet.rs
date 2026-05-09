@@ -66,10 +66,7 @@ pub async fn pet_replace_sprite_core(
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?
 }
 
-pub async fn pet_delete_core(
-    db: &DatabaseConnection,
-    id: String,
-) -> Result<(), AppCommandError> {
+pub async fn pet_delete_core(db: &DatabaseConnection, id: String) -> Result<(), AppCommandError> {
     let id_for_fs = id.clone();
     tokio::task::spawn_blocking(move || pets::delete_pet(&id_for_fs))
         .await
@@ -117,9 +114,8 @@ async fn save_config(
     db: &DatabaseConnection,
     config: &PetWindowConfig,
 ) -> Result<(), AppCommandError> {
-    let json = serde_json::to_string(config).map_err(|e| {
-        AppCommandError::io_error(format!("Failed to serialize pet config: {e}"))
-    })?;
+    let json = serde_json::to_string(config)
+        .map_err(|e| AppCommandError::io_error(format!("Failed to serialize pet config: {e}")))?;
     app_metadata_service::upsert_value(db, PET_CONFIG_KEY, &json)
         .await
         .map_err(AppCommandError::db)?;

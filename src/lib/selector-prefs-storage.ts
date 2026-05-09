@@ -21,7 +21,7 @@ const STORAGE_KEY = "codeg:selector-prefs"
 interface SelectorPrefs {
   modeId?: string
   modesHash?: string
-  configValues?: Record<string, string>
+  configValues?: Record<string, string | boolean>
   configHash?: string
 }
 
@@ -64,9 +64,11 @@ function hashModes(modes: SessionModeStateInfo): string {
 function hashConfigOptions(options: SessionConfigOptionInfo[]): string {
   return options
     .map((o) => {
-      if (o.kind.type !== "select") return o.id
-      const vals = o.kind.options.map((v) => v.value).join(",")
-      return `${o.id}:${vals}`
+      if (o.kind.type === "select") {
+        const vals = o.kind.options.map((v) => v.value).join(",")
+        return `${o.id}:select:${vals}`
+      }
+      return `${o.id}:boolean`
     })
     .join("\0")
 }
@@ -95,7 +97,7 @@ export function saveModePreference(
 export function saveConfigPreference(
   agentType: string,
   configId: string,
-  valueId: string,
+  valueId: string | boolean,
   allOptions: SessionConfigOptionInfo[]
 ) {
   updatePrefs(agentType, (prefs) => ({
@@ -164,10 +166,28 @@ export function applySavedConfigPreferences(
 
   let changed = false
   const merged = options.map((opt) => {
-    if (opt.kind.type !== "select") return opt
     const savedValue = prefs.configValues![opt.id]
-    if (!savedValue || savedValue === opt.kind.current_value) return opt
-    if (!opt.kind.options.some((o) => o.value === savedValue)) return opt
+    if (opt.kind.type === "select") {
+      if (
+        typeof savedValue !== "string" ||
+        savedValue === opt.kind.current_value
+      ) {
+        return opt
+      }
+      if (!opt.kind.options.some((o) => o.value === savedValue)) return opt
+      changed = true
+      return {
+        ...opt,
+        kind: { ...opt.kind, current_value: savedValue },
+      }
+    }
+
+    if (
+      typeof savedValue !== "boolean" ||
+      savedValue === opt.kind.current_value
+    ) {
+      return opt
+    }
     changed = true
     return {
       ...opt,

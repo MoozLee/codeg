@@ -106,7 +106,7 @@ interface MessageInputProps {
   configOptionsLoading?: boolean
   selectedModeId?: string | null
   onModeChange?: (modeId: string) => void
-  onConfigOptionChange?: (configId: string, valueId: string) => void
+  onConfigOptionChange?: (configId: string, value: string | boolean) => void
   agentType?: AgentType | null
   availableCommands?: AvailableCommandInfo[] | null
   promptCapabilities: PromptCapabilitiesInfo
@@ -1814,8 +1814,8 @@ export function MessageInput({
           <SessionConfigSelector
             key={option.id}
             option={option}
-            onSelect={(configId, valueId) =>
-              onConfigOptionChange?.(configId, valueId)
+            onSelect={(configId, value) =>
+              onConfigOptionChange?.(configId, value)
             }
           />
         ))}
@@ -1838,8 +1838,8 @@ export function MessageInput({
           <InlineSessionConfigSelector
             key={option.id}
             option={option}
-            onSelect={(configId, valueId) =>
-              onConfigOptionChange?.(configId, valueId)
+            onSelect={(configId, value) =>
+              onConfigOptionChange?.(configId, value)
             }
           />
         ))}
