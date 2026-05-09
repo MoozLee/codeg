@@ -27,8 +27,9 @@ import {
   useMemo,
   useState,
 } from "react"
-import { Streamdown } from "streamdown"
+import { Streamdown, defaultRemarkPlugins } from "streamdown"
 import { useStreamdownLinkSafety } from "./link-safety"
+import { remarkRewriteFileUriLinks } from "./remark-file-uri-links"
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"]
@@ -366,6 +367,11 @@ export function normalizeMathDelimiters(text: string): string {
   )
 }
 
+const remarkPlugins = [
+  ...Object.values(defaultRemarkPlugins),
+  remarkRewriteFileUriLinks,
+]
+
 function MessageResponseImpl({
   className,
   children,
@@ -388,6 +394,7 @@ function MessageResponseImpl({
       )}
       linkSafety={linkSafety}
       plugins={streamdownPlugins}
+      remarkPlugins={remarkPlugins}
       {...props}
     >
       {normalized}

@@ -390,7 +390,7 @@ export function SystemNetworkSettings() {
           setCustomPathExists(null)
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("terminalSaveFailed", { message }))
       } finally {
         setSavingTerminal(false)
@@ -538,7 +538,7 @@ export function SystemNetworkSettings() {
         setEnabled(next.enabled)
         setProxyUrl(next.proxy_url ?? "")
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("saveFailed", { message }))
       } finally {
         setSaving(false)
@@ -558,7 +558,7 @@ export function SystemNetworkSettings() {
         setPersistedDisableHwAccel(result.disable_hardware_acceleration)
       } catch (err) {
         setDisableHwAccel(prev)
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("renderingSaveFailed", { message }))
       } finally {
         setSavingRendering(false)
@@ -571,7 +571,7 @@ export function SystemNetworkSettings() {
     try {
       await relaunchApp()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("restartFailed", { message }))
     }
   }, [t])
@@ -588,7 +588,7 @@ export function SystemNetworkSettings() {
 
         setLanguageSettings(next)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("languageSaveFailed", { message }))
       } finally {
         setSavingLanguage(false)
@@ -764,23 +764,37 @@ export function SystemNetworkSettings() {
                   {t("checking")}
                 </Button>
               ) : availableUpdate ? (
-                <Button
-                  size="sm"
-                  onClick={installUpdate}
-                  disabled={installingUpdate}
-                >
-                  {installingUpdate ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      {t("updating")}
-                    </>
-                  ) : (
-                    <>
-                      <ArrowUpCircle className="h-3.5 w-3.5" />
-                      {t("upgradeTo", { version: availableUpdate.version })}
-                    </>
-                  )}
-                </Button>
+                isDesktop() ? (
+                  <Button
+                    size="sm"
+                    onClick={installUpdate}
+                    disabled={installingUpdate}
+                  >
+                    {installingUpdate ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        {t("updating")}
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpCircle className="h-3.5 w-3.5" />
+                        {t("upgradeTo", { version: availableUpdate.version })}
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      openUrl(
+                        "https://github.com/xintaofei/codeg/releases/latest"
+                      )
+                    }
+                  >
+                    <ArrowUpCircle className="h-3.5 w-3.5" />
+                    {t("viewRelease", { version: availableUpdate.version })}
+                  </Button>
+                )
               ) : (
                 <Button
                   key="check-update"

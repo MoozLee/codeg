@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl"
 import type { UserImageDisplay } from "@/lib/adapters/ai-elements-adapter"
 import { ImagePreviewDialog } from "@/components/ui/image-preview-dialog"
 import { downloadImage } from "@/lib/image-download"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface UserImageAttachmentsProps {
   images: UserImageDisplay[]
@@ -29,7 +30,7 @@ export function UserImageAttachments({
           suggestedName: image.name,
         })
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         window.alert(t("downloadFailed", { message }))
       }
     },

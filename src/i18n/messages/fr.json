@@ -188,6 +188,7 @@
     "updating": "Installation...",
     "downloading": "Téléchargement...",
     "upgradeTo": "Mettre à jour vers v{version}",
+    "viewRelease": "Voir la version v{version}",
     "foundUpdate": "Nouvelle version v{version} trouvée",
     "alreadyLatest": "Vous utilisez déjà la dernière version",
     "checkUpdateFailed": "Échec de la recherche de mises à jour : {message}",
@@ -428,7 +429,15 @@
       "fieldOutOfRange": "La valeur de {field} est hors de la plage autorisée",
       "jsonEmpty": "{name} ne peut pas être vide",
       "jsonInvalid": "{name} n’est pas un JSON valide : {message}",
-      "jsonMustBeObject": "{name} doit être un objet JSON"
+      "jsonMustBeObject": "{name} doit être un objet JSON",
+      "specMustBeObject": "La configuration MCP doit être un objet JSON.",
+      "missingType": "Le champ type est manquant dans la configuration MCP. Indiquez stdio, http (alias : streamable-http, streamableHttp) ou sse.",
+      "unsupportedType": "Type MCP non pris en charge {type}. Pris en charge : stdio, http (alias : streamable-http, streamableHttp), sse.",
+      "codexEntryUnsupportedType": "L’entrée MCP Codex {id} a un type non pris en charge {type}. Pris en charge : stdio, http (alias : streamable-http, streamableHttp), sse.",
+      "unsupportedTransportType": "Type de transport non pris en charge {type}. Pris en charge : http (alias : streamable-http, streamableHttp), sse.",
+      "stdioCommandRequired": "Un MCP stdio nécessite un champ command non vide.",
+      "remoteUrlRequired": "Un MCP distant nécessite un champ url non vide.",
+      "appsRequired": "Sélectionnez au moins une application cible."
     },
     "jsonNames": {
       "localConfig": "Configuration MCP",
@@ -486,7 +495,9 @@
       "draftTitle": "Nouveau MCP",
       "draftDescription": "Renseignez un Server ID et une configuration pour créer un serveur MCP local.",
       "serverIdLabel": "Server ID",
-      "serverIdPlaceholder": "Server ID (ex. my-mcp)"
+      "serverIdPlaceholder": "Server ID (ex. my-mcp)",
+      "typeHint": "Types pris en charge : stdio, http (alias : streamable-http, streamableHttp), sse. env n'est utilisé que par stdio ; pour les MCP distants, utilisez headers pour transporter les jetons d'authentification.",
+      "envOnRemoteWarning": "env détecté sur un MCP distant. Seul stdio utilise env ; les MCP distants transportent les jetons d'authentification via headers, donc env sera ignoré à l'enregistrement."
     },
     "market": {
       "selectMarketplace": "Sélectionner un marketplace",
@@ -689,9 +700,9 @@
       "authMustBeObject": "auth.json doit être un objet JSON",
       "authInvalid": "Erreur de format auth.json : {message}",
       "providerIdPattern": "L’ID du provider n’accepte que lettres, chiffres, underscore, point et tiret",
-      "providerExists": "Le provider '{providerId}' existe déjà",
+      "providerExists": "Le provider {providerId} existe déjà",
       "modelIdPattern": "L’ID du modèle n’accepte que lettres, chiffres, underscore, point, deux-points et tiret",
-      "modelExists": "Le modèle '{modelId}' existe déjà"
+      "modelExists": "Le modèle {modelId} existe déjà"
     },
     "warnings": {
       "nativeJsonRecoveredStructured": "La configuration JSON native est invalide ; réinitialisée en configuration structurée",
@@ -927,6 +938,7 @@
       "reloadFailed": "Échec du rechargement de la conversation : {message}",
       "reloaded": "Conversation rechargée",
       "reload": "Recharger",
+      "activeConversationIndicator": "Conversation active",
       "newConversation": "Nouvelle conversation",
       "closeConversation": "Fermer la conversation",
       "copyText": "Copier le texte",
@@ -1936,6 +1948,19 @@
           "todosProgress": "Tâches ({done}/{total})",
           "skillWithName": "Skill : {name}",
           "genericWithContext": "{tool} ({context})"
+        },
+        "toolGroup": {
+          "search": "{count, plural, one {A exploré # recherche} other {A exploré # recherches}}",
+          "command": "{count, plural, one {A exécuté # commande} other {A exécuté # commandes}}",
+          "read": "{count, plural, one {A lu des fichiers # fois} other {A lu des fichiers # fois}}",
+          "edit": "{count, plural, one {A modifié des fichiers # fois} other {A modifié des fichiers # fois}}",
+          "fetch": "{count, plural, one {A récupéré # ressource} other {A récupéré # ressources}}",
+          "think": "{count, plural, one {A réfléchi # fois} other {A réfléchi # fois}}",
+          "todo": "{count, plural, one {A mis à jour # tâche} other {A mis à jour # tâches}}",
+          "task": "{count, plural, one {A lancé # tâche} other {A lancé # tâches}}",
+          "other": "{count, plural, one {A utilisé # outil} other {A utilisé # outils}}",
+          "errorSuffix": "{count, plural, one {# échec} other {# échecs}}",
+          "joiner": " · "
         }
       }
     },
@@ -2300,6 +2325,64 @@
       "created": "Message rapide créé",
       "saved": "Message rapide enregistré",
       "deleted": "Message rapide supprimé"
+    }
+  },
+  "Pet": {
+    "menu": {
+      "scale": "Échelle",
+      "openManager": "Gérer les mascottes",
+      "close": "Fermer"
+    },
+    "loadError": "Échec du chargement de la mascotte",
+    "missingPetIdParam": "Aucune mascotte sélectionnée",
+    "summonButton": "Mascotte",
+    "manager": {
+      "title": "Mascottes",
+      "description": "Compagnons flottants de bureau avec des sprites compatibles Codex.",
+      "addPet": "Ajouter une mascotte",
+      "importFromCodex": "Importer depuis Codex",
+      "noPets": "Aucune mascotte. Ajoutez-en ou importez depuis Codex.",
+      "setActive": "Activer",
+      "active": "Active",
+      "edit": "Modifier",
+      "delete": "Supprimer",
+      "deleteConfirm": "Supprimer cette mascotte ? Elle sera retirée du disque.",
+      "summon": "Invoquer la fenêtre de la mascotte",
+      "openCodexHelp": "Les mascottes Codex doivent être dans ~/.codex/pets/. Aucune trouvée.",
+      "specRequirement": "Le sprite doit être un PNG/WebP 1536x1872 avec transparence.",
+      "form": {
+        "id": "ID mascotte",
+        "idHelp": "Lettres minuscules, chiffres, '-' et '_'. Max 64 caractères.",
+        "displayName": "Nom affiché",
+        "description": "Description (facultative)",
+        "spritesheet": "Sprite",
+        "chooseFile": "Choisir un fichier",
+        "replaceFile": "Remplacer le sprite",
+        "saveCreate": "Ajouter la mascotte",
+        "saveUpdate": "Enregistrer",
+        "cancel": "Annuler"
+      },
+      "errors": {
+        "missingId": "ID requis",
+        "missingName": "Nom requis",
+        "missingSpritesheet": "Sprite requis",
+        "addFailed": "Ajout impossible",
+        "updateFailed": "Mise à jour impossible",
+        "deleteFailed": "Suppression impossible",
+        "loadFailed": "Chargement impossible"
+      }
+    },
+    "import": {
+      "title": "Importer depuis Codex",
+      "subtitle": "Mascottes disponibles sous ~/.codex/pets/.",
+      "selectAll": "Tout sélectionner",
+      "alreadyImported": "Déjà importée",
+      "renameOnConflict": "Renommer en -imported en cas de conflit",
+      "import": "Importer la sélection",
+      "noneFound": "Aucune mascotte Codex importable.",
+      "imported": "Import réussi",
+      "failed": "Import échoué",
+      "close": "Fermer"
     }
   }
 }

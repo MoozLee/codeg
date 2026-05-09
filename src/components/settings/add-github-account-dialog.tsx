@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { validateGitHubToken, saveAccountToken } from "@/lib/api"
 import type { GitHubAccount } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface AddGitHubAccountDialogProps {
   open: boolean
@@ -105,7 +106,7 @@ export function AddGitHubAccountDialog({
       onAccountAdded(account)
       handleOpenChange(false)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setError(t("addFailed", { message }))
     } finally {
       setValidating(false)

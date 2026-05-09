@@ -88,6 +88,7 @@ import type {
   ModelProviderInfo,
   PreflightResult,
 } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 import { useAgentInstallStream } from "@/hooks/use-agent-install-stream"
 import { OpencodePluginsModal } from "./opencode-plugins-modal"
 
@@ -375,7 +376,7 @@ function parseConfigJsonText(configText: string): ConfigParseResult {
     }
     return { config: parsed as Record<string, unknown>, error: null }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = toErrorMessage(err)
     return {
       config: {},
       error: acpText(
@@ -411,7 +412,7 @@ function parseOpenCodeAuthJsonText(authJsonText: string): {
     }
     return { authObject: parsed as Record<string, unknown>, error: null }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = toErrorMessage(err)
     return {
       authObject: null,
       error: acpText(
@@ -1548,7 +1549,7 @@ function parseCodexAuthJsonObject(authJsonText: string): {
     }
     return { authObject: parsed as Record<string, unknown>, error: null }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = toErrorMessage(err)
     return {
       authObject: null,
       error: acpText(
@@ -2794,7 +2795,7 @@ export function AcpAgentSettings() {
         return updated
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setLoadingError(message)
     } finally {
       setLoadingAgents(false)
@@ -2840,7 +2841,7 @@ export function AcpAgentSettings() {
           }))
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         setCheckState((prev) => ({ ...prev, [agentType]: { error: message } }))
       } finally {
         setChecking((prev) => ({ ...prev, [agentType]: false }))
@@ -3112,7 +3113,7 @@ export function AcpAgentSettings() {
           }
         )
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(
           t("toasts.agentActionFailed", {
             name: agent.name,
@@ -3190,7 +3191,7 @@ export function AcpAgentSettings() {
           }
         )
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(
           t("toasts.agentActionFailed", {
             name: agent.name,
@@ -3263,7 +3264,7 @@ export function AcpAgentSettings() {
           description: t("toasts.localVersionRemoved"),
         })
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.uninstallFailed", { name: agent.name }), {
           description: message,
         })
@@ -3344,7 +3345,7 @@ export function AcpAgentSettings() {
         await acpReorderAgents(order)
       } catch (err) {
         console.error("[Settings] reorder agents failed:", err)
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.saveAgentOrderFailed"), {
           description: message,
         })
@@ -4338,7 +4339,7 @@ export function AcpAgentSettings() {
       })
       .catch((err) => {
         console.error("[Settings] remove opencode provider failed:", err)
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.providerDeleteFailed", { providerId }), {
           description: message,
         })
@@ -4955,7 +4956,7 @@ export function AcpAgentSettings() {
       setCodexDeviceCode(resp)
       setCodexLoginStatus("polling")
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = toErrorMessage(err)
       setCodexLoginError(msg)
       setCodexLoginStatus("error")
     }
@@ -5035,7 +5036,7 @@ export function AcpAgentSettings() {
                 }),
               ])
             } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err)
+              const msg = toErrorMessage(err)
               toast.error(t("codex.loginSaveFailed"), {
                 description: msg,
               })
@@ -5309,8 +5310,7 @@ export function AcpAgentSettings() {
                             "[Settings] persist enabled failed:",
                             err
                           )
-                          const message =
-                            err instanceof Error ? err.message : String(err)
+                          const message = toErrorMessage(err)
                           toast.error(t("toasts.saveAgentSwitchFailed"), {
                             description: message,
                           })
@@ -5407,8 +5407,7 @@ export function AcpAgentSettings() {
                           })
                           .catch((err) => {
                             console.error("[Settings] save env failed:", err)
-                            const message =
-                              err instanceof Error ? err.message : String(err)
+                            const message = toErrorMessage(err)
                             toast.error(t("toasts.saveEnvFailed"), {
                               description: message,
                             })
@@ -5846,8 +5845,7 @@ supports_websockets = true`}
                                 "[Settings] save codex native config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveCodexNativeFailed"), {
                                 description: message,
                               })
@@ -6162,8 +6160,7 @@ supports_websockets = true`}
                                 "[Settings] save gemini config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveGeminiFailed"), {
                                 description: message,
                               })
@@ -6838,8 +6835,7 @@ supports_websockets = true`}
                                 "[Settings] save opencode config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveOpenCodeFailed"), {
                                 description: message,
                               })
@@ -7012,8 +7008,7 @@ supports_websockets = true`}
                                 "[Settings] save cline config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveClineFailed"), {
                                 description: message,
                               })
@@ -7159,8 +7154,7 @@ supports_websockets = true`}
                                 "[Settings] save openclaw config failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(t("toasts.saveOpenClawFailed"), {
                                 description: message,
                               })
@@ -7543,8 +7537,7 @@ supports_websockets = true`}
                                 "[Settings] save config management failed:",
                                 err
                               )
-                              const message =
-                                err instanceof Error ? err.message : String(err)
+                              const message = toErrorMessage(err)
                               toast.error(
                                 t("toasts.saveConfigManagementFailed"),
                                 {

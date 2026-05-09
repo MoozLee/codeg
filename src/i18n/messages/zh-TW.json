@@ -188,6 +188,7 @@
     "updating": "升級中...",
     "downloading": "下載中...",
     "upgradeTo": "升級到 v{version}",
+    "viewRelease": "查看 v{version} 發布",
     "foundUpdate": "發現新版本 v{version}",
     "alreadyLatest": "目前已是最新版本",
     "checkUpdateFailed": "檢查更新失敗：{message}",
@@ -428,7 +429,15 @@
       "fieldOutOfRange": "{field} 的值不在可選範圍內",
       "jsonEmpty": "{name} 不能為空",
       "jsonInvalid": "{name} 不是合法 JSON：{message}",
-      "jsonMustBeObject": "{name} 必須是 JSON 物件"
+      "jsonMustBeObject": "{name} 必須是 JSON 物件",
+      "specMustBeObject": "MCP 設定必須是 JSON 物件。",
+      "missingType": "MCP 設定缺少 type 欄位。請填寫 stdio、http（別名 streamable-http、streamableHttp）、sse 其中之一。",
+      "unsupportedType": "不支援的 MCP type：{type}。支援的類型：stdio、http（別名 streamable-http、streamableHttp）、sse。",
+      "codexEntryUnsupportedType": "Codex MCP 項目 {id} 的 type 不受支援：{type}。支援的類型：stdio、http（別名 streamable-http、streamableHttp）、sse。",
+      "unsupportedTransportType": "不支援的 transport 類型：{type}。支援的類型：http（別名 streamable-http、streamableHttp）、sse。",
+      "stdioCommandRequired": "stdio 類型的 MCP 必須填寫非空的 command 欄位。",
+      "remoteUrlRequired": "遠端 MCP 必須填寫非空的 url 欄位。",
+      "appsRequired": "請至少選擇一個目標 App。"
     },
     "jsonNames": {
       "localConfig": "MCP 配置",
@@ -486,7 +495,9 @@
       "draftTitle": "新建 MCP",
       "draftDescription": "填寫 Server ID 與設定以建立本地 MCP 伺服器。",
       "serverIdLabel": "Server ID",
-      "serverIdPlaceholder": "Server ID（例如：my-mcp）"
+      "serverIdPlaceholder": "Server ID（例如：my-mcp）",
+      "typeHint": "支援類型：stdio、http（別名 streamable-http、streamableHttp）、sse。env 僅適用於 stdio；遠端 MCP 請透過 headers 欄位傳遞認證 token。",
+      "envOnRemoteWarning": "偵測到遠端 MCP 設定中包含 env 欄位。env 僅 stdio 類型使用，遠端 MCP 應透過 headers 攜帶認證資訊，env 欄位儲存時會被忽略。"
     },
     "market": {
       "selectMarketplace": "選擇市場",
@@ -689,9 +700,9 @@
       "authMustBeObject": "auth.json 必須是 JSON 物件",
       "authInvalid": "auth.json 格式錯誤：{message}",
       "providerIdPattern": "Provider ID 僅支援字母、數字、底線、點與中劃線",
-      "providerExists": "Provider '{providerId}' 已存在",
+      "providerExists": "Provider {providerId} 已存在",
       "modelIdPattern": "模型 ID 僅支援字母、數字、底線、點、冒號與中劃線",
-      "modelExists": "Model '{modelId}' 已存在"
+      "modelExists": "Model {modelId} 已存在"
     },
     "warnings": {
       "nativeJsonRecoveredStructured": "原生 JSON 配置格式無效，已重置為結構化配置",
@@ -927,6 +938,7 @@
       "reloadFailed": "會話重新載入失敗：{message}",
       "reloaded": "目前會話已重新載入",
       "reload": "重新載入",
+      "activeConversationIndicator": "目前啟用的會話",
       "newConversation": "新增會話",
       "closeConversation": "關閉會話",
       "copyText": "複製文字",
@@ -1936,6 +1948,19 @@
           "todosProgress": "待辦（{done}/{total}）",
           "skillWithName": "Skill：{name}",
           "genericWithContext": "{tool}：{context}"
+        },
+        "toolGroup": {
+          "search": "搜尋 {count} 次",
+          "command": "執行 {count} 個指令",
+          "read": "讀取 {count} 次檔案",
+          "edit": "編輯 {count} 次檔案",
+          "fetch": "抓取 {count} 個資源",
+          "think": "思考 {count} 次",
+          "todo": "更新 {count} 項待辦",
+          "task": "執行 {count} 個任務",
+          "other": "呼叫 {count} 個工具",
+          "errorSuffix": "{count} 個失敗",
+          "joiner": " · "
         }
       }
     },
@@ -2300,6 +2325,64 @@
       "created": "已建立快捷訊息",
       "saved": "已儲存快捷訊息",
       "deleted": "已刪除快捷訊息"
+    }
+  },
+  "Pet": {
+    "menu": {
+      "scale": "縮放",
+      "openManager": "管理寵物",
+      "close": "關閉"
+    },
+    "loadError": "載入寵物失敗",
+    "missingPetIdParam": "未選中任何寵物",
+    "summonButton": "寵物",
+    "manager": {
+      "title": "桌面寵物",
+      "description": "懸浮在桌面上的夥伴,使用與 Codex 相容的精靈圖。",
+      "addPet": "新增寵物",
+      "importFromCodex": "從 Codex 匯入",
+      "noPets": "暫無寵物。可以新增一隻,或從 Codex 匯入。",
+      "setActive": "設為使用中",
+      "active": "使用中",
+      "edit": "編輯",
+      "delete": "刪除",
+      "deleteConfirm": "確認刪除此寵物?會從磁碟上一併移除。",
+      "summon": "召喚寵物視窗",
+      "openCodexHelp": "Codex 寵物需位於 ~/.codex/pets/ 目錄下,但未找到。",
+      "specRequirement": "精靈圖必須是 1536x1872 像素帶透明通道的 PNG 或 WebP。",
+      "form": {
+        "id": "寵物 ID",
+        "idHelp": "僅允許小寫字母、數字、'-' 和 '_',最多 64 字元。",
+        "displayName": "顯示名稱",
+        "description": "描述 (選填)",
+        "spritesheet": "精靈圖",
+        "chooseFile": "選擇檔案",
+        "replaceFile": "替換精靈圖",
+        "saveCreate": "新增寵物",
+        "saveUpdate": "儲存變更",
+        "cancel": "取消"
+      },
+      "errors": {
+        "missingId": "寵物 ID 不能為空",
+        "missingName": "顯示名稱不能為空",
+        "missingSpritesheet": "必須選擇一個精靈圖",
+        "addFailed": "新增寵物失敗",
+        "updateFailed": "更新寵物失敗",
+        "deleteFailed": "刪除寵物失敗",
+        "loadFailed": "載入寵物列表失敗"
+      }
+    },
+    "import": {
+      "title": "從 Codex 匯入",
+      "subtitle": "在 ~/.codex/pets/ 下找到以下可匯入的寵物。",
+      "selectAll": "全選",
+      "alreadyImported": "已匯入",
+      "renameOnConflict": "衝突時自動加上 -imported 後綴",
+      "import": "匯入所選",
+      "noneFound": "未找到可匯入的 Codex 寵物。",
+      "imported": "匯入完成",
+      "failed": "匯入失敗",
+      "close": "關閉"
     }
   }
 }

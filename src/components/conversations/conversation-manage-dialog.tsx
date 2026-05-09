@@ -58,14 +58,10 @@ import type {
   ConversationStatus,
   DbConversationSummary,
 } from "@/lib/types"
-import {
-  AGENT_LABELS,
-  ALL_AGENT_TYPES,
-  STATUS_ICON_COLORS,
-  STATUS_ORDER,
-} from "@/lib/types"
+import { AGENT_LABELS, ALL_AGENT_TYPES, STATUS_ORDER } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { ConversationStatusIcon } from "@/components/conversations/conversation-status-icon"
+import { toErrorMessage } from "@/lib/app-error"
+import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
 
 interface ConversationManageDialogProps {
   open: boolean
@@ -152,7 +148,7 @@ export function ConversationManageDialog({
         setRows(sorted)
         setError(null)
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        setError(toErrorMessage(e))
       } finally {
         setLoading(false)
       }
@@ -213,7 +209,7 @@ export function ConversationManageDialog({
     } catch (e) {
       toast.error(
         t("toastOpFailed", {
-          message: e instanceof Error ? e.message : String(e),
+          message: toErrorMessage(e),
         })
       )
     } finally {
@@ -235,7 +231,7 @@ export function ConversationManageDialog({
       } catch (e) {
         toast.error(
           t("toastOpFailed", {
-            message: e instanceof Error ? e.message : String(e),
+            message: toErrorMessage(e),
           })
         )
       } finally {
@@ -295,10 +291,7 @@ export function ConversationManageDialog({
                   {STATUS_ORDER.map((s) => (
                     <SelectItem key={s} value={s}>
                       <span className="flex items-center gap-2">
-                        <ConversationStatusIcon
-                          status={s}
-                          className={cn("h-4 w-4", STATUS_ICON_COLORS[s])}
-                        />
+                        <ConversationStatusDot status={s} />
                         {tStatus(s)}
                       </span>
                     </SelectItem>
@@ -389,8 +382,8 @@ export function ConversationManageDialog({
                         <span className="shrink-0 text-xs text-muted-foreground w-10 text-right">
                           {formatRelative(conv.created_at)}
                         </span>
-                        <span
-                          className="shrink-0 inline-flex"
+                        <ConversationStatusDot
+                          status={conv.status as ConversationStatus}
                           title={
                             STATUS_ORDER.includes(
                               conv.status as ConversationStatus
@@ -398,17 +391,7 @@ export function ConversationManageDialog({
                               ? tStatus(conv.status as ConversationStatus)
                               : conv.status
                           }
-                        >
-                          <ConversationStatusIcon
-                            status={conv.status as ConversationStatus}
-                            className={cn(
-                              "h-4 w-4",
-                              STATUS_ICON_COLORS[
-                                conv.status as ConversationStatus
-                              ] ?? "text-muted-foreground"
-                            )}
-                          />
-                        </span>
+                        />
                       </div>
                     )
                   })
@@ -442,10 +425,7 @@ export function ConversationManageDialog({
                       key={s}
                       onSelect={() => handleBulkStatus(s)}
                     >
-                      <ConversationStatusIcon
-                        status={s}
-                        className={cn("h-4 w-4", STATUS_ICON_COLORS[s])}
-                      />
+                      <ConversationStatusDot status={s} />
                       {tStatus(s)}
                     </DropdownMenuItem>
                   ))}

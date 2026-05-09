@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/command"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface ConversationContextBarProps {
   extraContent?: React.ReactNode
@@ -185,7 +186,7 @@ export const ConversationFolderBranchPicker = memo(
                 await refreshFolder(ownFolder.id)
                 updateTask(taskId, { status: "completed" })
               } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err)
+                const msg = toErrorMessage(err)
                 updateTask(taskId, { status: "failed", error: msg })
                 toast.error(msg)
               }

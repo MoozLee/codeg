@@ -15,6 +15,7 @@ import {
   FileCode,
   FileImage,
   FileText,
+  Focus,
   Plus,
   RefreshCw,
   X,
@@ -1536,9 +1537,7 @@ export function ConversationDetailPanel({
           canTile
             ? cn(
                 "relative h-full min-w-[28rem] flex-1 overflow-hidden",
-                index > 0 && "border-l border-border",
-                active &&
-                  "bg-gradient-to-b from-sidebar-primary/[0.03] to-transparent"
+                index > 0 && "border-l border-border"
               )
             : active
               ? "h-full"
@@ -1548,6 +1547,16 @@ export function ConversationDetailPanel({
           canTile && !active ? () => switchTab(tab.id) : undefined
         }
       >
+        {canTile && active && (
+          <div
+            role="img"
+            aria-label={t("activeConversationIndicator")}
+            title={t("activeConversationIndicator")}
+            className="absolute top-2 left-1/2 z-20 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full bg-background/40 text-sidebar-primary shadow-sm ring-1 ring-sidebar-primary/20 backdrop-blur"
+          >
+            <Focus className="h-4 w-4" />
+          </div>
+        )}
         <ConversationTabView
           tabId={tab.id}
           conversationId={tab.conversationId}

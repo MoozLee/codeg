@@ -188,6 +188,7 @@
     "updating": "インストール中...",
     "downloading": "ダウンロード中...",
     "upgradeTo": "v{version} にアップグレード",
+    "viewRelease": "v{version} のリリースを表示",
     "foundUpdate": "新しいバージョン v{version} が見つかりました",
     "alreadyLatest": "すでに最新バージョンです",
     "checkUpdateFailed": "更新確認に失敗しました: {message}",
@@ -428,7 +429,15 @@
       "fieldOutOfRange": "{field} の値が許可範囲外です",
       "jsonEmpty": "{name} は空にできません",
       "jsonInvalid": "{name} は有効なJSONではありません: {message}",
-      "jsonMustBeObject": "{name} はJSONオブジェクトである必要があります"
+      "jsonMustBeObject": "{name} はJSONオブジェクトである必要があります",
+      "specMustBeObject": "MCP 設定は JSON オブジェクトである必要があります。",
+      "missingType": "MCP 設定に type フィールドがありません。stdio、http（エイリアス：streamable-http、streamableHttp）、sse のいずれかを指定してください。",
+      "unsupportedType": "サポートされていない MCP タイプ {type}。対応：stdio、http（エイリアス：streamable-http、streamableHttp）、sse。",
+      "codexEntryUnsupportedType": "Codex MCP エントリ {id} のタイプ {type} はサポートされていません。対応：stdio、http（エイリアス：streamable-http、streamableHttp）、sse。",
+      "unsupportedTransportType": "サポートされていない transport タイプ {type}。対応：http（エイリアス：streamable-http、streamableHttp）、sse。",
+      "stdioCommandRequired": "stdio タイプの MCP には空でない command フィールドが必要です。",
+      "remoteUrlRequired": "リモート MCP には空でない url フィールドが必要です。",
+      "appsRequired": "対象アプリを少なくとも 1 つ選択してください。"
     },
     "jsonNames": {
       "localConfig": "MCP設定",
@@ -486,7 +495,9 @@
       "draftTitle": "新規 MCP",
       "draftDescription": "Server ID と設定を入力してローカル MCP サーバーを作成します。",
       "serverIdLabel": "Server ID",
-      "serverIdPlaceholder": "Server ID（例：my-mcp）"
+      "serverIdPlaceholder": "Server ID（例：my-mcp）",
+      "typeHint": "対応タイプ：stdio、http（エイリアス streamable-http、streamableHttp）、sse。env は stdio 専用です。リモート MCP の認証トークンは headers で渡してください。",
+      "envOnRemoteWarning": "リモート MCP の設定に env が含まれています。env は stdio のみで使用され、リモート MCP の認証トークンは headers に格納します。env は保存時に無視されます。"
     },
     "market": {
       "selectMarketplace": "マーケットプレイスを選択",
@@ -689,9 +700,9 @@
       "authMustBeObject": "auth.json はJSONオブジェクトである必要があります",
       "authInvalid": "auth.json 形式エラー: {message}",
       "providerIdPattern": "Provider ID は英字・数字・アンダースコア・ドット・ハイフンのみ使用できます",
-      "providerExists": "Provider '{providerId}' はすでに存在します",
+      "providerExists": "Provider {providerId} はすでに存在します",
       "modelIdPattern": "Model ID は英字・数字・アンダースコア・ドット・コロン・ハイフンのみ使用できます",
-      "modelExists": "Model '{modelId}' はすでに存在します"
+      "modelExists": "Model {modelId} はすでに存在します"
     },
     "warnings": {
       "nativeJsonRecoveredStructured": "ネイティブJSON設定が不正のため、構造化設定にリセットしました",
@@ -927,6 +938,7 @@
       "reloadFailed": "会話の再読み込みに失敗しました: {message}",
       "reloaded": "会話を再読み込みしました",
       "reload": "再読み込み",
+      "activeConversationIndicator": "アクティブな会話",
       "newConversation": "新しい会話",
       "closeConversation": "会話を閉じる",
       "copyText": "テキストをコピー",
@@ -1936,6 +1948,19 @@
           "todosProgress": "タスク ({done}/{total})",
           "skillWithName": "Skill: {name}",
           "genericWithContext": "{tool}（{context}）"
+        },
+        "toolGroup": {
+          "search": "{count} 件を検索",
+          "command": "{count} 件のコマンドを実行",
+          "read": "ファイルを {count} 回読み取り",
+          "edit": "ファイルを {count} 回編集",
+          "fetch": "{count} 件のリソースを取得",
+          "think": "{count} 回思考",
+          "todo": "{count} 件の TODO を更新",
+          "task": "{count} 件のタスクを実行",
+          "other": "{count} 件のツールを使用",
+          "errorSuffix": "{count} 件失敗",
+          "joiner": " · "
         }
       }
     },
@@ -2300,6 +2325,64 @@
       "created": "クイックメッセージを作成しました",
       "saved": "クイックメッセージを保存しました",
       "deleted": "クイックメッセージを削除しました"
+    }
+  },
+  "Pet": {
+    "menu": {
+      "scale": "拡大率",
+      "openManager": "ペット管理",
+      "close": "閉じる"
+    },
+    "loadError": "ペットの読み込みに失敗",
+    "missingPetIdParam": "ペットが選択されていません",
+    "summonButton": "ペット",
+    "manager": {
+      "title": "デスクトップペット",
+      "description": "Codex 互換のスプライトシートで動く、デスクトップ常駐のお供。",
+      "addPet": "ペットを追加",
+      "importFromCodex": "Codex から取り込む",
+      "noPets": "ペットがありません。追加するか、Codex から取り込んでください。",
+      "setActive": "アクティブにする",
+      "active": "アクティブ",
+      "edit": "編集",
+      "delete": "削除",
+      "deleteConfirm": "このペットを削除しますか?ディスクからも削除されます。",
+      "summon": "ペットウィンドウを呼び出す",
+      "openCodexHelp": "Codex ペットは ~/.codex/pets/ 配下に配置する必要があります。見つかりません。",
+      "specRequirement": "スプライトシートは 1536x1872 ピクセル、透過 PNG / WebP 形式である必要があります。",
+      "form": {
+        "id": "ペット ID",
+        "idHelp": "英小文字、数字、'-'、'_' のみ。最大 64 文字。",
+        "displayName": "表示名",
+        "description": "説明 (任意)",
+        "spritesheet": "スプライトシート",
+        "chooseFile": "ファイルを選択",
+        "replaceFile": "スプライトを差し替え",
+        "saveCreate": "ペットを追加",
+        "saveUpdate": "変更を保存",
+        "cancel": "キャンセル"
+      },
+      "errors": {
+        "missingId": "ペット ID は必須です",
+        "missingName": "表示名は必須です",
+        "missingSpritesheet": "スプライトシートは必須です",
+        "addFailed": "ペットの追加に失敗しました",
+        "updateFailed": "ペットの更新に失敗しました",
+        "deleteFailed": "ペットの削除に失敗しました",
+        "loadFailed": "ペット一覧の取得に失敗しました"
+      }
+    },
+    "import": {
+      "title": "Codex から取り込む",
+      "subtitle": "~/.codex/pets/ 配下に見つかったペット一覧。",
+      "selectAll": "すべて選択",
+      "alreadyImported": "取り込み済み",
+      "renameOnConflict": "ID が重複した場合は -imported を付与",
+      "import": "選択したものを取り込む",
+      "noneFound": "取り込み可能な Codex ペットが見つかりません。",
+      "imported": "取り込みに成功",
+      "failed": "取り込みに失敗",
+      "close": "閉じる"
     }
   }
 }

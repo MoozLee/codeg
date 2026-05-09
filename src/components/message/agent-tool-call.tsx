@@ -4,46 +4,15 @@ import type { AgentToolCall } from "@/lib/types"
 import { tryParseJson, extractJsonField } from "./content-parts-renderer"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { Shimmer } from "@/components/ai-elements/shimmer"
-import { getStatusBadge } from "@/components/ai-elements/tool"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CompassIcon,
-  Loader2,
-  MapIcon,
-  TerminalIcon,
-  WrenchIcon,
-} from "lucide-react"
+import { ChevronRightIcon, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
-
-// ── helpers ────────────────────────────────────────────────────────────
-
-const ICON_CLASS = "size-4 text-muted-foreground"
-
-function getAgentIcon(subagentType: string | null) {
-  const t = subagentType?.toLowerCase() ?? ""
-  if (t.includes("explore")) return <CompassIcon className={ICON_CLASS} />
-  if (t.includes("plan")) return <MapIcon className={ICON_CLASS} />
-  if (t.includes("bash")) return <TerminalIcon className={ICON_CLASS} />
-  return <WrenchIcon className={ICON_CLASS} />
-}
-
-function getAccentColor(subagentType: string | null): string {
-  const t = subagentType?.toLowerCase() ?? ""
-  if (t.includes("explore"))
-    return "border-l-blue-500/50 dark:border-l-blue-400/40"
-  if (t.includes("plan"))
-    return "border-l-amber-500/50 dark:border-l-amber-400/40"
-  if (t.includes("bash"))
-    return "border-l-green-500/50 dark:border-l-green-400/40"
-  return "border-l-purple-500/50 dark:border-l-purple-400/40"
-}
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -91,12 +60,15 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
     part.state === "input-available" || part.state === "input-streaming"
   const isError = part.state === "output-error"
 
-  const [bodyOpen, setBodyOpen] = useState(isRunning || isError)
+  const [bodyOpen, setBodyOpen] = useState(isError)
   const [promptOpen, setPromptOpen] = useState(false)
 
   // Auto-collapse once when the agent transitions from running to completed
-  // (non-error). The running → completed transition only fires once per tool
-  // call, so this is naturally one-shot.
+  // (non-error) — only matters when the user manually expanded during streaming.
+  // Render-phase `setState` driven by tracked previous state is the canonical
+  // React pattern for "respond to a prop transition" — see
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders.
+  // The transition fires at most once per tool call.
   const [prevIsRunning, setPrevIsRunning] = useState(isRunning)
   if (prevIsRunning !== isRunning) {
     setPrevIsRunning(isRunning)
@@ -138,12 +110,6 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
     [parsed, part.input]
   )
 
-  const icon = useMemo(() => getAgentIcon(subagentType), [subagentType])
-  const accentColor = useMemo(
-    () => getAccentColor(subagentType),
-    [subagentType]
-  )
-
   const title = useMemo(() => {
     const prefix = subagentType ?? "Agent"
     return description ? `${prefix}: ${description}` : prefix
@@ -170,115 +136,127 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   }, [agentStats])
 
   return (
-    <Collapsible open={bodyOpen} onOpenChange={setBodyOpen}>
-      <div
+    <Collapsible open={bodyOpen} onOpenChange={setBodyOpen} className="w-full">
+      {/* Pill trigger — matches ToolGroupPart structure with themed emphasis. */}
+      <CollapsibleTrigger
         className={cn(
-          "rounded-md border border-border/60 bg-muted/20 overflow-hidden",
-          "border-l-[3px]",
-          accentColor
+          "group inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-primary/15",
+          isError && "text-destructive"
+        )}
+        aria-label={statusLabel}
+      >
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={cn(
+            "size-3 shrink-0 opacity-60 transition-transform",
+            bodyOpen && "rotate-90"
+          )}
+        />
+        <span className="min-w-0 truncate">
+          {isRunning ? (
+            <Shimmer as="span" duration={1} shineColor="var(--primary)">
+              {title}
+            </Shimmer>
+          ) : (
+            title
+          )}
+        </span>
+        {durationSuffix && (
+          <span className="shrink-0 text-muted-foreground/60">
+            {durationSuffix}
+          </span>
+        )}
+      </CollapsibleTrigger>
+
+      {/* Body — sits below the pill. Internal sections retain their own affordances. */}
+      <CollapsibleContent
+        className={cn(
+          "w-full outline-none",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          "data-[state=closed]:slide-out-to-top-1 data-[state=open]:slide-in-from-top-1"
         )}
       >
-        {/* Header — clickable to toggle body */}
-        <CollapsibleTrigger className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="shrink-0">{icon}</span>
-            <span className="min-w-0 flex-1 truncate whitespace-nowrap text-sm font-medium text-left">
-              {title}
-            </span>
-            {!bodyOpen && durationSuffix && (
-              <span className="shrink-0 text-xs text-muted-foreground/60">
-                {durationSuffix}
-              </span>
-            )}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {getStatusBadge(part.state, statusLabel)}
-            <ChevronDownIcon
-              className={cn(
-                "size-4 text-muted-foreground transition-transform",
-                !bodyOpen && "-rotate-90"
-              )}
-            />
-          </div>
-        </CollapsibleTrigger>
-
-        {/* Collapsible body */}
-        <CollapsibleContent>
-          <div className="max-h-72 overflow-y-auto space-y-3 px-4 pb-4">
-            {/* Model + duration summary */}
-            {(model || durationSuffix) && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                {model && (
+        <div className="mt-3 w-full overflow-hidden rounded-md border border-border/60">
+          <ScrollArea className="max-h-72">
+            <div className="space-y-3 px-3.5 py-2">
+              {/* Model summary */}
+              {model && (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span>
                     {t("agentModelLabel")}:{" "}
                     <span className="font-mono">{model}</span>
                   </span>
-                )}
-                {durationSuffix && <span>{durationSuffix}</span>}
-              </div>
-            )}
+                </div>
+              )}
 
-            {/* Collapsible prompt */}
-            {prompt && (
-              <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
-                <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                  <ChevronRightIcon
-                    className={cn(
-                      "size-3.5 transition-transform",
-                      promptOpen && "rotate-90"
-                    )}
-                  />
-                  {t("agentPromptLabel")}
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="mt-2 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
-                    <MessageResponse>{prompt}</MessageResponse>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
+              {/* Collapsible prompt */}
+              {prompt && (
+                <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
+                  <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                    <ChevronRightIcon
+                      aria-hidden="true"
+                      className={cn(
+                        "size-3.5 transition-transform",
+                        promptOpen && "rotate-90"
+                      )}
+                    />
+                    {t("agentPromptLabel")}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="mt-2 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
+                      <MessageResponse>{prompt}</MessageResponse>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
 
-            {/* Subagent tool calls — rendered with the same ToolCallPart
-                as the outer conversation for consistent appearance */}
-            {adaptedToolCalls.length > 0 && (
-              <div className="space-y-2">
-                {adaptedToolCalls.map((tc, i) =>
-                  renderToolCall(
-                    tc as Extract<AdaptedContentPart, { type: "tool-call" }>,
-                    `subagent-tc-${i}`
-                  )
-                )}
-              </div>
-            )}
+              {/* Subagent tool calls — rendered with the same ToolCallPart
+              as the outer conversation for consistent appearance */}
+              {adaptedToolCalls.length > 0 && (
+                <div className="space-y-2">
+                  {adaptedToolCalls.map((tc, i) =>
+                    renderToolCall(
+                      tc as Extract<AdaptedContentPart, { type: "tool-call" }>,
+                      `subagent-tc-${i}`
+                    )
+                  )}
+                </div>
+              )}
 
-            {/* Running indicator */}
-            {isRunning && !part.output && (
-              <div className="flex items-center gap-2">
-                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                <Shimmer className="text-sm" duration={2}>
-                  {t("agentRunning")}
-                </Shimmer>
-              </div>
-            )}
+              {/* Running indicator */}
+              {isRunning && !part.output && (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                  <Shimmer
+                    className="text-sm"
+                    duration={1}
+                    shineColor="var(--primary)"
+                  >
+                    {t("agentRunning")}
+                  </Shimmer>
+                </div>
+              )}
 
-            {/* Error output */}
-            {isError && part.errorText && (
-              <div className="rounded-md bg-destructive/10 p-3">
-                <pre className="whitespace-pre-wrap break-words text-xs text-destructive">
-                  {part.errorText}
-                </pre>
-              </div>
-            )}
+              {/* Error output */}
+              {isError && part.errorText && (
+                <div className="rounded-md bg-destructive/10 p-3">
+                  <pre className="whitespace-pre-wrap break-words text-xs text-destructive">
+                    {part.errorText}
+                  </pre>
+                </div>
+              )}
 
-            {/* Final output */}
-            {part.output && !isError && (
-              <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
-                <MessageResponse>{part.output}</MessageResponse>
-              </div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </div>
+              {/* Final output */}
+              {part.output && !isError && (
+                <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
+                  <MessageResponse>{part.output}</MessageResponse>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </CollapsibleContent>
     </Collapsible>
   )
 })

@@ -28,6 +28,10 @@ export interface AppCommandError {
   code: AppErrorCode
   message: string
   detail?: string | null
+  /** Optional dotted i18n key used to render a localized message. */
+  i18n_key?: string | null
+  /** Optional named parameters substituted into the localized template. */
+  i18n_params?: Record<string, string> | null
 }
 
 export interface ConversationSummary {
@@ -223,17 +227,10 @@ export const STATUS_LABELS: Record<ConversationStatus, string> = {
 }
 
 export const STATUS_COLORS: Record<ConversationStatus, string> = {
-  in_progress: "bg-blue-500",
-  pending_review: "bg-orange-500",
+  in_progress: "bg-yellow-400",
+  pending_review: "bg-blue-500",
   completed: "bg-green-500",
   cancelled: "bg-red-500",
-}
-
-export const STATUS_ICON_COLORS: Record<ConversationStatus, string> = {
-  in_progress: "text-blue-500",
-  pending_review: "text-orange-500",
-  completed: "text-green-500",
-  cancelled: "text-red-500",
 }
 
 export const AGENT_DISPLAY_ORDER: AgentType[] = [

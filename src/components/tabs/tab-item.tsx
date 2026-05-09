@@ -5,8 +5,8 @@ import { Reorder } from "motion/react"
 import { X } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
-import { STATUS_COLORS } from "@/lib/types"
 import type { ConversationStatus } from "@/lib/types"
+import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -118,13 +118,8 @@ export const TabItem = memo(function TabItem({
                 : "text-muted-foreground"
             )}
           >
-            <span
-              className={cn(
-                "w-2 h-2 rounded-full shrink-0",
-                tab.status
-                  ? STATUS_COLORS[tab.status as ConversationStatus]
-                  : "bg-gray-400 dark:bg-gray-500"
-              )}
+            <ConversationStatusDot
+              status={tab.status as ConversationStatus | undefined}
             />
             <span
               className={cn(

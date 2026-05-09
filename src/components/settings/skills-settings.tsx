@@ -67,6 +67,7 @@ import type {
   AgentType,
   FolderHistoryEntry,
 } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 type SkillsTranslator = (
   key: string,
@@ -363,7 +364,7 @@ export function SkillsSettings() {
         setIsContentEditing(mode === "edit")
         setIsDrafting(false)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.loadFailed"), { description: message })
       } finally {
         setSkillReading(false)
@@ -404,7 +405,7 @@ export function SkillsSettings() {
         )
         return result
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         setSkillsError(message)
         setSkillsSupported(true)
         setSkillLocation(null)
@@ -441,7 +442,7 @@ export function SkillsSettings() {
 
       setAgents(next.filter((agent) => supported.has(agent.agent_type)))
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setLoadingError(message)
       setAgents([])
     } finally {
@@ -477,7 +478,7 @@ export function SkillsSettings() {
       try {
         await openFolder(dirPath)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.openFolderFailed"), { description: message })
       }
     },
@@ -548,7 +549,7 @@ export function SkillsSettings() {
         isEditingExisting ? t("toasts.updated") : t("toasts.created")
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("toasts.saveFailed"), { description: message })
     } finally {
       setSkillSaving(false)
@@ -605,7 +606,7 @@ export function SkillsSettings() {
           setIsDrafting(false)
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.deleteFailed"), { description: message })
       } finally {
         setSkillDeletingId(null)

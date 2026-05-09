@@ -33,6 +33,7 @@ import {
   loadPersistedWorkspaceMode,
   savePersistedWorkspaceMode,
 } from "@/lib/workspace-mode-storage"
+import { toErrorMessage } from "@/lib/app-error"
 
 export type WorkspaceMode = "conversation" | "fusion" | "files"
 export type WorkspacePane = "conversation" | "files"
@@ -448,10 +449,7 @@ export function WorkspaceProvider({
             )
           )
         } catch (error) {
-          rejectTab(
-            tabId,
-            error instanceof Error ? error.message : String(error)
-          )
+          rejectTab(tabId, toErrorMessage(error))
         }
         return
       }
@@ -497,7 +495,7 @@ export function WorkspaceProvider({
             prev && prev.path === path ? null : prev
           )
         }
-        rejectTab(tabId, error instanceof Error ? error.message : String(error))
+        rejectTab(tabId, toErrorMessage(error))
       }
     },
     [folderPath, rejectTab, t, upsertLoadingTab]
@@ -525,10 +523,7 @@ export function WorkspaceProvider({
           )
           resolveTab(tabId, result || t("noChanges"), false)
         } catch (error) {
-          rejectTab(
-            tabId,
-            error instanceof Error ? error.message : String(error)
-          )
+          rejectTab(tabId, toErrorMessage(error))
         }
         return
       }
@@ -557,10 +552,7 @@ export function WorkspaceProvider({
           )
           resolveTab(tabId, result || t("noChanges"), false)
         } catch (error) {
-          rejectTab(
-            tabId,
-            error instanceof Error ? error.message : String(error)
-          )
+          rejectTab(tabId, toErrorMessage(error))
         }
         return
       }
@@ -581,10 +573,7 @@ export function WorkspaceProvider({
           )
           resolveTab(tabId, result || t("noChanges"), false)
         } catch (error) {
-          rejectTab(
-            tabId,
-            error instanceof Error ? error.message : String(error)
-          )
+          rejectTab(tabId, toErrorMessage(error))
         }
         return
       }
@@ -612,7 +601,7 @@ export function WorkspaceProvider({
         )
         resolveRichDiffTab(tabId, originalContent, modifiedResult.content)
       } catch (error) {
-        rejectTab(tabId, error instanceof Error ? error.message : String(error))
+        rejectTab(tabId, toErrorMessage(error))
       }
     },
     [folderPath, rejectTab, resolveTab, resolveRichDiffTab, t, upsertLoadingTab]
@@ -663,10 +652,7 @@ export function WorkspaceProvider({
           )
           resolveRichDiffTab(tabId, originalContent, modifiedResult.content)
         } catch (error) {
-          rejectTab(
-            tabId,
-            error instanceof Error ? error.message : String(error)
-          )
+          rejectTab(tabId, toErrorMessage(error))
         }
         return
       }
@@ -683,7 +669,7 @@ export function WorkspaceProvider({
         )
         resolveTab(tabId, result || t("noChanges"), false)
       } catch (error) {
-        rejectTab(tabId, error instanceof Error ? error.message : String(error))
+        rejectTab(tabId, toErrorMessage(error))
       }
     },
     [folderPath, rejectTab, resolveRichDiffTab, resolveTab, t, upsertLoadingTab]
@@ -721,10 +707,7 @@ export function WorkspaceProvider({
           )
           resolveRichDiffTab(tabId, originalContent, modifiedContent)
         } catch (error) {
-          rejectTab(
-            tabId,
-            error instanceof Error ? error.message : String(error)
-          )
+          rejectTab(tabId, toErrorMessage(error))
         }
       } else {
         upsertLoadingTab(
@@ -739,10 +722,7 @@ export function WorkspaceProvider({
           )
           resolveTab(tabId, result || t("noDiffOutput"), false)
         } catch (error) {
-          rejectTab(
-            tabId,
-            error instanceof Error ? error.message : String(error)
-          )
+          rejectTab(tabId, toErrorMessage(error))
         }
       }
     },
@@ -883,7 +863,7 @@ export function WorkspaceProvider({
 
         return true
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         setFileTabs((prev) =>
           prev.map((candidate) =>
             candidate.id === tabId
@@ -967,7 +947,7 @@ export function WorkspaceProvider({
           )
         )
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         setFileTabs((prev) =>
           prev.map((candidate) =>
             candidate.id === tabId

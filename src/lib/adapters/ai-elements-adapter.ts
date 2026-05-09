@@ -5,6 +5,7 @@ import type {
   TurnUsage,
   AgentExecutionStats,
 } from "@/lib/types"
+import { isAgentLikeToolName } from "@/lib/adapters/tool-kind-classifier"
 
 /**
  * Adapted content part types for AI SDK Elements components
@@ -15,19 +16,21 @@ export type ToolCallState =
   | "output-available"
   | "output-error"
 
+export type AdaptedToolCallPart = {
+  type: "tool-call"
+  toolCallId: string
+  toolName: string
+  displayTitle?: string | null
+  input: string | null
+  state: ToolCallState
+  output?: string | null
+  errorText?: string
+  agentStats?: AgentExecutionStats | null
+}
+
 export type AdaptedContentPart =
   | { type: "text"; text: string }
-  | {
-      type: "tool-call"
-      toolCallId: string
-      toolName: string
-      displayTitle?: string | null
-      input: string | null
-      state: ToolCallState
-      output?: string | null
-      errorText?: string
-      agentStats?: AgentExecutionStats | null
-    }
+  | AdaptedToolCallPart
   | {
       type: "tool-result"
       toolCallId: string
@@ -36,6 +39,11 @@ export type AdaptedContentPart =
       state: "output-available" | "output-error"
     }
   | { type: "reasoning"; content: string; isStreaming: boolean }
+  | {
+      type: "tool-group"
+      items: AdaptedToolCallPart[]
+      isStreaming: boolean
+    }
 
 export interface UserResourceDisplay {
   name: string
@@ -591,6 +599,70 @@ function adaptContentBlock(
 }
 
 /**
+ * Merge adjacent tool-group parts in a parts array into a single tool-group.
+ * Used for cross-turn merging when concatenated content from consecutive
+ * assistant turns lands two tool-groups next to each other.
+ */
+export function mergeAdjacentToolGroups(
+  parts: AdaptedContentPart[]
+): AdaptedContentPart[] {
+  const result: AdaptedContentPart[] = []
+  for (const part of parts) {
+    const last = result[result.length - 1]
+    if (part.type === "tool-group" && last?.type === "tool-group") {
+      const mergedItems = [...last.items, ...part.items]
+      result[result.length - 1] = {
+        type: "tool-group",
+        items: mergedItems,
+        isStreaming: mergedItems.some(
+          (item) =>
+            item.state === "input-streaming" || item.state === "input-available"
+        ),
+      }
+    } else {
+      result.push(part)
+    }
+  }
+  return result
+}
+
+/**
+ * Wrap any consecutive run of tool-call parts into a single tool-group.
+ * Text, reasoning, tool-result and any other part types break the run.
+ * Even a single tool call is wrapped, so the renderer can present a uniform
+ * collapsed summary across history.
+ */
+export function groupConsecutiveToolCalls(
+  parts: AdaptedContentPart[]
+): AdaptedContentPart[] {
+  const result: AdaptedContentPart[] = []
+  let buffer: AdaptedToolCallPart[] = []
+
+  const flush = () => {
+    if (buffer.length === 0) return
+    const items = buffer
+    buffer = []
+    const isStreaming = items.some(
+      (item) =>
+        item.state === "input-streaming" || item.state === "input-available"
+    )
+    result.push({ type: "tool-group", items, isStreaming })
+  }
+
+  for (const part of parts) {
+    if (part.type === "tool-call" && !isAgentLikeToolName(part.toolName)) {
+      buffer.push(part)
+      continue
+    }
+    flush()
+    result.push(part)
+  }
+  flush()
+
+  return result
+}
+
+/**
  * Build a map of tool_use_id → tool_result ContentBlock from content blocks.
  * Used to correlate tool calls with their results.
  */
@@ -738,10 +810,15 @@ export function adaptMessageTurn(
     }
   }
 
+  const groupedContent =
+    turn.role === "assistant"
+      ? groupConsecutiveToolCalls(adaptedContent)
+      : adaptedContent
+
   const userSplit =
     turn.role === "user"
-      ? splitUserTextAndResources(adaptedContent, text.attachedResources)
-      : { parts: adaptedContent, resources: [] as UserResourceDisplay[] }
+      ? splitUserTextAndResources(groupedContent, text.attachedResources)
+      : { parts: groupedContent, resources: [] as UserResourceDisplay[] }
   const userImages =
     turn.role === "user" ? extractUserImagesFromBlocks(turn.blocks) : []
   const assistantImages =
@@ -785,4 +862,117 @@ export function adaptMessageTurns(
       inProgressToolCallIdsByIndex?.get(i)
     )
   )
+}
+
+interface TurnCacheEntry {
+  text: AdapterMessageText
+  blocks: ContentBlock[]
+  blocksLen: number
+  timestamp: string
+  role: MessageRole
+  usage: TurnUsage | null | undefined
+  duration_ms: number | null | undefined
+  model: string | null | undefined
+  adapted: AdaptedMessage
+}
+
+export interface MessageTurnAdapter {
+  /**
+   * Adapt all turns to messages, reusing previously computed `AdaptedMessage`
+   * references for turns whose content hasn't changed. Streaming turns and
+   * turns with in-progress tool calls are never cached so partial state always
+   * re-flows through the adapter.
+   */
+  adapt(
+    turns: MessageTurn[],
+    text: AdapterMessageText,
+    streamingIndices?: Set<number>,
+    inProgressToolCallIdsByIndex?: Map<number, Set<string>>
+  ): AdaptedMessage[]
+  clear(): void
+}
+
+/**
+ * Build a stateful adapter that caches per-turn results. Intended to live for
+ * the lifetime of a chat view — instantiate once via `useRef` so the cache
+ * survives across re-renders triggered by streaming deltas.
+ *
+ * Cache invalidation: an entry is reused only when `(text, blocks,
+ * blocksLen, timestamp, role, usage, duration_ms, model)` all match. The
+ * blocks reference catches whole-turn rewrites (e.g. detail refetch
+ * replacing `detail.turns`) where blocksLen/timestamp may stay equal but
+ * a tool's output_preview was updated; PATCH_TURN_METADATA preserves the
+ * blocks reference, so it still hits. The usage trio is patched in by
+ * `syncTurnMetadata` after a stream finishes (initial blocks land first,
+ * token totals arrive on a later DB roundtrip), so excluding them would
+ * freeze the turn at its pre-patch state and the post-stream stats row
+ * would never appear. Turns no longer present are GC'd at the end of
+ * every adapt() call so the cache size tracks the conversation.
+ */
+export function createMessageTurnAdapter(): MessageTurnAdapter {
+  const cache = new Map<string, TurnCacheEntry>()
+
+  return {
+    adapt(turns, text, streamingIndices, inProgressToolCallIdsByIndex) {
+      const seen = new Set<string>()
+      const out: AdaptedMessage[] = new Array(turns.length)
+
+      for (let i = 0; i < turns.length; i += 1) {
+        const turn = turns[i]
+        seen.add(turn.id)
+        const isStreaming = streamingIndices?.has(i) ?? false
+        const inProgress = inProgressToolCallIdsByIndex?.get(i)
+        const cacheable = !isStreaming && !inProgress
+        const blocksLen = turn.blocks.length
+
+        if (cacheable) {
+          const cached = cache.get(turn.id)
+          if (
+            cached &&
+            cached.text === text &&
+            cached.blocks === turn.blocks &&
+            cached.blocksLen === blocksLen &&
+            cached.timestamp === turn.timestamp &&
+            cached.role === turn.role &&
+            cached.usage === turn.usage &&
+            cached.duration_ms === turn.duration_ms &&
+            cached.model === turn.model
+          ) {
+            out[i] = cached.adapted
+            continue
+          }
+        }
+
+        const adapted = adaptMessageTurn(turn, text, isStreaming, inProgress)
+        out[i] = adapted
+
+        if (cacheable) {
+          cache.set(turn.id, {
+            text,
+            blocks: turn.blocks,
+            blocksLen,
+            timestamp: turn.timestamp,
+            role: turn.role,
+            usage: turn.usage,
+            duration_ms: turn.duration_ms,
+            model: turn.model,
+            adapted,
+          })
+        } else {
+          cache.delete(turn.id)
+        }
+      }
+
+      if (cache.size > seen.size) {
+        for (const id of cache.keys()) {
+          if (!seen.has(id)) cache.delete(id)
+        }
+      }
+
+      return out
+    },
+    clear() {
+      cache.clear()
+    },
+  }
 }

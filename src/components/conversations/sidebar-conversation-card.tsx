@@ -4,7 +4,7 @@ import { memo, useState, useCallback } from "react"
 import { Pencil, Trash2, Circle, Plus, ExternalLink } from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { DbConversationSummary, ConversationStatus } from "@/lib/types"
-import { STATUS_ICON_COLORS, STATUS_ORDER } from "@/lib/types"
+import { STATUS_ORDER } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
   ContextMenu,
@@ -35,8 +35,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ConversationStatusIcon } from "./conversation-status-icon"
-import { SidebarStatusIcon } from "./sidebar-status-icon"
+import { ConversationStatusDot } from "./conversation-status-dot"
+import { AgentIcon } from "@/components/agent-icon"
 
 interface SidebarConversationCardProps {
   conversation: DbConversationSummary
@@ -138,7 +138,33 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                   transform: "translateX(-50%)",
                 }}
               />
-              <SidebarStatusIcon status={status} emphasized={isOpenInTab} />
+              <div
+                className="pointer-events-none absolute top-1/2 z-10 flex items-center justify-center"
+                style={{
+                  left: "var(--conv-rail-axis, 0.875rem)",
+                  width: "0.875rem",
+                  height: "0.875rem",
+                  transform: "translate(-50%, -50%)",
+                }}
+                aria-hidden
+              >
+                <AgentIcon
+                  agentType={conversation.agent_type}
+                  className="h-[0.75rem] w-[0.75rem]"
+                />
+                <ConversationStatusDot
+                  status={status}
+                  size="sm"
+                  className="absolute -right-0.5 -bottom-0.5 ring-2 ring-sidebar"
+                >
+                  {isOpenInTab ? (
+                    <span
+                      aria-hidden
+                      className="block h-[0.1875rem] w-[0.1875rem] rounded-full bg-sidebar"
+                    />
+                  ) : null}
+                </ConversationStatusDot>
+              </div>
 
               <span
                 className={cn(
@@ -229,10 +255,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                     key={s}
                     onSelect={() => onStatusChange(conversation.id, s)}
                   >
-                    <ConversationStatusIcon
-                      status={s}
-                      className={cn("h-4 w-4", STATUS_ICON_COLORS[s])}
-                    />
+                    <ConversationStatusDot status={s} />
                     {tStatus(s)}
                   </ContextMenuItem>
                 )

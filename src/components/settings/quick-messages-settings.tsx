@@ -42,6 +42,7 @@ import {
   quickMessagesUpdate,
 } from "@/lib/api"
 import type { QuickMessage } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 const LEFT_MIN_WIDTH = 280
 const RIGHT_MIN_WIDTH = 420
@@ -147,7 +148,7 @@ export function QuickMessagesSettings() {
       const list = await quickMessagesList()
       setMessages(list)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setLoadError(message)
       setMessages([])
     } finally {
@@ -226,7 +227,7 @@ export function QuickMessagesSettings() {
       try {
         await quickMessagesReorder(ids)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.saveOrderFailed"), { description: message })
         await refresh()
       } finally {
@@ -253,7 +254,7 @@ export function QuickMessagesSettings() {
         titleInputRef.current?.focus()
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("toasts.createFailed"), { description: message })
     } finally {
       setCreating(false)
@@ -274,7 +275,7 @@ export function QuickMessagesSettings() {
       )
       toast.success(t("toasts.saved"))
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("toasts.saveFailed"), { description: message })
     } finally {
       setSaving(false)
@@ -297,7 +298,7 @@ export function QuickMessagesSettings() {
       toast.success(t("toasts.deleted"))
       setDeleteTargetId(null)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("toasts.deleteFailed"), { description: message })
     } finally {
       setDeleting(false)

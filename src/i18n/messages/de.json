@@ -188,6 +188,7 @@
     "updating": "Wird installiert...",
     "downloading": "Herunterladen...",
     "upgradeTo": "Auf v{version} aktualisieren",
+    "viewRelease": "Release v{version} anzeigen",
     "foundUpdate": "Neue Version v{version} gefunden",
     "alreadyLatest": "Du verwendest bereits die neueste Version",
     "checkUpdateFailed": "Update-Prüfung fehlgeschlagen: {message}",
@@ -428,7 +429,15 @@
       "fieldOutOfRange": "Der Wert von {field} liegt außerhalb des erlaubten Bereichs",
       "jsonEmpty": "{name} darf nicht leer sein",
       "jsonInvalid": "{name} ist kein gültiges JSON: {message}",
-      "jsonMustBeObject": "{name} muss ein JSON-Objekt sein"
+      "jsonMustBeObject": "{name} muss ein JSON-Objekt sein",
+      "specMustBeObject": "Die MCP-Konfiguration muss ein JSON-Objekt sein.",
+      "missingType": "Der Konfiguration fehlt das Feld type. Bitte stdio, http (Aliase: streamable-http, streamableHttp) oder sse angeben.",
+      "unsupportedType": "Nicht unterstützter MCP-Typ {type}. Unterstützt: stdio, http (Aliase: streamable-http, streamableHttp), sse.",
+      "codexEntryUnsupportedType": "Codex-MCP-Eintrag {id} hat den nicht unterstützten Typ {type}. Unterstützt: stdio, http (Aliase: streamable-http, streamableHttp), sse.",
+      "unsupportedTransportType": "Nicht unterstützter Transport-Typ {type}. Unterstützt: http (Aliase: streamable-http, streamableHttp), sse.",
+      "stdioCommandRequired": "stdio-MCPs benötigen ein nicht leeres Feld command.",
+      "remoteUrlRequired": "Remote-MCPs benötigen ein nicht leeres Feld url.",
+      "appsRequired": "Mindestens eine Ziel-App auswählen."
     },
     "jsonNames": {
       "localConfig": "MCP-Konfiguration",
@@ -486,7 +495,9 @@
       "draftTitle": "Neuer MCP",
       "draftDescription": "Geben Sie eine Server-ID und Konfiguration an, um einen lokalen MCP-Server zu erstellen.",
       "serverIdLabel": "Server-ID",
-      "serverIdPlaceholder": "Server-ID (z. B. my-mcp)"
+      "serverIdPlaceholder": "Server-ID (z. B. my-mcp)",
+      "typeHint": "Unterstützte Typen: stdio, http (Aliase: streamable-http, streamableHttp), sse. env wird nur von stdio verwendet; für Remote-MCPs Auth-Tokens über headers übermitteln.",
+      "envOnRemoteWarning": "env wurde in einem Remote-MCP erkannt. Nur stdio verwendet env; Remote-MCPs übermitteln Auth-Tokens über headers, sodass env beim Speichern ignoriert wird."
     },
     "market": {
       "selectMarketplace": "Marktplatz auswählen",
@@ -689,9 +700,9 @@
       "authMustBeObject": "auth.json muss ein JSON-Objekt sein",
       "authInvalid": "Formatfehler in auth.json: {message}",
       "providerIdPattern": "Provider-ID unterstützt nur Buchstaben, Zahlen, Unterstrich, Punkt und Bindestrich",
-      "providerExists": "Provider '{providerId}' existiert bereits",
+      "providerExists": "Provider {providerId} existiert bereits",
       "modelIdPattern": "Model-ID unterstützt nur Buchstaben, Zahlen, Unterstrich, Punkt, Doppelpunkt und Bindestrich",
-      "modelExists": "Model '{modelId}' existiert bereits"
+      "modelExists": "Model {modelId} existiert bereits"
     },
     "warnings": {
       "nativeJsonRecoveredStructured": "Native JSON-Konfiguration ist ungültig; auf strukturierte Konfiguration zurückgesetzt",
@@ -927,6 +938,7 @@
       "reloadFailed": "Konversation konnte nicht neu geladen werden: {message}",
       "reloaded": "Konversation neu geladen",
       "reload": "Neu laden",
+      "activeConversationIndicator": "Aktive Konversation",
       "newConversation": "Neue Konversation",
       "closeConversation": "Konversation schließen",
       "copyText": "Text kopieren",
@@ -1936,6 +1948,19 @@
           "todosProgress": "Aufgaben ({done}/{total})",
           "skillWithName": "Skill: {name}",
           "genericWithContext": "{tool} ({context})"
+        },
+        "toolGroup": {
+          "search": "{count, plural, one {# Suche durchgeführt} other {# Suchen durchgeführt}}",
+          "command": "{count, plural, one {# Befehl ausgeführt} other {# Befehle ausgeführt}}",
+          "read": "{count, plural, one {Dateien # Mal gelesen} other {Dateien # Mal gelesen}}",
+          "edit": "{count, plural, one {Dateien # Mal bearbeitet} other {Dateien # Mal bearbeitet}}",
+          "fetch": "{count, plural, one {# Ressource abgerufen} other {# Ressourcen abgerufen}}",
+          "think": "{count, plural, one {# Mal nachgedacht} other {# Mal nachgedacht}}",
+          "todo": "{count, plural, one {# Aufgabe aktualisiert} other {# Aufgaben aktualisiert}}",
+          "task": "{count, plural, one {# Aufgabe ausgeführt} other {# Aufgaben ausgeführt}}",
+          "other": "{count, plural, one {# Werkzeug verwendet} other {# Werkzeuge verwendet}}",
+          "errorSuffix": "{count, plural, one {# fehlgeschlagen} other {# fehlgeschlagen}}",
+          "joiner": " · "
         }
       }
     },
@@ -2300,6 +2325,64 @@
       "created": "Schnellnachricht erstellt",
       "saved": "Schnellnachricht gespeichert",
       "deleted": "Schnellnachricht gelöscht"
+    }
+  },
+  "Pet": {
+    "menu": {
+      "scale": "Skalierung",
+      "openManager": "Pets verwalten",
+      "close": "Schließen"
+    },
+    "loadError": "Pet konnte nicht geladen werden",
+    "missingPetIdParam": "Kein Pet ausgewählt",
+    "summonButton": "Pet",
+    "manager": {
+      "title": "Desktop-Pets",
+      "description": "Schwebende Begleiter mit Codex-kompatiblen Sprite-Sheets.",
+      "addPet": "Pet hinzufügen",
+      "importFromCodex": "Aus Codex importieren",
+      "noPets": "Keine Pets. Lege eines an oder importiere aus Codex.",
+      "setActive": "Aktivieren",
+      "active": "Aktiv",
+      "edit": "Bearbeiten",
+      "delete": "Löschen",
+      "deleteConfirm": "Dieses Pet löschen? Auch von der Festplatte entfernt.",
+      "summon": "Pet-Fenster aufrufen",
+      "openCodexHelp": "Codex-Pets müssen in ~/.codex/pets/ liegen. Nichts gefunden.",
+      "specRequirement": "Sprite-Sheet muss 1536x1872 PNG oder WebP mit Transparenz sein.",
+      "form": {
+        "id": "Pet-ID",
+        "idHelp": "Kleinbuchstaben, Ziffern, '-' und '_'. Max 64 Zeichen.",
+        "displayName": "Anzeigename",
+        "description": "Beschreibung (optional)",
+        "spritesheet": "Sprite-Sheet",
+        "chooseFile": "Datei wählen",
+        "replaceFile": "Sprite ersetzen",
+        "saveCreate": "Pet hinzufügen",
+        "saveUpdate": "Änderungen speichern",
+        "cancel": "Abbrechen"
+      },
+      "errors": {
+        "missingId": "Pet-ID erforderlich",
+        "missingName": "Anzeigename erforderlich",
+        "missingSpritesheet": "Sprite erforderlich",
+        "addFailed": "Hinzufügen fehlgeschlagen",
+        "updateFailed": "Aktualisieren fehlgeschlagen",
+        "deleteFailed": "Löschen fehlgeschlagen",
+        "loadFailed": "Pet-Liste konnte nicht geladen werden"
+      }
+    },
+    "import": {
+      "title": "Aus Codex importieren",
+      "subtitle": "Pets unter ~/.codex/pets/.",
+      "selectAll": "Alle auswählen",
+      "alreadyImported": "Bereits importiert",
+      "renameOnConflict": "Konflikte mit Suffix -imported umbenennen",
+      "import": "Auswahl importieren",
+      "noneFound": "Keine importierbaren Codex-Pets gefunden.",
+      "imported": "Erfolgreich importiert",
+      "failed": "Import fehlgeschlagen",
+      "close": "Schließen"
     }
   }
 }

@@ -25,6 +25,12 @@ interface VirtualizedMessageThreadProps<T> {
    * affects the very first paint — omit it if you don't care.
    */
   itemSize?: number
+  /**
+   * Pixels of overscan around the viewport (virtua `bufferSize`).
+   * Larger values reduce blank flashes during fast scroll on tall rows
+   * at the cost of more off-screen reconciliation. @default 800
+   */
+  bufferSize?: number
   /** Vertical gap between items in px. @default 16 */
   gap?: number
   /** Vertical padding before the first / after the last item. @default 16 */
@@ -45,6 +51,7 @@ export function VirtualizedMessageThread<T>({
   renderItem,
   emptyState,
   itemSize,
+  bufferSize = 800,
   gap = 16,
   padding = 16,
   className,
@@ -86,6 +93,7 @@ export function VirtualizedMessageThread<T>({
           ref={virtualizerRef}
           scrollRef={scrollRef as unknown as RefObject<HTMLElement | null>}
           itemSize={itemSize}
+          bufferSize={bufferSize}
         >
           {items.map((item, index) => (
             <div

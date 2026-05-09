@@ -21,6 +21,7 @@ import {
   getChatChannelHasToken,
 } from "@/lib/api"
 import type { ChatChannelInfo } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface EditChatChannelDialogProps {
   open: boolean
@@ -97,7 +98,7 @@ export function EditChatChannelDialog({
       onChannelUpdated()
       toast.success(t("editSuccess"))
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = toErrorMessage(err)
       setError(msg)
     } finally {
       setLoading(false)

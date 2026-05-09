@@ -23,6 +23,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { createChatChannel, saveChatChannelToken } from "@/lib/api"
 import type { ChannelType } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 interface AddChatChannelDialogProps {
   open: boolean
@@ -108,7 +109,7 @@ export function AddChatChannelDialog({
       handleOpenChange(false)
       onChannelAdded()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = toErrorMessage(err)
       setError(msg)
     } finally {
       setLoading(false)

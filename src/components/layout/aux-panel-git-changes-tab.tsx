@@ -50,6 +50,7 @@ import {
 import { joinFsPath } from "@/lib/path-utils"
 import { emitAttachFileToSession } from "@/lib/session-attachment-events"
 import type { GitStatusEntry } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -564,7 +565,7 @@ export function GitChangesTab() {
   const handleOpenCommitWindow = useCallback(() => {
     if (!folder) return
     openCommitWindow(folder.id).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.openCommitWindowFailed"), {
         description: message,
       })
@@ -627,7 +628,7 @@ export function GitChangesTab() {
           new Set(candidates.map((entry) => entry.path))
         )
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         setDirectoryGitError(message)
       } finally {
         setDirectoryGitLoading(false)
@@ -660,7 +661,7 @@ export function GitChangesTab() {
         toast.success(t("toasts.addedToVcs", { name: target.name }))
         await workspaceState.requestResync("git_action:add")
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         toast.error(t("toasts.addToVcsFailed"), { description: message })
       }
     },
@@ -677,7 +678,7 @@ export function GitChangesTab() {
       setRollbackTarget(null)
       await workspaceState.requestResync("git_action:rollback")
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.rollbackFailed"), { description: message })
     } finally {
       setRollingBack(false)
@@ -708,7 +709,7 @@ export function GitChangesTab() {
       setDeleteTarget(null)
       await workspaceState.requestResync("git_action:delete")
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.deleteFailed"), { description: message })
     } finally {
       setDeleting(false)
@@ -793,7 +794,7 @@ export function GitChangesTab() {
       resetDirectoryGitActionDialog()
       await workspaceState.requestResync("git_action:batch")
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       setDirectoryGitError(message)
       toast.error(
         directoryGitActionType === "add"

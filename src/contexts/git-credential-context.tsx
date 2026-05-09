@@ -30,7 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { extractAppCommandError } from "@/lib/app-error"
+import { extractAppCommandError, toErrorMessage } from "@/lib/app-error"
 import type { GitCredentials } from "@/lib/types"
 import {
   gitListRemotes,
@@ -308,7 +308,7 @@ export function GitCredentialProvider({ children }: { children: ReactNode }) {
       pendingRef.current?.resolve(creds)
       pendingRef.current = null
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = toErrorMessage(err)
       setError(msg)
       setSubmitting(false)
     }

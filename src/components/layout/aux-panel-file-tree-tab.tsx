@@ -1426,7 +1426,7 @@ export function FileTreeTab() {
   const handleOpenCommitWindow = useCallback(() => {
     if (!folder) return
     openCommitWindow(folder.id).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.openCommitWindowFailed"), {
         description: message,
       })
@@ -1500,7 +1500,7 @@ export function FileTreeTab() {
         )
         setDirectoryGitExpandedPaths(expanded)
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         setDirectoryGitError(message)
       } finally {
         setDirectoryGitLoading(false)
@@ -1532,7 +1532,7 @@ export function FileTreeTab() {
         toast.success(t("toasts.addedToVcs", { name: target.name }))
         await fetchTree()
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = toErrorMessage(error)
         toast.error(t("toasts.addToVcsFailed"), { description: message })
       }
     },
@@ -1571,7 +1571,7 @@ export function FileTreeTab() {
     } catch (error) {
       setCompareBranchList({ local: [], remote: [], worktree_branches: [] })
       setCompareCurrentBranch(null)
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.loadBranchesFailed"), { description: message })
     } finally {
       setCompareBranchLoading(false)
@@ -1839,7 +1839,7 @@ export function FileTreeTab() {
       setCreateName("")
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.createFailed"), { description: message })
     } finally {
       setCreating(false)
@@ -1861,7 +1861,7 @@ export function FileTreeTab() {
       setRenameValue("")
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.renameFailed"), { description: message })
     } finally {
       setRenaming(false)
@@ -1876,7 +1876,7 @@ export function FileTreeTab() {
       setDeleteTarget(null)
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.deleteFailed"), { description: message })
     } finally {
       setDeleting(false)
@@ -1892,7 +1892,7 @@ export function FileTreeTab() {
       setRollbackTarget(null)
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.rollbackFailed"), { description: message })
     } finally {
       setRollingBack(false)
@@ -1929,7 +1929,7 @@ export function FileTreeTab() {
       resetDirectoryGitActionDialog()
       await fetchTree()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       setDirectoryGitError(message)
       toast.error(
         directoryGitActionType === "add"
@@ -2032,7 +2032,7 @@ export function FileTreeTab() {
       setExternalConflictPrompt(null)
       void fetchTree({ silent: true })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toErrorMessage(error)
       toast.error(t("toasts.saveCopyFailed"), { description: message })
     } finally {
       setSavingExternalConflictCopy(false)

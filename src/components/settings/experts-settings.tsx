@@ -54,6 +54,7 @@ import type {
   ExpertLinkState,
   ExpertListItem,
 } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 
 const ICON_MAP: Record<string, LucideIcon> = {
   Lightbulb,
@@ -203,7 +204,7 @@ export function ExpertsSettings() {
       setExperts(expertList)
       setAgents(agentList)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       setLoadError(message)
       setExperts([])
       setAgents([])
@@ -315,7 +316,7 @@ export function ExpertsSettings() {
       })
       .catch((err) => {
         if (cancelled) return
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(t("toasts.loadFailed"), { description: message })
       })
       .finally(() => {
@@ -352,7 +353,7 @@ export function ExpertsSettings() {
           toast.success(t("toasts.disabled"))
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toErrorMessage(err)
         toast.error(
           enable ? t("toasts.enableFailed") : t("toasts.disableFailed"),
           {
@@ -371,7 +372,7 @@ export function ExpertsSettings() {
       const path = await expertsOpenCentralDir()
       await openFolder(path)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toErrorMessage(err)
       toast.error(t("toasts.openFolderFailed"), { description: message })
     }
   }, [t])

@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { weixinGetQrcode, weixinCheckQrcode } from "@/lib/api"
+import { toErrorMessage } from "@/lib/app-error"
 
 /** Client-side QR code expiry (5 minutes). */
 const QR_EXPIRY_MS = 5 * 60 * 1000
@@ -86,7 +87,7 @@ function WeixinQrcodeContent({
 
       setStatus("waiting")
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = toErrorMessage(err)
       setError(msg)
       setStatus("expired")
     }

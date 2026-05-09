@@ -49,6 +49,7 @@ import type {
   ChannelStatusInfo,
   ChannelType,
 } from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
 import { AddChatChannelDialog } from "./add-chat-channel-dialog"
 import { EditChatChannelDialog } from "./edit-chat-channel-dialog"
 import { WeixinQrcodeDialog } from "./weixin-qrcode-dialog"
@@ -138,7 +139,7 @@ export function ChannelListTab() {
           // No token or token expired — show QR code dialog
           setQrcodeChannelId(id)
         } else {
-          const msg = err instanceof Error ? err.message : String(err)
+          const msg = toErrorMessage(err)
           toast.error(t("connectFailed") + ": " + msg)
         }
       } finally {
@@ -157,7 +158,7 @@ export function ChannelListTab() {
         toast.success(t("connectSuccess"))
         await loadChannels()
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = toErrorMessage(err)
         toast.error(t("connectFailed") + ": " + msg)
       } finally {
         setActionLoading(null)
@@ -189,7 +190,7 @@ export function ChannelListTab() {
         await testChatChannel(id)
         toast.success(t("testSuccess"))
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = toErrorMessage(err)
         toast.error(t("testFailed") + ": " + msg)
       } finally {
         setActionLoading(null)

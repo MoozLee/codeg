@@ -891,7 +891,7 @@ export function GitLogTab() {
       })
     } catch (error) {
       toast.error(t("toasts.createBranchFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: toErrorMessage(error),
       })
     } finally {
       setCreatingBranch(false)
@@ -952,7 +952,7 @@ export function GitLogTab() {
       setResetMode("mixed")
     } catch (error) {
       toast.error(t("toasts.resetFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: toErrorMessage(error),
       })
     } finally {
       setResetting(false)

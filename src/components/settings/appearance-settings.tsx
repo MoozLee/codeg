@@ -4,8 +4,8 @@ import { useEffect, useMemo } from "react"
 import { Monitor, Moon, RotateCcw, Sun, Type } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
-import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -37,6 +37,7 @@ import {
   type ThemeColor,
   type ZoomLevel,
 } from "@/lib/theme-presets"
+import { PetManagerSection } from "./pet-manager-section"
 
 type ThemeMode = "system" | "light" | "dark"
 type FontSelectValue = string
@@ -123,6 +124,7 @@ export function AppearanceSettings() {
   return (
     <ScrollArea className="h-full">
       <div className="w-full space-y-4 p-3 md:p-4">
+        {/* ===== Theme Mode ===== */}
         <section className="rounded-xl border bg-card p-4 space-y-4">
           <div className="flex items-center gap-2">
             <Sun className="h-4 w-4 text-muted-foreground" />
@@ -184,6 +186,7 @@ export function AppearanceSettings() {
           </div>
         </section>
 
+        {/* ===== Theme Color ===== */}
         <section className="rounded-xl border bg-card p-4 space-y-4">
           <div className="flex items-center gap-2">
             <span
@@ -235,6 +238,7 @@ export function AppearanceSettings() {
           </p>
         </section>
 
+        {/* ===== Fonts ===== */}
         <section className="rounded-xl border bg-card p-4 space-y-4">
           <div className="flex items-center gap-2">
             <Type className="h-4 w-4 text-muted-foreground" />
@@ -313,6 +317,7 @@ export function AppearanceSettings() {
           )}
         </section>
 
+        {/* ===== Zoom Level ===== */}
         <section className="rounded-xl border bg-card p-4 space-y-4">
           <div className="flex items-center gap-2">
             <Type className="h-4 w-4 text-muted-foreground" />
@@ -364,6 +369,9 @@ export function AppearanceSettings() {
             {t("resetToDefaults")}
           </Button>
         </div>
+
+        {/* ===== Desktop Pet ===== */}
+        <PetManagerSection />
       </div>
     </ScrollArea>
   )

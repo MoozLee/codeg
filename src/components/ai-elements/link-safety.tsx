@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { openUrl } from "@/lib/platform"
+import { toErrorMessage } from "@/lib/app-error"
 import type { LinkSafetyConfig, LinkSafetyModalProps } from "streamdown"
 import { toast } from "sonner"
 import { useActiveFolder } from "@/contexts/active-folder-context"
@@ -96,12 +97,12 @@ function isLocalPathLike(path: string): boolean {
 }
 
 function parseLocalFileTarget(rawUrl: string): LocalFileTarget | null {
-  const raw = decodeUriSafely(rawUrl.trim())
-  if (!raw) return null
+  const trimmed = rawUrl.trim()
+  if (!trimmed) return null
 
-  if (raw.toLowerCase().startsWith("file://")) {
+  if (trimmed.toLowerCase().startsWith("file://")) {
     try {
-      const parsed = new URL(raw)
+      const parsed = new URL(trimmed)
       const rawPathname = decodeUriSafely(parsed.pathname)
       const normalizedPathname = stripLeadingSlashOnWindows(rawPathname)
       const pathAndLine = splitPathAndLine(normalizedPathname)
@@ -115,23 +116,27 @@ function parseLocalFileTarget(rawUrl: string): LocalFileTarget | null {
     }
   }
 
-  if (URL_SCHEME.test(raw) && !WINDOWS_ABSOLUTE_PATH.test(raw)) {
+  if (URL_SCHEME.test(trimmed) && !WINDOWS_ABSOLUTE_PATH.test(trimmed)) {
     return null
   }
 
-  const hashIndex = raw.indexOf("#")
-  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : ""
-  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw
-  const queryIndex = withoutHash.indexOf("?")
-  const withoutQuery =
-    queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash
-  const pathAndLine = splitPathAndLine(withoutQuery)
+  // Split on raw # / ? before decoding so encoded `%23` / `%3F` inside the
+  // path don't get promoted to fragment/query separators (which would point
+  // the open-file dialog at the wrong file).
+  const hashIndex = trimmed.indexOf("#")
+  const rawHash = hashIndex >= 0 ? trimmed.slice(hashIndex) : ""
+  const beforeHash = hashIndex >= 0 ? trimmed.slice(0, hashIndex) : trimmed
+  const queryIndex = beforeHash.indexOf("?")
+  const rawPathPart =
+    queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash
+  const decodedPath = decodeUriSafely(rawPathPart)
+  const pathAndLine = splitPathAndLine(decodedPath)
   const normalizedPath = stripLeadingSlashOnWindows(pathAndLine.path)
   if (!isLocalPathLike(normalizedPath)) return null
 
   return {
     path: normalizeSlashPath(normalizedPath),
-    line: parseHashLine(hash) ?? pathAndLine.line,
+    line: parseHashLine(rawHash) ?? pathAndLine.line,
   }
 }
 
@@ -257,7 +262,7 @@ function useOpenLinkOrFile() {
           })
         } catch (error) {
           toast.error(t("errorFailedOpen"), {
-            description: error instanceof Error ? error.message : String(error),
+            description: toErrorMessage(error),
           })
         }
         return
@@ -267,7 +272,7 @@ function useOpenLinkOrFile() {
         await openUrl(url)
       } catch (error) {
         toast.error(t("errorFailedLink"), {
-          description: error instanceof Error ? error.message : String(error),
+          description: toErrorMessage(error),
         })
       }
     },
@@ -367,7 +372,7 @@ export function FilePathLink({
     })
       .catch((error) => {
         toast.error(t("errorFailedOpen"), {
-          description: error instanceof Error ? error.message : String(error),
+          description: toErrorMessage(error),
         })
       })
       .finally(() => {

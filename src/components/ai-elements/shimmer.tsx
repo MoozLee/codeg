@@ -30,6 +30,7 @@ export interface TextShimmerProps {
   className?: string
   duration?: number
   spread?: number
+  shineColor?: string
 }
 
 const ShimmerComponent = ({
@@ -38,6 +39,7 @@ const ShimmerComponent = ({
   className,
   duration = 2,
   spread = 2,
+  shineColor,
 }: TextShimmerProps) => {
   const MotionComponent = useMemo(
     () => getMotionComponent(Component as keyof JSX.IntrinsicElements),
@@ -49,21 +51,21 @@ const ShimmerComponent = ({
     [children, spread]
   )
 
+  const shine = shineColor ?? "var(--color-background)"
+
   return (
     // eslint-disable-next-line react-hooks/static-components -- component is cached at module level via motionComponentCache
     <MotionComponent
       animate={{ backgroundPosition: "0% center" }}
       className={cn(
-        "relative inline-block bg-[length:250%_100%,auto] bg-clip-text text-transparent",
-        "[--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--color-background),#0000_calc(50%+var(--spread)))] [background-repeat:no-repeat,padding-box]",
+        "relative inline-block bg-[length:250%_100%,auto] bg-clip-text bg-no-repeat text-transparent",
         className
       )}
       initial={{ backgroundPosition: "100% center" }}
       style={
         {
           "--spread": `${dynamicSpread}px`,
-          backgroundImage:
-            "var(--bg), linear-gradient(var(--color-muted-foreground), var(--color-muted-foreground))",
+          backgroundImage: `linear-gradient(90deg, #0000 calc(50% - var(--spread)), ${shine}, #0000 calc(50% + var(--spread))), linear-gradient(var(--color-muted-foreground), var(--color-muted-foreground))`,
         } as CSSProperties
       }
       transition={{

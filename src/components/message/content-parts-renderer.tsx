@@ -1,13 +1,25 @@
 import { memo, useMemo, useState, type ReactNode } from "react"
 import type { AdaptedContentPart } from "@/lib/adapters/ai-elements-adapter"
+import {
+  classifyToolKind,
+  TOOL_KIND_ORDER,
+  type ToolKindLabel,
+} from "@/lib/adapters/tool-kind-classifier"
 import type { MessageRole } from "@/lib/types"
 import { normalizeToolName } from "@/lib/tool-call-normalization"
 import { useTranslations } from "next-intl"
+import { cn } from "@/lib/utils"
 import {
   countUnifiedDiffLineChanges,
   estimateChangedLineStats,
 } from "@/lib/line-change-stats"
 import { MessageResponse } from "@/components/ai-elements/message"
+import { Shimmer } from "@/components/ai-elements/shimmer"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   Tool,
   ToolHeader,
@@ -42,6 +54,7 @@ import {
   MinusIcon,
   PlusIcon,
   WrenchIcon,
+  ChevronRightIcon,
 } from "lucide-react"
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -1653,7 +1666,7 @@ const HIDDEN_FIELDS = new Set(["dangerouslyDisableSandbox"])
 
 function GenericToolInput({ input }: { input: string }) {
   const t = useTranslations("Folder.chat.contentParts")
-  const parsed = tryParseJson(input)
+  const parsed = useMemo(() => tryParseJson(input), [input])
 
   if (!parsed) {
     return (
@@ -1738,7 +1751,7 @@ function StructuredToolInput({
 }) {
   const t = useTranslations("Folder.chat.contentParts")
   const name = toolName.toLowerCase()
-  const parsed = tryParseJson(input)
+  const parsed = useMemo(() => tryParseJson(input), [input])
   const truncated =
     (name === "edit" || name === "write" || name === "apply_patch") &&
     isTruncatedInput(input)
@@ -2400,6 +2413,98 @@ const ReasoningPart = memo(function ReasoningPart({
   )
 })
 
+const ToolGroupPart = memo(function ToolGroupPart({
+  part,
+}: {
+  part: Extract<AdaptedContentPart, { type: "tool-group" }>
+}) {
+  const t = useTranslations("Folder.chat.contentParts.toolGroup")
+  const [open, setOpen] = useState(false)
+
+  const { phrases, errorPhrase } = useMemo(() => {
+    const counts = TOOL_KIND_ORDER.reduce(
+      (acc, kind) => {
+        acc[kind] = 0
+        return acc
+      },
+      {} as Record<ToolKindLabel, number>
+    )
+    let errors = 0
+    for (const item of part.items) {
+      counts[classifyToolKind(item.toolName)] += 1
+      if (item.state === "output-error" || item.errorText) errors += 1
+    }
+    const built: string[] = []
+    for (const kind of TOOL_KIND_ORDER) {
+      const count = counts[kind]
+      if (count <= 0) continue
+      built.push(t(kind, { count }))
+    }
+    if (built.length === 0) {
+      built.push(t("other", { count: part.items.length }))
+    }
+    return {
+      phrases: built,
+      errorPhrase: errors > 0 ? t("errorSuffix", { count: errors }) : null,
+    }
+  }, [part, t])
+
+  if (part.items.length === 0) return null
+
+  const joiner = t("joiner")
+  const titleText = phrases.join(joiner)
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="w-full">
+      <CollapsibleTrigger
+        className={cn(
+          "group inline-flex max-w-full items-center gap-1.5 rounded-full bg-muted/60 px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        )}
+      >
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={cn(
+            "size-3 shrink-0 opacity-60 transition-transform",
+            open && "rotate-90"
+          )}
+        />
+        <span className="min-w-0 truncate">
+          {part.isStreaming ? (
+            <Shimmer as="span" duration={1} shineColor="var(--primary)">
+              {titleText}
+            </Shimmer>
+          ) : (
+            titleText
+          )}
+          {errorPhrase && (
+            <span className="text-destructive">
+              {joiner}
+              {errorPhrase}
+            </span>
+          )}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent
+        className={cn(
+          "w-full outline-none",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          "data-[state=closed]:slide-out-to-top-1 data-[state=open]:slide-in-from-top-1"
+        )}
+      >
+        <div className="mt-3 w-full space-y-3">
+          {part.items.map((item, idx) => (
+            <ToolCallPart
+              key={`grouped-tc-${item.toolCallId ?? idx}`}
+              part={item}
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+})
+
 // ── Main renderer ─────────────────────────────────────────────────────
 
 interface ContentPartsRendererProps {
@@ -2426,6 +2531,10 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
 
         if (part.type === "tool-call") {
           return <ToolCallPart key={`tc-${part.toolCallId ?? i}`} part={part} />
+        }
+
+        if (part.type === "tool-group") {
+          return <ToolGroupPart key={`tg-${i}`} part={part} />
         }
 
         if (part.type === "tool-result") {

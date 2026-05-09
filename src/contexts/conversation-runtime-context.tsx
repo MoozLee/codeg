@@ -22,6 +22,7 @@ import type {
   TurnUsage,
 } from "@/lib/types"
 import { inferLiveToolName } from "@/lib/tool-call-normalization"
+import { toErrorMessage } from "@/lib/app-error"
 
 export type ConversationSyncState = "idle" | "awaiting_persist"
 
@@ -447,7 +448,7 @@ function buildStreamingTurnsFromLiveMessage(
         const children = isAgent
           ? (agentChildren.get(block.info.tool_call_id) ?? [])
           : []
-        // Lazy: only construct agentStats when there are children to show
+
         const agentStats: AgentExecutionStats | undefined =
           isAgent && children.length > 0
             ? {
@@ -1003,7 +1004,7 @@ export function ConversationRuntimeProvider({
         dispatch({
           type: "FETCH_DETAIL_ERROR",
           conversationId,
-          error: error instanceof Error ? error.message : String(error),
+          error: toErrorMessage(error),
         })
       })
   }, [])
@@ -1018,7 +1019,7 @@ export function ConversationRuntimeProvider({
         dispatch({
           type: "FETCH_DETAIL_ERROR",
           conversationId,
-          error: error instanceof Error ? error.message : String(error),
+          error: toErrorMessage(error),
         })
       })
   }, [])
@@ -1069,15 +1070,63 @@ export function ConversationRuntimeProvider({
 
               for (let i = 0; i < localAssistantIndices.length; i++) {
                 const parsedIdx = offset + i
-                if (parsedIdx < 0 || parsedIdx >= parsedAssistantTurns.length)
-                  continue
-                const pt = parsedAssistantTurns[parsedIdx]
-                if (!pt.usage && !pt.duration_ms && !pt.model) continue
+                let usageToApply: TurnUsage | null | undefined
+                let durationToApply: number | null | undefined
+                let modelToApply: string | null | undefined
+
+                if (parsedIdx >= 0 && parsedIdx < parsedAssistantTurns.length) {
+                  const pt = parsedAssistantTurns[parsedIdx]
+                  usageToApply = pt.usage
+                  durationToApply = pt.duration_ms
+                  modelToApply = pt.model
+                }
+
+                // When the parser splits the response into more sub-turns
+                // than the live stream did (offset > 0), roll the leading
+                // unmatched parsed turns' usage/duration into local[0] so
+                // that sum(local) equals sum(parsed). Without this, the
+                // mid-stream stats row under-reports tokens vs. a fresh
+                // historical reload, which clears localTurns and shows
+                // every parsed turn directly.
+                if (i === 0 && offset > 0) {
+                  for (let j = 0; j < offset; j++) {
+                    const extra = parsedAssistantTurns[j]
+                    if (extra.usage) {
+                      if (!usageToApply) {
+                        usageToApply = { ...extra.usage }
+                      } else {
+                        usageToApply = {
+                          input_tokens:
+                            usageToApply.input_tokens +
+                            extra.usage.input_tokens,
+                          output_tokens:
+                            usageToApply.output_tokens +
+                            extra.usage.output_tokens,
+                          cache_creation_input_tokens:
+                            usageToApply.cache_creation_input_tokens +
+                            extra.usage.cache_creation_input_tokens,
+                          cache_read_input_tokens:
+                            usageToApply.cache_read_input_tokens +
+                            extra.usage.cache_read_input_tokens,
+                        }
+                      }
+                    }
+                    if (typeof extra.duration_ms === "number") {
+                      durationToApply =
+                        (durationToApply ?? 0) + extra.duration_ms
+                    }
+                    if (!modelToApply && extra.model) {
+                      modelToApply = extra.model
+                    }
+                  }
+                }
+
+                if (!usageToApply && !durationToApply && !modelToApply) continue
                 patches.push({
                   index: localAssistantIndices[i],
-                  usage: pt.usage,
-                  duration_ms: pt.duration_ms,
-                  model: pt.model,
+                  usage: usageToApply,
+                  duration_ms: durationToApply,
+                  model: modelToApply,
                 })
               }
 

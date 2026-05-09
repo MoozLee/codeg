@@ -25,11 +25,12 @@ import {
   useRef,
   useState,
 } from "react"
-import { Streamdown } from "streamdown"
+import { Streamdown, defaultRemarkPlugins } from "streamdown"
 
 import { Shimmer } from "./shimmer"
 import { useStreamdownLinkSafety } from "./link-safety"
 import { normalizeMathDelimiters } from "./message"
+import { remarkRewriteFileUriLinks } from "./remark-file-uri-links"
 
 interface ReasoningContextValue {
   isStreaming: boolean
@@ -175,7 +176,11 @@ export const ReasoningTrigger = memo(
     const defaultGetThinkingMessage = useCallback(
       (nextIsStreaming: boolean, nextDuration?: number) => {
         if (nextIsStreaming || nextDuration === 0) {
-          return <Shimmer duration={1}>{t("thinking")}</Shimmer>
+          return (
+            <Shimmer duration={1} shineColor="var(--primary)">
+              {t("thinking")}
+            </Shimmer>
+          )
         }
         if (nextDuration === undefined) {
           return <p>{t("thoughtForFewSeconds")}</p>
@@ -226,6 +231,10 @@ export type ReasoningContentProps = ComponentProps<
 
 const math = createMathPlugin({ singleDollarTextMath: true })
 const streamdownPlugins = { cjk, code, math, mermaid }
+const remarkPlugins = [
+  ...Object.values(defaultRemarkPlugins),
+  remarkRewriteFileUriLinks,
+]
 
 export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => {
@@ -247,6 +256,7 @@ export const ReasoningContent = memo(
         <Streamdown
           linkSafety={linkSafety}
           plugins={streamdownPlugins}
+          remarkPlugins={remarkPlugins}
           {...props}
         >
           {normalized}

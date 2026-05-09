@@ -13,6 +13,20 @@ function normalizeString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
+function parseI18nParams(value: unknown): Record<string, string> | null {
+  const obj = asObject(value)
+  if (!obj) return null
+  const out: Record<string, string> = {}
+  for (const [key, raw] of Object.entries(obj)) {
+    if (typeof raw === "string") {
+      out[key] = raw
+    } else if (typeof raw === "number" || typeof raw === "boolean") {
+      out[key] = String(raw)
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
 function parseErrorObject(value: unknown): AppCommandError | null {
   const obj = asObject(value)
   if (!obj) return null
@@ -21,6 +35,8 @@ function parseErrorObject(value: unknown): AppCommandError | null {
   const message = normalizeString(obj.message)
   const detailRaw = normalizeString(obj.detail)
   const detail = detailRaw ?? null
+  const i18nKey = normalizeString(obj.i18n_key)
+  const i18nParams = parseI18nParams(obj.i18n_params)
 
   if (!code || !message) return null
 
@@ -28,6 +44,8 @@ function parseErrorObject(value: unknown): AppCommandError | null {
     code,
     message,
     detail,
+    i18n_key: i18nKey,
+    i18n_params: i18nParams,
   }
 }
 
@@ -83,4 +101,38 @@ export function toErrorMessage(error: unknown): string {
   } catch {
     return String(error)
   }
+}
+
+/** Translator callable shape compatible with next-intl's scoped translator. */
+export type AppErrorTranslator = (
+  key: string,
+  params?: Record<string, string | number>
+) => string
+
+/**
+ * Like `toErrorMessage`, but prefers the backend-provided i18n hint when
+ * present. The translator should be scoped to the namespace whose keys the
+ * backend emits (e.g. for MCP errors, a translator scoped to `McpSettings`).
+ *
+ * Falls back to the English `message` when the key is missing OR the
+ * translator throws (e.g. unknown key in a different translator's namespace).
+ */
+export function toLocalizedErrorMessage(
+  error: unknown,
+  translate: AppErrorTranslator
+): string {
+  const appError = extractAppCommandError(error)
+  if (appError?.i18n_key) {
+    try {
+      const params = appError.i18n_params ?? undefined
+      const localized = translate(appError.i18n_key, params)
+      const trimmed = localized.trim()
+      if (trimmed && trimmed !== appError.i18n_key) {
+        return trimmed
+      }
+    } catch {
+      // fall through to non-localized path
+    }
+  }
+  return toErrorMessage(error)
 }

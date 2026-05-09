@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use crate::db::error::DbError;
@@ -29,6 +31,15 @@ pub struct AppCommandError {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// Optional dotted i18n key (e.g. `"mcp.errors.unsupportedType"`) the
+    /// frontend can use to render a localized message. When absent, the
+    /// frontend falls back to `message` (English).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub i18n_key: Option<String>,
+    /// Optional named parameters substituted into the localized template.
+    /// All values are pre-stringified so the wire format stays JSON-safe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub i18n_params: Option<BTreeMap<String, String>>,
 }
 
 impl AppCommandError {
@@ -37,11 +48,27 @@ impl AppCommandError {
             code,
             message: message.into(),
             detail: None,
+            i18n_key: None,
+            i18n_params: None,
         }
     }
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// Attach a localized rendering hint. The frontend prefers this over
+    /// `message` when displaying the error to the user. `params` may be empty.
+    pub fn with_i18n(
+        mut self,
+        key: impl Into<String>,
+        params: BTreeMap<String, String>,
+    ) -> Self {
+        self.i18n_key = Some(key.into());
+        if !params.is_empty() {
+            self.i18n_params = Some(params);
+        }
         self
     }
 

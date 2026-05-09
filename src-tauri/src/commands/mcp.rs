@@ -37,6 +37,14 @@ fn mcp_network(message: impl Into<String>) -> AppCommandError {
     AppCommandError::network(message)
 }
 
+/// Build the parameter map for an i18n-tagged MCP error.
+fn mcp_i18n_params<const N: usize>(pairs: [(&str, &str); N]) -> BTreeMap<String, String> {
+    pairs
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum McpAppType {
@@ -301,7 +309,8 @@ pub async fn mcp_install_from_marketplace(
 ) -> Result<LocalMcpServer, AppCommandError> {
     let normalized_apps = normalize_apps(apps);
     if normalized_apps.is_empty() {
-        return Err(mcp_invalid_input("at least one target app is required"));
+        return Err(mcp_invalid_input("at least one target app is required")
+            .with_i18n("errors.appsRequired", BTreeMap::new()));
     }
 
     let selection = InstallSelection::new(option_id, protocol, parameter_values)?;
@@ -346,7 +355,8 @@ pub async fn mcp_upsert_local_server(
     let canonical_spec = canonicalize_spec(&spec, "local MCP save")?;
     let target_apps = normalize_apps(apps);
     if target_apps.is_empty() {
-        return Err(mcp_invalid_input("at least one target app is required"));
+        return Err(mcp_invalid_input("at least one target app is required")
+            .with_i18n("errors.appsRequired", BTreeMap::new()));
     }
 
     let target_set = target_apps.iter().copied().collect::<BTreeSet<_>>();
@@ -471,11 +481,56 @@ impl InstallSelection {
     }
 }
 
-fn normalize_protocol_value(raw: &str) -> String {
-    match raw.trim() {
-        "streamable-http" => "http".to_string(),
-        other => other.to_string(),
+/// Normalize a user-supplied MCP transport type string into one of the
+/// canonical values understood by `canonicalize_spec`.
+///
+/// Stage 1 (precise): trimmed lowercase exact match against the ACP/MCP-spec
+/// canonical names (`stdio` / `http` / `sse`) plus the OpenCode-native markers
+/// (`local` / `remote`). The latter two are NOT ACP types — they appear only
+/// as a redirect signal so `canonicalize_spec` can hand off to
+/// `canonicalize_opencode_spec` when a user pastes OpenCode-format JSON
+/// (`type: "local" | "remote"`, command-as-array, `environment` instead of
+/// `env`). After translation, the canonical output's type is always one of
+/// `stdio` / `http` / `sse`.
+///
+/// Stage 2 (alias collapse, http only): strip non-ASCII-alphanumeric characters
+/// and lowercase, then match `streamablehttp` -> `http`. Catches
+/// `streamable-http`, `streamableHttp`, `streamable_http`, `Streamable HTTP`,
+/// etc. Inputs containing non-ASCII separators (e.g. U+2010 hyphen, full-width
+/// letters from CJK IME) are intentionally rejected and fall through to the
+/// caller's unsupported-type error — that path echoes the raw value, so users
+/// can spot the encoding issue.
+///
+/// Returns `None` for unknown values so callers can decide between strict
+/// rejection and permissive fallback.
+fn normalize_mcp_type(raw: &str) -> Option<&'static str> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
     }
+
+    let lower = trimmed.to_ascii_lowercase();
+    match lower.as_str() {
+        "stdio" => return Some("stdio"),
+        "http" => return Some("http"),
+        "sse" => return Some("sse"),
+        "local" => return Some("local"),
+        "remote" => return Some("remote"),
+        _ => {}
+    }
+
+    let collapsed: String = lower.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    if collapsed == "streamablehttp" {
+        return Some("http");
+    }
+
+    None
+}
+
+fn normalize_protocol_value(raw: &str) -> String {
+    normalize_mcp_type(raw)
+        .map(str::to_string)
+        .unwrap_or_else(|| raw.trim().to_string())
 }
 
 fn protocol_priority(protocol: &str) -> i32 {
@@ -747,32 +802,47 @@ async fn parse_json_value_response(
 }
 
 fn canonicalize_spec(spec: &Value, source: &str) -> Result<Value, AppCommandError> {
-    let obj = spec
-        .as_object()
-        .ok_or_else(|| mcp_invalid_input(format!("{source}: MCP spec must be a JSON object")))?;
+    let obj = spec.as_object().ok_or_else(|| {
+        mcp_invalid_input(format!("{source}: MCP spec must be a JSON object"))
+            .with_i18n("errors.specMustBeObject", BTreeMap::new())
+    })?;
 
-    let mut inferred_type = obj
+    let raw_type = obj
         .get("type")
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or_default()
         .to_string();
 
-    if inferred_type.is_empty() {
+    let resolved_type: &'static str = if raw_type.is_empty() {
         if obj.get("command").is_some() {
-            inferred_type = "stdio".to_string();
+            "stdio"
         } else if obj.get("url").is_some() {
-            inferred_type = "http".to_string();
+            "http"
+        } else {
+            return Err(mcp_invalid_input(format!(
+                "{source}: MCP spec missing 'type'; provide one of stdio, http (aliases: streamable-http, streamableHttp), sse"
+            ))
+            .with_i18n("errors.missingType", BTreeMap::new()));
         }
-    }
-
-    if inferred_type == "streamable-http" {
-        inferred_type = "http".to_string();
-    }
+    } else {
+        match normalize_mcp_type(&raw_type) {
+            Some(value) => value,
+            None => {
+                return Err(mcp_invalid_input(format!(
+                    "{source}: unsupported MCP server type '{raw_type}'; supported: stdio, http (aliases: streamable-http, streamableHttp), sse"
+                ))
+                .with_i18n(
+                    "errors.unsupportedType",
+                    mcp_i18n_params([("type", raw_type.as_str())]),
+                ));
+            }
+        }
+    };
 
     let mut normalized = Map::new();
 
-    match inferred_type.as_str() {
+    match resolved_type {
         "stdio" => {
             let command = obj
                 .get("command")
@@ -783,6 +853,7 @@ fn canonicalize_spec(spec: &Value, source: &str) -> Result<Value, AppCommandErro
                     mcp_invalid_input(format!(
                         "{source}: stdio MCP spec requires a non-empty command"
                     ))
+                    .with_i18n("errors.stdioCommandRequired", BTreeMap::new())
                 })?;
 
             normalized.insert("type".to_string(), Value::String("stdio".to_string()));
@@ -824,27 +895,20 @@ fn canonicalize_spec(spec: &Value, source: &str) -> Result<Value, AppCommandErro
                     mcp_invalid_input(format!(
                         "{source}: remote MCP spec requires a non-empty url"
                     ))
+                    .with_i18n("errors.remoteUrlRequired", BTreeMap::new())
                 })?;
 
-            normalized.insert("type".to_string(), Value::String(inferred_type));
+            normalized.insert("type".to_string(), Value::String(resolved_type.to_string()));
             normalized.insert("url".to_string(), Value::String(url.to_string()));
 
             if let Some(headers) = obj_as_string_map(obj.get("headers")) {
                 normalized.insert("headers".to_string(), Value::Object(headers));
             }
         }
-        "local" => {
+        "local" | "remote" => {
             return canonicalize_opencode_spec(spec, source);
         }
-        "remote" => {
-            return canonicalize_opencode_spec(spec, source);
-        }
-        _ => {
-            return Err(mcp_invalid_input(format!(
-                "{source}: unsupported MCP server type '{}'; expected stdio/http/sse",
-                inferred_type
-            )));
-        }
+        _ => unreachable!("normalize_mcp_type returns one of stdio/http/sse/local/remote"),
     }
 
     for (key, value) in obj {
@@ -1101,11 +1165,23 @@ fn codex_entry_to_canonical(id: &str, value: &toml::Value) -> Result<Value, AppC
         .filter(|value| !value.is_empty())
         .unwrap_or("stdio")
         .to_string();
+    let canonical_type = normalize_mcp_type(&raw_type).ok_or_else(|| {
+        mcp_invalid_input(format!(
+            "Codex MCP entry '{id}' has unsupported type '{raw_type}'"
+        ))
+        .with_i18n(
+            "errors.codexEntryUnsupportedType",
+            mcp_i18n_params([("id", id), ("type", raw_type.as_str())]),
+        )
+    })?;
 
     let mut spec = Map::new();
-    spec.insert("type".to_string(), Value::String(raw_type.clone()));
+    spec.insert(
+        "type".to_string(),
+        Value::String(canonical_type.to_string()),
+    );
 
-    match raw_type.as_str() {
+    match canonical_type {
         "stdio" => {
             if let Some(command) = table
                 .get("command")
@@ -1155,7 +1231,7 @@ fn codex_entry_to_canonical(id: &str, value: &toml::Value) -> Result<Value, AppC
                 spec.insert("cwd".to_string(), Value::String(cwd.to_string()));
             }
         }
-        "http" | "sse" | "streamable-http" => {
+        "http" | "sse" => {
             if let Some(url) = table
                 .get("url")
                 .and_then(toml::Value::as_str)
@@ -1190,7 +1266,11 @@ fn codex_entry_to_canonical(id: &str, value: &toml::Value) -> Result<Value, AppC
         _ => {
             return Err(mcp_invalid_input(format!(
                 "Codex MCP entry '{id}' has unsupported type '{raw_type}'"
-            )));
+            ))
+            .with_i18n(
+                "errors.codexEntryUnsupportedType",
+                mcp_i18n_params([("id", id), ("type", raw_type.as_str())]),
+            ));
         }
     }
 
@@ -1273,6 +1353,9 @@ fn canonical_to_codex_entry(spec: &Value) -> Result<toml::Value, AppCommandError
             }
         }
         "http" | "sse" => {
+            // env intentionally not written for http/sse: per ACP/MCP spec, env is
+            // stdio-only; remote transports use headers. canonicalize_spec strips
+            // env upstream too.
             let url = obj.get("url").and_then(Value::as_str).ok_or_else(|| {
                 mcp_invalid_input("Codex conversion: remote MCP spec missing url")
             })?;
@@ -2348,10 +2431,8 @@ fn first_non_empty_icon_src(icons: Option<&[OfficialIcon]>) -> Option<String> {
 }
 
 fn transport_protocol(kind: &str) -> Option<String> {
-    match kind.trim() {
-        "stdio" => Some("stdio".to_string()),
-        "http" | "streamable-http" => Some("http".to_string()),
-        "sse" => Some("sse".to_string()),
+    match normalize_mcp_type(kind)? {
+        canonical @ ("stdio" | "http" | "sse") => Some(canonical.to_string()),
         _ => None,
     }
 }
@@ -2731,13 +2812,15 @@ fn remote_spec_from_transport_with_values(
     enforce_required: bool,
 ) -> Result<Value, AppCommandError> {
     let kind = transport.r#type.trim();
-    let canonical_type = match kind {
-        "streamable-http" | "http" => "http",
-        "sse" => "sse",
+    let canonical_type = match normalize_mcp_type(kind) {
+        Some(value @ ("http" | "sse")) => value,
         _ => {
-            return Err(mcp_invalid_input(format!(
-                "unsupported transport type '{kind}'"
-            )))
+            return Err(
+                mcp_invalid_input(format!("unsupported transport type '{kind}'")).with_i18n(
+                    "errors.unsupportedTransportType",
+                    mcp_i18n_params([("type", kind)]),
+                ),
+            )
         }
     };
 
@@ -3471,9 +3554,9 @@ fn parse_smithery_option_id(option_id: &str) -> Option<usize> {
 }
 
 fn smithery_connection_protocol(connection: &SmitheryConnection) -> String {
-    match connection.r#type.trim() {
-        "sse" => "sse".to_string(),
-        "streamable-http" | "http" => "http".to_string(),
+    match normalize_mcp_type(&connection.r#type) {
+        Some("sse") => "sse".to_string(),
+        Some("http") => "http".to_string(),
         _ => "http".to_string(),
     }
 }
@@ -3787,4 +3870,191 @@ fn resolve_smithery_install_spec_with_selection(
     }
 
     canonicalize_spec(&selected.spec, "smithery selected option")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_mcp_type_canonical_pass_through() {
+        assert_eq!(normalize_mcp_type("stdio"), Some("stdio"));
+        assert_eq!(normalize_mcp_type("http"), Some("http"));
+        assert_eq!(normalize_mcp_type("sse"), Some("sse"));
+        assert_eq!(normalize_mcp_type("local"), Some("local"));
+        assert_eq!(normalize_mcp_type("remote"), Some("remote"));
+    }
+
+    #[test]
+    fn normalize_mcp_type_streamable_http_aliases_collapse_to_http() {
+        for raw in [
+            "streamable-http",
+            "streamableHttp",
+            "streamable_http",
+            "Streamable HTTP",
+            "STREAMABLE-HTTP",
+            "  streamable-http  ",
+            "streamable.http",
+        ] {
+            assert_eq!(normalize_mcp_type(raw), Some("http"), "input {raw:?}");
+        }
+    }
+
+    #[test]
+    fn normalize_mcp_type_rejects_unknown() {
+        assert!(normalize_mcp_type("").is_none());
+        assert!(normalize_mcp_type("   ").is_none());
+        assert!(normalize_mcp_type("Foo").is_none());
+        assert!(normalize_mcp_type("ws").is_none());
+    }
+
+    fn codex_entry(toml_src: &str) -> toml::Value {
+        toml::from_str::<toml::Value>(toml_src).expect("parse test toml")
+    }
+
+    #[test]
+    fn codex_entry_canonicalizes_streamable_http_aliases() {
+        for raw in ["streamableHttp", "streamable-http", "streamable_http"] {
+            let value = codex_entry(&format!(
+                "type = \"{raw}\"\nurl = \"https://mcp.example.com/mcp\"\n"
+            ));
+            let canonical = codex_entry_to_canonical("ex", &value)
+                .unwrap_or_else(|err| panic!("input {raw:?} should normalize: {err}"));
+            assert_eq!(
+                canonical
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                "http",
+                "input {raw:?}"
+            );
+            assert_eq!(
+                canonical
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                "https://mcp.example.com/mcp"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_entry_keeps_canonical_types_intact() {
+        let stdio = codex_entry("type = \"stdio\"\ncommand = \"npx\"\n");
+        let canonical = codex_entry_to_canonical("ex", &stdio).expect("stdio entry");
+        assert_eq!(canonical.get("type").and_then(Value::as_str), Some("stdio"));
+        assert_eq!(canonical.get("command").and_then(Value::as_str), Some("npx"));
+
+        let sse = codex_entry("type = \"sse\"\nurl = \"https://mcp.example.com/sse\"\n");
+        let canonical = codex_entry_to_canonical("ex", &sse).expect("sse entry");
+        assert_eq!(canonical.get("type").and_then(Value::as_str), Some("sse"));
+    }
+
+    #[test]
+    fn codex_entry_rejects_unknown_type_with_raw_in_message() {
+        let value = codex_entry("type = \"Foo\"\nurl = \"https://x\"\n");
+        let err = codex_entry_to_canonical("ex", &value).expect_err("Foo should be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("'Foo'"), "error should echo raw type: {msg}");
+        assert!(msg.contains("'ex'"), "error should mention id: {msg}");
+        assert_eq!(
+            err.i18n_key.as_deref(),
+            Some("errors.codexEntryUnsupportedType")
+        );
+        let params = err.i18n_params.as_ref().expect("i18n params attached");
+        assert_eq!(params.get("id").map(String::as_str), Some("ex"));
+        assert_eq!(params.get("type").map(String::as_str), Some("Foo"));
+    }
+
+    #[test]
+    fn codex_entry_rejects_opencode_only_aliases() {
+        // OpenCode-native types are not valid in Codex TOML; catching them keeps
+        // the Codex pipeline's accepted set tight.
+        for raw in ["local", "remote"] {
+            let value = codex_entry(&format!("type = \"{raw}\"\nurl = \"https://x\"\n"));
+            assert!(
+                codex_entry_to_canonical("ex", &value).is_err(),
+                "raw {raw:?} should not be accepted by Codex pipeline",
+            );
+        }
+    }
+
+    #[test]
+    fn transport_protocol_normalizes_aliases() {
+        assert_eq!(transport_protocol("stdio"), Some("stdio".to_string()));
+        assert_eq!(transport_protocol("http"), Some("http".to_string()));
+        assert_eq!(transport_protocol("sse"), Some("sse".to_string()));
+        assert_eq!(
+            transport_protocol("streamable-http"),
+            Some("http".to_string())
+        );
+        assert_eq!(
+            transport_protocol("streamableHttp"),
+            Some("http".to_string())
+        );
+        assert_eq!(transport_protocol("local"), None);
+        assert_eq!(transport_protocol("foo"), None);
+    }
+
+    fn make_transport(kind: &str, url: &str) -> OfficialTransport {
+        let payload = serde_json::json!({
+            "type": kind,
+            "url": url,
+        });
+        serde_json::from_value(payload).expect("OfficialTransport from json")
+    }
+
+    #[test]
+    fn remote_spec_from_transport_normalizes_aliases() {
+        for raw in ["streamable-http", "streamableHttp", "http"] {
+            let transport = make_transport(raw, "https://mcp.example.com/mcp");
+            let spec =
+                remote_spec_from_transport_with_values(&transport, &Map::new(), false).unwrap();
+            assert_eq!(
+                spec.get("type").and_then(Value::as_str),
+                Some("http"),
+                "raw {raw:?}"
+            );
+        }
+
+        let sse = make_transport("sse", "https://mcp.example.com/sse");
+        let spec = remote_spec_from_transport_with_values(&sse, &Map::new(), false).unwrap();
+        assert_eq!(spec.get("type").and_then(Value::as_str), Some("sse"));
+
+        let unknown = make_transport("ws", "https://x");
+        let err = remote_spec_from_transport_with_values(&unknown, &Map::new(), false)
+            .expect_err("ws should be rejected");
+        assert_eq!(
+            err.i18n_key.as_deref(),
+            Some("errors.unsupportedTransportType")
+        );
+        let params = err.i18n_params.as_ref().expect("i18n params attached");
+        assert_eq!(params.get("type").map(String::as_str), Some("ws"));
+    }
+
+    fn make_smithery_connection(kind: &str) -> SmitheryConnection {
+        let payload = serde_json::json!({ "type": kind });
+        serde_json::from_value(payload).expect("SmitheryConnection from json")
+    }
+
+    #[test]
+    fn smithery_connection_protocol_normalizes_aliases() {
+        assert_eq!(
+            smithery_connection_protocol(&make_smithery_connection("streamable-http")),
+            "http"
+        );
+        assert_eq!(
+            smithery_connection_protocol(&make_smithery_connection("streamableHttp")),
+            "http"
+        );
+        assert_eq!(
+            smithery_connection_protocol(&make_smithery_connection("sse")),
+            "sse"
+        );
+        // Unknown falls back to http (preserves prior permissive behavior).
+        assert_eq!(
+            smithery_connection_protocol(&make_smithery_connection("ws")),
+            "http"
+        );
+    }
 }

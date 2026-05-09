@@ -188,6 +188,7 @@
     "updating": "Installing...",
     "downloading": "Downloading...",
     "upgradeTo": "Upgrade to v{version}",
+    "viewRelease": "View v{version} release",
     "foundUpdate": "New version v{version} found",
     "alreadyLatest": "You're on the latest version",
     "checkUpdateFailed": "Failed to check for updates: {message}",
@@ -428,7 +429,15 @@
       "fieldOutOfRange": "{field} value is out of allowed range",
       "jsonEmpty": "{name} cannot be empty",
       "jsonInvalid": "{name} is not valid JSON: {message}",
-      "jsonMustBeObject": "{name} must be a JSON object"
+      "jsonMustBeObject": "{name} must be a JSON object",
+      "specMustBeObject": "MCP config must be a JSON object.",
+      "missingType": "MCP config is missing the type field. Use one of stdio, http (aliases: streamable-http, streamableHttp), sse.",
+      "unsupportedType": "Unsupported MCP type {type}. Supported: stdio, http (aliases: streamable-http, streamableHttp), sse.",
+      "codexEntryUnsupportedType": "Codex MCP entry {id} has unsupported type {type}. Supported: stdio, http (aliases: streamable-http, streamableHttp), sse.",
+      "unsupportedTransportType": "Unsupported transport type {type}. Supported: http (aliases: streamable-http, streamableHttp), sse.",
+      "stdioCommandRequired": "stdio MCP requires a non-empty command field.",
+      "remoteUrlRequired": "Remote MCP requires a non-empty url field.",
+      "appsRequired": "Select at least one target app."
     },
     "jsonNames": {
       "localConfig": "MCP Config",
@@ -486,7 +495,9 @@
       "draftTitle": "New MCP",
       "draftDescription": "Provide a Server ID and configuration to create a local MCP server.",
       "serverIdLabel": "Server ID",
-      "serverIdPlaceholder": "Server ID (e.g. my-mcp)"
+      "serverIdPlaceholder": "Server ID (e.g. my-mcp)",
+      "typeHint": "Supported types: stdio, http (aliases: streamable-http, streamableHttp), sse. env is only used by stdio; for remote MCPs use headers to carry auth tokens.",
+      "envOnRemoteWarning": "env detected on a remote MCP. Only stdio uses env; remote MCPs carry auth tokens via headers, so env will be ignored on save."
     },
     "market": {
       "selectMarketplace": "Select marketplace",
@@ -689,9 +700,9 @@
       "authMustBeObject": "auth.json must be a JSON object",
       "authInvalid": "auth.json format error: {message}",
       "providerIdPattern": "Provider ID only supports letters, numbers, underscore, dot and hyphen",
-      "providerExists": "Provider '{providerId}' already exists",
+      "providerExists": "Provider {providerId} already exists",
       "modelIdPattern": "Model ID only supports letters, numbers, underscore, dot, colon and hyphen",
-      "modelExists": "Model '{modelId}' already exists"
+      "modelExists": "Model {modelId} already exists"
     },
     "warnings": {
       "nativeJsonRecoveredStructured": "Native JSON config is invalid; reset to structured config",
@@ -927,6 +938,7 @@
       "reloadFailed": "Failed to reload conversation: {message}",
       "reloaded": "Conversation reloaded",
       "reload": "Reload",
+      "activeConversationIndicator": "Active conversation",
       "newConversation": "New Conversation",
       "closeConversation": "Close Conversation",
       "copyText": "Copy Text",
@@ -1936,6 +1948,19 @@
           "todosProgress": "Todos ({done}/{total})",
           "skillWithName": "Skill: {name}",
           "genericWithContext": "{tool}: {context}"
+        },
+        "toolGroup": {
+          "search": "{count, plural, one {Explored # search} other {Explored # searches}}",
+          "command": "{count, plural, one {Ran # command} other {Ran # commands}}",
+          "read": "{count, plural, one {Read files # time} other {Read files # times}}",
+          "edit": "{count, plural, one {Edited files # time} other {Edited files # times}}",
+          "fetch": "{count, plural, one {Fetched # resource} other {Fetched # resources}}",
+          "think": "{count, plural, one {Thought # time} other {Thought # times}}",
+          "todo": "{count, plural, one {Updated # todo} other {Updated # todos}}",
+          "task": "{count, plural, one {Ran # task} other {Ran # tasks}}",
+          "other": "{count, plural, one {Used # tool} other {Used # tools}}",
+          "errorSuffix": "{count, plural, one {# failed} other {# failed}}",
+          "joiner": " · "
         }
       }
     },
@@ -2300,6 +2325,64 @@
       "created": "Quick message created",
       "saved": "Quick message saved",
       "deleted": "Quick message deleted"
+    }
+  },
+  "Pet": {
+    "menu": {
+      "scale": "Scale",
+      "openManager": "Manage pets",
+      "close": "Close"
+    },
+    "loadError": "Failed to load pet",
+    "missingPetIdParam": "No pet selected",
+    "summonButton": "Pet",
+    "manager": {
+      "title": "Pets",
+      "description": "Floating desktop companions powered by Codex-compatible sprite sheets.",
+      "addPet": "Add pet",
+      "importFromCodex": "Import from Codex",
+      "noPets": "No pets yet. Add one or import from Codex.",
+      "setActive": "Set active",
+      "active": "Active",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this pet? It will be removed from disk.",
+      "summon": "Summon pet window",
+      "openCodexHelp": "Codex pets must be installed under ~/.codex/pets/. None found.",
+      "specRequirement": "Spritesheet must be 1536x1872 PNG or WebP with transparency.",
+      "form": {
+        "id": "Pet ID",
+        "idHelp": "Lowercase letters, digits, '-' and '_'. Max 64 chars.",
+        "displayName": "Display name",
+        "description": "Description (optional)",
+        "spritesheet": "Spritesheet",
+        "chooseFile": "Choose file",
+        "replaceFile": "Replace spritesheet",
+        "saveCreate": "Add pet",
+        "saveUpdate": "Save changes",
+        "cancel": "Cancel"
+      },
+      "errors": {
+        "missingId": "Pet id is required",
+        "missingName": "Display name is required",
+        "missingSpritesheet": "Spritesheet is required",
+        "addFailed": "Failed to add pet",
+        "updateFailed": "Failed to update pet",
+        "deleteFailed": "Failed to delete pet",
+        "loadFailed": "Failed to load pets"
+      }
+    },
+    "import": {
+      "title": "Import from Codex",
+      "subtitle": "These pets are available under ~/.codex/pets/.",
+      "selectAll": "Select all",
+      "alreadyImported": "Already imported",
+      "renameOnConflict": "Rename conflicts with -imported suffix",
+      "import": "Import selected",
+      "noneFound": "No importable Codex pets found.",
+      "imported": "Imported successfully",
+      "failed": "Import failed",
+      "close": "Close"
     }
   }
 }

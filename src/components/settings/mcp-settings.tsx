@@ -47,6 +47,8 @@ import {
   mcpSearchMarketplace,
   mcpUpsertLocalServer,
 } from "@/lib/api"
+import { toLocalizedErrorMessage } from "@/lib/app-error"
+import { normalizeMcpType } from "@/lib/mcp-types"
 import { cn } from "@/lib/utils"
 import type {
   LocalMcpServer,
@@ -119,9 +121,10 @@ function specSummary(spec: Record<string, unknown>, t: McpTranslator): string {
 }
 
 function protocolBadgeLabel(protocol: string, t: McpTranslator): string {
-  if (protocol === "stdio") return t("protocol.stdio")
-  if (protocol === "sse") return "SSE"
-  if (protocol === "http") return "HTTP"
+  const canonical = normalizeMcpType(protocol)
+  if (canonical === "stdio") return t("protocol.stdio")
+  if (canonical === "sse") return "SSE"
+  if (canonical === "http") return "HTTP"
   return protocol
 }
 
@@ -209,7 +212,7 @@ function parseParameterValues(
       try {
         values[field.key] = JSON.parse(raw)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, t)
         return {
           values: {},
           error: t("errors.fieldInvalidJson", {
@@ -258,6 +261,26 @@ function selectedAppsFromDraft(
   )
 }
 
+function detectEnvOnRemote(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return false
+  }
+  if (!isObject(parsed)) return false
+
+  const rawType = typeof parsed.type === "string" ? parsed.type : ""
+  const canonical = normalizeMcpType(rawType)
+  if (canonical !== "http" && canonical !== "sse") return false
+
+  const env = parsed.env
+  if (!isObject(env)) return false
+  return Object.keys(env).length > 0
+}
+
 function parseJsonObject(
   text: string,
   name: string,
@@ -272,7 +295,7 @@ function parseJsonObject(
   try {
     parsed = JSON.parse(trimmed)
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = toLocalizedErrorMessage(err, t)
     throw new Error(t("errors.jsonInvalid", { name, message }))
   }
 
@@ -285,7 +308,7 @@ function parseJsonObject(
 
 export function McpSettings() {
   const t = useTranslations("McpSettings")
-  const mcpT = t as unknown as McpTranslator
+  const mcpT = useMemo(() => t as unknown as McpTranslator, [t])
   const [loading, setLoading] = useState(true)
   const [loadingError, setLoadingError] = useState<string | null>(null)
 
@@ -355,6 +378,15 @@ export function McpSettings() {
     )
   }, [marketDetail, selectedInstallOptionId])
 
+  const draftEnvOnRemote = useMemo(
+    () => detectEnvOnRemote(draftSpecText),
+    [draftSpecText]
+  )
+  const localEnvOnRemote = useMemo(
+    () => detectEnvOnRemote(localSpecText),
+    [localSpecText]
+  )
+
   const filteredLocalServers = useMemo(() => {
     const q = localFilter.trim().toLowerCase()
     if (!q) return installedServers
@@ -390,12 +422,12 @@ export function McpSettings() {
         setSelection({ kind: "local", id: servers[0].id })
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       setLoadingError(message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [mcpT])
 
   useEffect(() => {
     loadInitial().catch((err) => {
@@ -444,7 +476,7 @@ export function McpSettings() {
         setMarketSpecDirty(false)
       })
       .catch((err) => {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, mcpT)
         setMarketDetailError(message)
         setMarketDetail(null)
         setMarketSpecText("")
@@ -455,7 +487,7 @@ export function McpSettings() {
       .finally(() => {
         setMarketDetailLoading(false)
       })
-  }, [selection, selectedMarketItem])
+  }, [selection, selectedMarketItem, mcpT])
 
   const executeSearch = useCallback(
     async ({
@@ -488,13 +520,13 @@ export function McpSettings() {
           })
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, mcpT)
         setSearchError(message)
       } finally {
         setSearching(false)
       }
     },
-    []
+    [mcpT]
   )
 
   useEffect(() => {
@@ -528,13 +560,13 @@ export function McpSettings() {
           return null
         })
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, mcpT)
         toast.error(t("toasts.uninstallFailed", { message }))
       } finally {
         setRunningAction(null)
       }
     },
-    [refreshLocalServers, t]
+    [refreshLocalServers, t, mcpT]
   )
 
   const saveLocalServer = useCallback(async () => {
@@ -548,7 +580,7 @@ export function McpSettings() {
         mcpT
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       toast.error(message)
       return
     }
@@ -578,7 +610,7 @@ export function McpSettings() {
         setLocalAppsDraft(appsToDraft(updated.apps))
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       toast.error(t("toasts.saveFailed", { message }))
     } finally {
       setRunningAction(null)
@@ -620,7 +652,7 @@ export function McpSettings() {
         mcpT
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       toast.error(message)
       return
     }
@@ -650,7 +682,7 @@ export function McpSettings() {
         setSelection(null)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       toast.error(t("toasts.saveFailed", { message }))
     } finally {
       setRunningAction(null)
@@ -724,7 +756,7 @@ export function McpSettings() {
           mcpT
         )
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = toLocalizedErrorMessage(err, mcpT)
         toast.error(message)
         return
       }
@@ -761,7 +793,7 @@ export function McpSettings() {
         setSelection({ kind: "local", id: installed.id })
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = toLocalizedErrorMessage(err, mcpT)
       toast.error(t("toasts.installFailed", { message }))
     } finally {
       setRunningAction(null)
@@ -1328,12 +1360,21 @@ export function McpSettings() {
                 <div className="text-xs text-muted-foreground">
                   {t("local.configJson")}
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("local.typeHint")}
+                </p>
                 <Textarea
                   value={draftSpecText}
                   onChange={(event) => setDraftSpecText(event.target.value)}
                   className="min-h-[360px] font-mono text-xs"
                 />
               </div>
+
+              {draftEnvOnRemote ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  {t("local.envOnRemoteWarning")}
+                </div>
+              ) : null}
 
               <div className="flex justify-end gap-2">
                 <Button
@@ -1425,12 +1466,21 @@ export function McpSettings() {
                 <div className="text-xs text-muted-foreground">
                   {t("local.configJson")}
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("local.typeHint")}
+                </p>
                 <Textarea
                   value={localSpecText}
                   onChange={(event) => setLocalSpecText(event.target.value)}
                   className="min-h-[360px] font-mono text-xs"
                 />
               </div>
+
+              {localEnvOnRemote ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  {t("local.envOnRemoteWarning")}
+                </div>
+              ) : null}
 
               <div className="flex justify-end">
                 <Button
