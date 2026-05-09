@@ -1,5 +1,6 @@
 mod acp;
 pub use acp::{idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS};
+pub use network::proxy::init_proxy_from_db;
 mod app_error;
 pub mod app_state;
 pub mod chat_channel;
@@ -126,16 +127,7 @@ mod tauri_app {
 
                 // Restore and apply saved system proxy settings before any network operation.
                 let db = app.state::<db::AppDatabase>();
-                match tauri::async_runtime::block_on(system_settings::load_system_proxy_settings(
-                    &db.conn,
-                )) {
-                    Ok(settings) => {
-                        let _ = network::proxy::apply_system_proxy_settings(&settings);
-                    }
-                    Err(err) => {
-                        eprintln!("[Settings] failed to load system proxy settings: {err}");
-                    }
-                }
+                tauri::async_runtime::block_on(network::proxy::init_proxy_from_db(&db.conn));
 
                 // Load saved appearance settings before any window is created.
                 tauri::async_runtime::block_on(windows::load_saved_zoom(&db.conn));

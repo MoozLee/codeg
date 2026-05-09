@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use axum::{extract::Extension, Json};
@@ -104,6 +104,19 @@ struct LatestManifest {
 const UPDATE_MANIFEST_URL: &str =
     "https://github.com/xintaofei/codeg/releases/latest/download/latest.json";
 
+// Built once on first use so we don't re-allocate the DNS resolver / TLS
+// context for every settings-page mount. Proxy env vars are sampled here, so
+// `init_proxy_from_db` must run before the first request — both startup paths
+// already do that.
+static UPDATE_HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(15))
+        .user_agent(concat!("codeg/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| format!("failed to initialize update HTTP client: {e}"))
+});
+
 pub async fn check_app_update() -> Result<Json<AppUpdateCheckResult>, AppCommandError> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let manifest = fetch_latest_manifest().await?;
@@ -125,14 +138,10 @@ pub async fn check_app_update() -> Result<Json<AppUpdateCheckResult>, AppCommand
 }
 
 async fn fetch_latest_manifest() -> Result<LatestManifest, AppCommandError> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .user_agent(concat!("codeg/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| {
-            AppCommandError::network("Failed to build update HTTP client")
-                .with_detail(e.to_string())
-        })?;
+    let client = UPDATE_HTTP_CLIENT.as_ref().map_err(|err| {
+        AppCommandError::network("Failed to initialize update HTTP client")
+            .with_detail(err.clone())
+    })?;
 
     let response = client
         .get(UPDATE_MANIFEST_URL)

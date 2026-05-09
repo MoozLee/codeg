@@ -1,3 +1,4 @@
+import { toErrorMessage } from "./app-error"
 import { getTransport, isDesktop } from "./transport"
 
 // All updater imports are dynamic to avoid crashing in non-Tauri browsers.
@@ -71,11 +72,6 @@ export async function closeAppUpdate(
 ): Promise<void> {
   if (typeof update?.close !== "function") return
   await update.close()
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 export function normalizeAppUpdateError(error: unknown): AppUpdateErrorInfo {

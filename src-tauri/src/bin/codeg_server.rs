@@ -61,6 +61,11 @@ async fn async_main() {
         .await
         .expect("Failed to initialize database");
 
+    // Restore and apply saved system proxy settings before any network operation.
+    // reqwest clients (including the LazyLock in check_app_update) cache the proxy
+    // config at build time, so this must run before the first one is constructed.
+    codeg_lib::init_proxy_from_db(&db.conn).await;
+
     // Create shared broadcaster
     let broadcaster = Arc::new(WebEventBroadcaster::new());
     let emitter = EventEmitter::WebOnly(broadcaster.clone());
