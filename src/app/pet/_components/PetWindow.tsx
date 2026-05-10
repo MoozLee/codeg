@@ -4,13 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2 } from "lucide-react"
 import { getPet, getPetSettings, readPetSpritesheet } from "@/lib/pet/api"
-import type { PetDetail } from "@/lib/pet/types"
+import type { PetDetail, PetWindowConfig } from "@/lib/pet/types"
 import {
   createPetSpriteObjectUrl,
   revokePetSpriteObjectUrl,
 } from "@/lib/pet/sprite-url"
 import { disposeTauriListener } from "@/lib/tauri-listener"
-import { isDesktop } from "@/lib/transport"
+import { getTransport, isDesktop } from "@/lib/transport"
 import {
   PET_FRAME_DURATIONS_MS,
   PET_ONESHOT_LOOPS,
@@ -38,6 +38,7 @@ const WAVING_DURATION_MS =
   sumDurations("waving") * INTERACTION_LOOPS + INTERACTION_SLACK_MS
 const PET_HOVER_ENTER_EVENT = "pet://hover-enter"
 const PET_HOVER_LEAVE_EVENT = "pet://hover-leave"
+const PET_ACTIVE_CHANGED_EVENT = "pet://active-changed"
 
 function sumDurations(state: PetState): number {
   return PET_FRAME_DURATIONS_MS[state].reduce((acc, d) => acc + d, 0)
@@ -57,8 +58,17 @@ export function PetWindow({ petId }: PetWindowProps) {
   const [spritesheetUrl, setSpritesheetUrl] = useState<string | null>(null)
   const [scale, setScale] = useState<number>(1)
   const [error, setError] = useState<string | null>(null)
+  // The URL only carries the *initial* pet id (the active one when the
+  // window was opened). After that, settings can switch the active pet
+  // and we want the live window to swap sprites without close/reopen, so
+  // the rendered id has to be reactive state rather than the prop.
+  const [activePetId, setActivePetId] = useState<string>(petId)
   const agentState = usePetState()
   const oneShot = usePetOneShot()
+
+  useEffect(() => {
+    setActivePetId(petId)
+  }, [petId])
 
   // Interaction-driven state takes priority over the agent-driven state so
   // a drag, hover, or click immediately wins over the ambient ACP animation.
@@ -199,8 +209,8 @@ export function PetWindow({ petId }: PetWindowProps) {
     async function load() {
       try {
         const [detail, sprite, config] = await Promise.all([
-          getPet(petId),
-          readPetSpritesheet(petId),
+          getPet(activePetId),
+          readPetSpritesheet(activePetId),
           getPetSettings(),
         ])
         objectUrl = createPetSpriteObjectUrl(sprite)
@@ -221,7 +231,37 @@ export function PetWindow({ petId }: PetWindowProps) {
       cancelled = true
       revokePetSpriteObjectUrl(objectUrl)
     }
-  }, [petId])
+  }, [activePetId])
+
+  // Settings UI emits `pet://active-changed` when the user picks a new
+  // active pet. Swap the rendered id in place; the loader effect above
+  // re-runs and pulls the new sprite/config. A null id (e.g. active
+  // pet deleted) is ignored — no current UI path to deactivate without
+  // also closing the window.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    void (async () => {
+      try {
+        const off = await getTransport().subscribe<PetWindowConfig>(
+          PET_ACTIVE_CHANGED_EVENT,
+          (payload) => {
+            if (cancelled) return
+            const next = payload?.activePetId
+            if (next) setActivePetId(next)
+          }
+        )
+        if (cancelled) off()
+        else unlisten = off
+      } catch (err) {
+        console.warn("[Pet] active-changed subscription failed:", err)
+      }
+    })()
+    return () => {
+      cancelled = true
+      if (unlisten) unlisten()
+    }
+  }, [])
 
   // Keep the document title clean. macOS hides it via title_bar_style anyway,
   // but server-mode preview shows it.

@@ -125,10 +125,6 @@ mod tauri_app {
         builder
             .plugin(
                 tauri_plugin_window_state::Builder::new()
-                    // Settings is created hidden and shown only after modal-owner
-                    // setup. The window-state plugin's initial restore can call
-                    // show()/set_focus() during on_window_ready, which defeats
-                    // that and causes a visible pre-modal position flash.
                     .skip_initial_state("settings")
                     .build(),
             )
@@ -148,6 +144,7 @@ mod tauri_app {
             .manage(std::sync::Arc::new(
                 web::event_bridge::WebEventBroadcaster::new(),
             ))
+            .manage(crate::pet_state_mapper::new_pet_state_handle())
             .setup(|app| {
                 let app_data_dir = app.path().app_data_dir()?;
                 let app_version = env!("CARGO_PKG_VERSION");
@@ -234,9 +231,15 @@ mod tauri_app {
                         .inner()
                         .clone();
                     let emitter = web::event_bridge::EventEmitter::Tauri(app.handle().clone());
-                    tauri::async_runtime::spawn(
-                        crate::pet_state_mapper::pet_state_subscriber_task(broadcaster, emitter),
-                    );
+                    let pet_state_handle = app
+                        .state::<crate::pet_state_mapper::PetStateHandle>()
+                        .inner()
+                        .clone();
+                    tauri::async_runtime::spawn(crate::pet_state_mapper::pet_state_subscriber_task(
+                        broadcaster,
+                        emitter,
+                        pet_state_handle,
+                    ));
                 }
 
                 // Spawn the LifecycleSubscriber: persists cross-connection DB state
@@ -611,6 +614,7 @@ mod tauri_app {
                 pet_commands::pet_marketplace_list,
                 pet_commands::pet_marketplace_install,
                 pet_commands::pet_celebrate,
+                pet_commands::pet_get_current_state,
                 project_boot::detect_package_manager,
                 project_boot::create_shadcn_project,
                 system_settings::list_system_font_families,

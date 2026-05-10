@@ -44,7 +44,7 @@ export const PET_FRAME_DURATIONS_MS: Record<PetState, number[]> = {
   running_right: [120, 120, 120, 120, 120, 120, 120, 220],
   running_left: [120, 120, 120, 120, 120, 120, 120, 220],
   waving: [240, 240, 240, 240],
-  jumping: [280, 240, 200, 200, 160],
+  jumping: [240, 110, 180, 340, 160],
   failed: [140, 140, 140, 140, 140, 140, 140, 280],
   waiting: [240, 240, 240, 240, 240, 240],
   running: [120, 120, 120, 120, 120, 120],

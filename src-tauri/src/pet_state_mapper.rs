@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -24,6 +24,38 @@ use crate::acp::types::{AcpEvent, ConnectionStatus, EventEnvelope};
 use crate::db::entities::conversation::ConversationStatus;
 use crate::models::pet::PetState;
 use crate::web::event_bridge::{emit_event, EventEmitter, WebEvent, WebEventBroadcaster};
+
+/// Shared latest-known `PetState`, written by the subscriber task and read
+/// by the `pet_get_current_state` command. Lets a freshly opened pet window
+/// pick up the *current* ambient state instead of waiting for the next
+/// state transition — the subscriber only emits on changes, so without this
+/// the frontend would otherwise sit on its default `Idle` indefinitely if
+/// the agent was already running when the window opened.
+pub type PetStateHandle = Arc<RwLock<PetState>>;
+
+pub fn new_pet_state_handle() -> PetStateHandle {
+    Arc::new(RwLock::new(PetState::Idle))
+}
+
+/// Read the current ambient state. Falls back to `Idle` if the lock is
+/// poisoned — a poisoned lock means the writer panicked, in which case
+/// the snapshot is stale and `Idle` is the safe default.
+pub fn read_pet_state(handle: &PetStateHandle) -> PetState {
+    handle.read().map(|guard| *guard).unwrap_or(PetState::Idle)
+}
+
+fn write_pet_state(handle: &PetStateHandle, value: PetState) {
+    match handle.write() {
+        Ok(mut guard) => *guard = value,
+        Err(err) => {
+            // A poisoned lock means a previous writer panicked. The handle
+            // is now permanently stale, which would silently degrade the
+            // open-pet-mid-conversation experience to "always Idle" with no
+            // other symptom. Surface it so it shows up in operator logs.
+            eprintln!("[Pet] pet_state handle poisoned, dropping write: {err}");
+        }
+    }
+}
 
 /// How long the ambient `Failed` state stays visible before automatically
 /// fading back to whatever the rest of the snapshot would compute. Restarts
@@ -86,12 +118,16 @@ impl PetGlobalState {
             }
             AcpEvent::TurnComplete { .. } => {
                 self.prompting.remove(conn);
-                // PermissionRequest entries with stale request_ids are not
-                // cleared here — the lifecycle of a single permission is
-                // closed by the agent re-sending or the user responding,
-                // both of which surface as ConversationStatusChanged or a
-                // status flip. Leaving stale entries around briefly is
-                // safer than clearing too eagerly.
+                // A permission request is bounded by the turn that raised it:
+                // by the time TurnComplete arrives the user has either
+                // approved (agent reached end_turn / refusal / max_tokens)
+                // or the turn was cancelled. There is no separate event
+                // when the user clicks allow/deny — the response goes
+                // straight back to the agent through `responder.respond()`
+                // — so this is the only deterministic place to drop the
+                // entry. Without this, a single past permission would mask
+                // Running across the entire app until the connection drops.
+                self.pending_permissions.retain(|_, cid| cid != conn);
             }
             AcpEvent::ConversationStatusChanged {
                 conversation_id,
@@ -112,15 +148,36 @@ impl PetGlobalState {
 }
 
 /// Pure function: aggregate → state. Order of checks defines priority.
+///
+/// Priority rationale, top-down:
+///
+/// * `Failed` — most urgent, brief auto-recovery handles the linger.
+/// * `Review` from `pending_permissions` — blocking: the agent literally
+///   cannot proceed without the user clicking allow/deny, so it outranks
+///   any concurrent prompt elsewhere.
+/// * `Running` from `prompting` — active work outranks `pending_reviews`.
+///   `pending_reviews` accumulates a `conversation_id` every time a turn
+///   ends successfully and is only removed when *that specific* conversation
+///   is prompted again (or the row flips to InProgress/Completed/Cancelled).
+///   If `Review` were checked first, a single un-acked turn from any past
+///   conversation would mask the running animation for every subsequent
+///   prompt — including in unrelated conversations — until each stale row
+///   was cleared individually.
+/// * `Review` from `pending_reviews` — informational: surface "you have
+///   un-acked turns" only when nothing is actively running.
+/// * `Waiting` / `Idle` — ambient.
 pub fn compute_pet_state(snapshot: &PetGlobalState) -> PetState {
     if !snapshot.erroring.is_empty() {
         return PetState::Failed;
     }
-    if !snapshot.pending_permissions.is_empty() || !snapshot.pending_reviews.is_empty() {
+    if !snapshot.pending_permissions.is_empty() {
         return PetState::Review;
     }
     if !snapshot.prompting.is_empty() {
         return PetState::Running;
+    }
+    if !snapshot.pending_reviews.is_empty() {
+        return PetState::Review;
     }
     if !snapshot.connected.is_empty() {
         return PetState::Waiting;
@@ -207,6 +264,7 @@ fn cancel_failed_recovery(clear_task: &mut Option<JoinHandle<()>>) {
 pub fn pet_state_subscriber_task(
     broadcaster: Arc<WebEventBroadcaster>,
     emitter: EventEmitter,
+    handle: PetStateHandle,
 ) -> impl Future<Output = ()> + Send + 'static {
     let mut rx = broadcaster.subscribe();
     let (clear_tx, mut clear_rx) = mpsc::channel::<()>(8);
@@ -215,6 +273,7 @@ pub fn pet_state_subscriber_task(
         let mut last_state = PetState::Idle;
         let mut clear_task: Option<JoinHandle<()>> = None;
         // Push an initial "idle" snapshot so the renderer doesn't start blank.
+        write_pet_state(&handle, last_state);
         emit_event(&emitter, "pet://state", last_state);
 
         loop {
@@ -297,6 +356,7 @@ pub fn pet_state_subscriber_task(
                                 let next = compute_pet_state(&snapshot);
                                 if next != last_state {
                                     last_state = next;
+                                    write_pet_state(&handle, next);
                                     emit_event(&emitter, "pet://state", next);
                                 }
                             }
@@ -317,6 +377,7 @@ pub fn pet_state_subscriber_task(
                             cancel_failed_recovery(&mut clear_task);
                             if last_state != PetState::Idle {
                                 last_state = PetState::Idle;
+                                write_pet_state(&handle, last_state);
                                 emit_event(&emitter, "pet://state", last_state);
                             }
                         }
@@ -335,6 +396,7 @@ pub fn pet_state_subscriber_task(
                     let next = compute_pet_state(&snapshot);
                     if next != last_state {
                         last_state = next;
+                        write_pet_state(&handle, next);
                         emit_event(&emitter, "pet://state", next);
                     }
                 }
@@ -423,6 +485,349 @@ mod tests {
             },
         ));
         assert_eq!(compute_pet_state(&s), PetState::Failed);
+    }
+
+    #[test]
+    fn running_outranks_stale_pending_review_from_other_conversation() {
+        // Regression: a turn that ended in conversation 1 leaves
+        // `pending_reviews = {1}`. Without the priority fix, every subsequent
+        // prompt — even from a different connection / conversation — would
+        // be masked as `Review` until conv 1 was acked, so the pet stops
+        // showing the running animation across the whole app.
+        let mut s = PetGlobalState::default();
+        s.apply(&env(
+            "c1",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 1,
+                status: ConversationStatus::PendingReview,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Review);
+
+        s.apply(&env(
+            "c2",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        assert_eq!(
+            compute_pet_state(&s),
+            PetState::Running,
+            "a stale pending_review must not mask an active prompt elsewhere"
+        );
+    }
+
+    #[test]
+    fn back_to_back_conversations_each_show_running() {
+        // End-to-end of the user-reported flow: A prompts → A finishes →
+        // switch to B and prompt → B finishes → back to A. Pet should show
+        // Running during every prompt, regardless of un-acked reviews
+        // accumulating in other conversations.
+        let mut s = PetGlobalState::default();
+
+        // A prompt.
+        s.apply(&env(
+            "c_a",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 1,
+                status: ConversationStatus::InProgress,
+            },
+        ));
+        s.apply(&env(
+            "c_a",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Running);
+
+        // A turn ends.
+        s.apply(&env(
+            "c_a",
+            AcpEvent::TurnComplete {
+                session_id: "sa".into(),
+                stop_reason: "end_turn".into(),
+                agent_type: "claude_code".into(),
+            },
+        ));
+        s.apply(&env(
+            "c_a",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Connected,
+            },
+        ));
+        s.apply(&env(
+            "c_a",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 1,
+                status: ConversationStatus::PendingReview,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Review);
+
+        // Switch to B and prompt — A's review is still pending but B should
+        // animate running.
+        s.apply(&env(
+            "c_b",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 2,
+                status: ConversationStatus::InProgress,
+            },
+        ));
+        s.apply(&env(
+            "c_b",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Running);
+
+        // B turn ends — both A and B reviews now stale.
+        s.apply(&env(
+            "c_b",
+            AcpEvent::TurnComplete {
+                session_id: "sb".into(),
+                stop_reason: "end_turn".into(),
+                agent_type: "claude_code".into(),
+            },
+        ));
+        s.apply(&env(
+            "c_b",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Connected,
+            },
+        ));
+        s.apply(&env(
+            "c_b",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 2,
+                status: ConversationStatus::PendingReview,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Review);
+
+        // Back to A and prompt — B is still un-acked but A should animate.
+        s.apply(&env(
+            "c_a",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 1,
+                status: ConversationStatus::InProgress,
+            },
+        ));
+        s.apply(&env(
+            "c_a",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        assert_eq!(
+            compute_pet_state(&s),
+            PetState::Running,
+            "returning to a prior conversation must animate even when other reviews are pending"
+        );
+    }
+
+    #[test]
+    fn concurrent_prompts_stay_running_through_partial_completion() {
+        // Two connections prompting at the same time. When one finishes
+        // (and adds itself to pending_reviews), the pet should keep showing
+        // Running because the other is still actively prompting.
+        let mut s = PetGlobalState::default();
+        s.apply(&env(
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        s.apply(&env(
+            "c2",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Running);
+
+        // c1 finishes its turn: removed from prompting, conv 1 now pending
+        // review. c2 is still prompting.
+        s.apply(&env(
+            "c1",
+            AcpEvent::TurnComplete {
+                session_id: "s1".into(),
+                stop_reason: "end_turn".into(),
+                agent_type: "claude_code".into(),
+            },
+        ));
+        s.apply(&env(
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Connected,
+            },
+        ));
+        s.apply(&env(
+            "c1",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 1,
+                status: ConversationStatus::PendingReview,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Running);
+
+        // c2 finishes too — now the pet is allowed to surface the reviews.
+        s.apply(&env(
+            "c2",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Connected,
+            },
+        ));
+        s.apply(&env(
+            "c2",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 2,
+                status: ConversationStatus::PendingReview,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Review);
+    }
+
+    #[test]
+    fn turn_complete_clears_permission_for_that_connection() {
+        // The user responds to a permission via `RespondPermission` which
+        // bypasses the broadcaster — there is no AcpEvent fired on
+        // resolution. TurnComplete is the only deterministic close of the
+        // permission lifecycle, so leaving entries here past TurnComplete
+        // would mask Running across every conversation indefinitely.
+        let mut s = PetGlobalState::default();
+        s.apply(&env(
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        s.apply(&env(
+            "c1",
+            AcpEvent::PermissionRequest {
+                request_id: "r1".into(),
+                tool_call: serde_json::json!({}),
+                options: vec![],
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Review);
+
+        s.apply(&env(
+            "c1",
+            AcpEvent::TurnComplete {
+                session_id: "s1".into(),
+                stop_reason: "end_turn".into(),
+                agent_type: "claude_code".into(),
+            },
+        ));
+        s.apply(&env(
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Connected,
+            },
+        ));
+
+        assert!(
+            s.pending_permissions.is_empty(),
+            "permission entry must not survive TurnComplete"
+        );
+        assert_eq!(compute_pet_state(&s), PetState::Waiting);
+    }
+
+    #[test]
+    fn turn_complete_only_clears_permissions_for_finishing_connection() {
+        // Concurrent turns: c1 finishes while c2 still has an outstanding
+        // permission. c2's entry must survive — only the connection that
+        // emitted TurnComplete is scrubbed.
+        let mut s = PetGlobalState::default();
+        s.apply(&env(
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        s.apply(&env(
+            "c2",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        s.apply(&env(
+            "c1",
+            AcpEvent::PermissionRequest {
+                request_id: "r1".into(),
+                tool_call: serde_json::json!({}),
+                options: vec![],
+            },
+        ));
+        s.apply(&env(
+            "c2",
+            AcpEvent::PermissionRequest {
+                request_id: "r2".into(),
+                tool_call: serde_json::json!({}),
+                options: vec![],
+            },
+        ));
+        assert_eq!(s.pending_permissions.len(), 2);
+
+        s.apply(&env(
+            "c1",
+            AcpEvent::TurnComplete {
+                session_id: "s1".into(),
+                stop_reason: "end_turn".into(),
+                agent_type: "claude_code".into(),
+            },
+        ));
+
+        assert_eq!(s.pending_permissions.len(), 1);
+        assert!(s.pending_permissions.contains_key("r2"));
+        assert_eq!(compute_pet_state(&s), PetState::Review);
+    }
+
+    #[test]
+    fn permission_request_outranks_active_prompting() {
+        // An outstanding permission is blocking — the agent literally can't
+        // proceed without user input — so it must outrank Running even
+        // when a different connection is mid-prompt.
+        let mut s = PetGlobalState::default();
+        s.apply(&env(
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            },
+        ));
+        s.apply(&env(
+            "c2",
+            AcpEvent::PermissionRequest {
+                request_id: "r1".into(),
+                tool_call: serde_json::json!({}),
+                options: vec![],
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Review);
+    }
+
+    #[test]
+    fn pending_review_visible_only_when_nothing_running() {
+        // The lower-priority review check still fires when no prompts are
+        // active — pet should surface that there's something un-acked once
+        // the running connections settle down.
+        let mut s = PetGlobalState::default();
+        s.apply(&env(
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Connected,
+            },
+        ));
+        s.apply(&env(
+            "c1",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 1,
+                status: ConversationStatus::PendingReview,
+            },
+        ));
+        assert_eq!(compute_pet_state(&s), PetState::Review);
     }
 
     #[test]
@@ -517,7 +922,11 @@ mod tests {
 
         // Subscribe BEFORE spawning so we don't miss the initial idle emit.
         let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        tokio::spawn(pet_state_subscriber_task(
+            broadcaster.clone(),
+            emitter,
+            new_pet_state_handle(),
+        ));
 
         // Drain the initial `pet://state = idle` emit.
         let _ = rx.recv().await;
@@ -549,7 +958,11 @@ mod tests {
         let broadcaster = Arc::new(WebEventBroadcaster::new());
         let emitter = EventEmitter::WebOnly(broadcaster.clone());
         let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        tokio::spawn(pet_state_subscriber_task(
+            broadcaster.clone(),
+            emitter,
+            new_pet_state_handle(),
+        ));
         let _ = rx.recv().await; // initial idle
 
         broadcaster.send(
@@ -567,7 +980,11 @@ mod tests {
         let broadcaster = Arc::new(WebEventBroadcaster::new());
         let emitter = EventEmitter::WebOnly(broadcaster.clone());
         let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        tokio::spawn(pet_state_subscriber_task(
+            broadcaster.clone(),
+            emitter,
+            new_pet_state_handle(),
+        ));
         let _ = rx.recv().await;
 
         broadcaster.send(
@@ -588,7 +1005,11 @@ mod tests {
         let broadcaster = Arc::new(WebEventBroadcaster::new());
         let emitter = EventEmitter::WebOnly(broadcaster.clone());
         let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        tokio::spawn(pet_state_subscriber_task(
+            broadcaster.clone(),
+            emitter,
+            new_pet_state_handle(),
+        ));
         let _ = rx.recv().await;
 
         broadcaster.send(
@@ -613,7 +1034,11 @@ mod tests {
         let broadcaster = Arc::new(WebEventBroadcaster::new());
         let emitter = EventEmitter::WebOnly(broadcaster.clone());
         let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        tokio::spawn(pet_state_subscriber_task(
+            broadcaster.clone(),
+            emitter,
+            new_pet_state_handle(),
+        ));
         // initial idle
         let initial = rx.recv().await.unwrap();
         assert_eq!(initial.channel, "pet://state");
@@ -674,7 +1099,11 @@ mod tests {
         let broadcaster = Arc::new(WebEventBroadcaster::new());
         let emitter = EventEmitter::WebOnly(broadcaster.clone());
         let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(broadcaster.clone(), emitter));
+        tokio::spawn(pet_state_subscriber_task(
+            broadcaster.clone(),
+            emitter,
+            new_pet_state_handle(),
+        ));
         let _ = rx.recv().await; // initial idle
 
         let send_error = |conn: &str| {
@@ -753,6 +1182,101 @@ mod tests {
             .expect("oneshot should fire within 1s")
             .expect("recv");
         assert_eq!(evt.payload.as_ref(), &serde_json::json!("failed"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn handle_resets_to_idle_on_failed_recovery_timeout() {
+        // The `clear_rx` arm of the subscriber's select! also writes the
+        // handle. Without it, after a brief Failed flash recovers to Idle,
+        // a freshly-opened pet window would see a stale `failed` snapshot
+        // for the rest of the session.
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let handle = new_pet_state_handle();
+        let mut rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(
+            broadcaster.clone(),
+            emitter,
+            handle.clone(),
+        ));
+        let _ = rx.recv().await; // initial idle
+
+        broadcaster.send(
+            "acp://event",
+            &EventEnvelope {
+                seq: 1,
+                connection_id: "c1".into(),
+                payload: AcpEvent::Error {
+                    message: "boom".into(),
+                    agent_type: "claude_code".into(),
+                    code: None,
+                },
+            },
+        );
+        let failed = read_state_event(&mut rx).await;
+        assert_eq!(failed.payload.as_ref(), &serde_json::json!("failed"));
+        assert_eq!(read_pet_state(&handle), PetState::Failed);
+
+        tokio::time::advance(Duration::from_millis(PET_FAILED_RECOVERY_MS + 100)).await;
+        let recovered = read_state_event(&mut rx).await;
+        assert_eq!(recovered.payload.as_ref(), &serde_json::json!("idle"));
+        assert_eq!(
+            read_pet_state(&handle),
+            PetState::Idle,
+            "handle must follow the auto-recovery transition, not stay stuck on failed"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_tracks_last_emitted_ambient_state() {
+        // Regression for the open-pet-mid-conversation case: the subscriber
+        // de-duplicates emissions on `pet://state`, so a window opening
+        // *after* the state has already settled into Running won't see any
+        // event. The handle is the snapshot the freshly-mounted frontend
+        // reads to fill in the gap, so it must always reflect the most
+        // recent emitted ambient state.
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let handle = new_pet_state_handle();
+        let mut rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(
+            broadcaster.clone(),
+            emitter,
+            handle.clone(),
+        ));
+
+        // Drain initial idle emit; handle is set in lockstep.
+        let initial = read_state_event(&mut rx).await;
+        assert_eq!(initial.payload.as_ref(), &serde_json::json!("idle"));
+        assert_eq!(read_pet_state(&handle), PetState::Idle);
+
+        broadcaster.send(
+            "acp://event",
+            &EventEnvelope {
+                seq: 1,
+                connection_id: "c1".into(),
+                payload: AcpEvent::StatusChanged {
+                    status: ConnectionStatus::Prompting,
+                },
+            },
+        );
+        let running = read_state_event(&mut rx).await;
+        assert_eq!(running.payload.as_ref(), &serde_json::json!("running"));
+        assert_eq!(read_pet_state(&handle), PetState::Running);
+
+        broadcaster.send(
+            "acp://event",
+            &EventEnvelope {
+                seq: 2,
+                connection_id: "c1".into(),
+                payload: AcpEvent::StatusChanged {
+                    status: ConnectionStatus::Connected,
+                },
+            },
+        );
+        let waiting = read_state_event(&mut rx).await;
+        assert_eq!(waiting.payload.as_ref(), &serde_json::json!("waiting"));
+        assert_eq!(read_pet_state(&handle), PetState::Waiting);
     }
 
     #[test]
