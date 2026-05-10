@@ -888,7 +888,8 @@
         "openFolderFailed": "フォルダを開けませんでした",
         "removeFolderFailed": "フォルダの削除に失敗しました: {message}",
         "reorderFoldersFailed": "フォルダの並べ替えに失敗しました: {message}",
-        "changeFolderColorFailed": "色の変更に失敗しました: {message}"
+        "changeFolderColorFailed": "色の変更に失敗しました: {message}",
+        "togglePinFailed": "ピン留めの切り替えに失敗しました: {message}"
       },
       "statsLabel": "{folders} フォルダ · {convos} 会話",
       "reorderHandle": "ドラッグして並べ替え",
@@ -910,7 +911,13 @@
       "folderHeaderMenu": {
         "manageConversations": "会話の管理…",
         "changeColor": "色を変更",
-        "removeFromWorkspace": "ワークスペースから削除"
+        "removeFromWorkspace": "ワークスペースから削除",
+        "pin": "ピン留め",
+        "unpin": "ピン留めを解除"
+      },
+      "sections": {
+        "pinned": "ピン留め",
+        "projects": "プロジェクト"
       },
       "manageConversations": {
         "title": "会話の管理 — {name}",

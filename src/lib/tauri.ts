@@ -558,6 +558,13 @@ export async function reorderFolders(ids: number[]): Promise<void> {
   return invoke("reorder_folders", { ids })
 }
 
+export async function updateFolderPinned(
+  folderId: number,
+  isPinned: boolean
+): Promise<FolderDetail> {
+  return invoke("update_folder_pinned", { folderId, isPinned })
+}
+
 export async function importLocalConversations(
   folderId: number
 ): Promise<ImportResult> {

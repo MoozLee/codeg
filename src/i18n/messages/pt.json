@@ -888,7 +888,8 @@
         "openFolderFailed": "Falha ao abrir pasta",
         "removeFolderFailed": "Falha ao remover pasta: {message}",
         "reorderFoldersFailed": "Falha ao reordenar pastas: {message}",
-        "changeFolderColorFailed": "Falha ao alterar a cor: {message}"
+        "changeFolderColorFailed": "Falha ao alterar a cor: {message}",
+        "togglePinFailed": "Falha ao alternar a fixação: {message}"
       },
       "statsLabel": "{folders} pastas · {convos} conversas",
       "reorderHandle": "Arraste para reordenar",
@@ -910,7 +911,13 @@
       "folderHeaderMenu": {
         "manageConversations": "Gerenciar conversas…",
         "changeColor": "Alterar cor",
-        "removeFromWorkspace": "Remover do espaço de trabalho"
+        "removeFromWorkspace": "Remover do espaço de trabalho",
+        "pin": "Fixar",
+        "unpin": "Desafixar"
+      },
+      "sections": {
+        "pinned": "Fixados",
+        "projects": "Projetos"
       },
       "manageConversations": {
         "title": "Gerenciar conversas — {name}",

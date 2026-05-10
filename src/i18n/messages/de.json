@@ -888,7 +888,8 @@
         "openFolderFailed": "Ordner konnte nicht geöffnet werden",
         "removeFolderFailed": "Ordner konnte nicht entfernt werden: {message}",
         "reorderFoldersFailed": "Ordner konnten nicht neu sortiert werden: {message}",
-        "changeFolderColorFailed": "Farbe konnte nicht geändert werden: {message}"
+        "changeFolderColorFailed": "Farbe konnte nicht geändert werden: {message}",
+        "togglePinFailed": "Anheften konnte nicht umgeschaltet werden: {message}"
       },
       "statsLabel": "{folders} Ordner · {convos} Konversationen",
       "reorderHandle": "Zum Neuordnen ziehen",
@@ -910,7 +911,13 @@
       "folderHeaderMenu": {
         "manageConversations": "Konversationen verwalten…",
         "changeColor": "Farbe ändern",
-        "removeFromWorkspace": "Aus Arbeitsbereich entfernen"
+        "removeFromWorkspace": "Aus Arbeitsbereich entfernen",
+        "pin": "Anheften",
+        "unpin": "Lösen"
+      },
+      "sections": {
+        "pinned": "Angeheftet",
+        "projects": "Projekte"
       },
       "manageConversations": {
         "title": "Konversationen verwalten — {name}",

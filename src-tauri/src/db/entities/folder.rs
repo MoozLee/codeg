@@ -17,6 +17,7 @@ pub struct Model {
     pub is_open: bool,
     pub sort_order: i32,
     pub color: String,
+    pub is_pinned: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

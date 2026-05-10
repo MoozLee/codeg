@@ -888,7 +888,8 @@
         "openFolderFailed": "فشل فتح المجلد",
         "removeFolderFailed": "فشل إزالة المجلد: {message}",
         "reorderFoldersFailed": "فشل إعادة ترتيب المجلدات: {message}",
-        "changeFolderColorFailed": "فشل تغيير اللون: {message}"
+        "changeFolderColorFailed": "فشل تغيير اللون: {message}",
+        "togglePinFailed": "فشل تبديل التثبيت: {message}"
       },
       "statsLabel": "{folders} مجلدات · {convos} محادثة",
       "reorderHandle": "اسحب لإعادة الترتيب",
@@ -910,7 +911,13 @@
       "folderHeaderMenu": {
         "manageConversations": "إدارة المحادثات…",
         "changeColor": "تغيير اللون",
-        "removeFromWorkspace": "إزالة من مساحة العمل"
+        "removeFromWorkspace": "إزالة من مساحة العمل",
+        "pin": "تثبيت",
+        "unpin": "إلغاء التثبيت"
+      },
+      "sections": {
+        "pinned": "مثبت",
+        "projects": "المشاريع"
       },
       "manageConversations": {
         "title": "إدارة المحادثات — {name}",

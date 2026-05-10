@@ -888,7 +888,8 @@
         "openFolderFailed": "Failed to open folder",
         "removeFolderFailed": "Failed to remove folder: {message}",
         "reorderFoldersFailed": "Failed to reorder folders: {message}",
-        "changeFolderColorFailed": "Failed to change folder color: {message}"
+        "changeFolderColorFailed": "Failed to change folder color: {message}",
+        "togglePinFailed": "Failed to toggle folder pin: {message}"
       },
       "statsLabel": "{folders} folders · {convos} conversations",
       "reorderHandle": "Drag to reorder",
@@ -910,7 +911,13 @@
       "folderHeaderMenu": {
         "manageConversations": "Manage conversations…",
         "changeColor": "Change color",
-        "removeFromWorkspace": "Remove from workspace"
+        "removeFromWorkspace": "Remove from workspace",
+        "pin": "Pin",
+        "unpin": "Unpin"
+      },
+      "sections": {
+        "pinned": "Pinned",
+        "projects": "Projects"
       },
       "manageConversations": {
         "title": "Manage conversations — {name}",
