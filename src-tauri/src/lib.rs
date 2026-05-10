@@ -101,6 +101,12 @@ mod tauri_app {
         process::ensure_user_npm_prefix_in_path();
 
         tauri::Builder::default()
+            // Must be the first plugin: it short-circuits second launches by
+            // signalling the running instance and exiting before any other
+            // initialization. The callback runs in the *original* process.
+            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                windows::show_main_window(app);
+            }))
             .plugin(tauri_plugin_window_state::Builder::new().build())
             .plugin(tauri_plugin_opener::init())
             .plugin(tauri_plugin_dialog::init())
@@ -133,6 +139,20 @@ mod tauri_app {
                 // Load saved appearance settings before any window is created.
                 tauri::async_runtime::block_on(windows::load_saved_zoom(&db.conn));
                 tauri::async_runtime::block_on(windows::load_saved_appearance_mode(&db.conn));
+
+                // System tray: required for the WeChat-style hide-on-close
+                // flow on Windows/Linux (no built-in dock to bring the
+                // workspace back). Locale comes from the persisted language
+                // settings; system mode falls back to English here, which
+                // the user can fix by switching to manual mode.
+                let tray_locale = tauri::async_runtime::block_on(
+                    crate::commands::system_settings::load_system_language_settings(&db.conn),
+                )
+                .map(|settings| settings.language)
+                .unwrap_or_default();
+                if let Err(err) = windows::install_tray_icon(app.handle(), tray_locale) {
+                    eprintln!("[Tray] failed to install tray icon: {err}");
+                }
 
                 // Sweep stale ACP binary cache trash (rename-aside fallback
                 // artifacts). Detached OS thread: cannot block startup, panics
@@ -247,14 +267,27 @@ mod tauri_app {
                 Ok(())
             })
             .on_menu_event(|app, event| {
+                let id = event.id().as_ref().to_string();
+
+                // Tray menu items act in Rust directly: showing the
+                // workspace and quitting are both pure runtime concerns
+                // with no UI state to coordinate.
+                if id.starts_with(windows::TRAY_MENU_ID_PREFIX) {
+                    match id.as_str() {
+                        windows::TRAY_MENU_ID_SHOW => windows::show_main_window(app),
+                        windows::TRAY_MENU_ID_QUIT => app.exit(0),
+                        _ => {}
+                    }
+                    return;
+                }
+
                 // Dispatch native pet context-menu actions. Items live under
-                // the `pet:` id namespace; everything else (tray menus, future
-                // app menus) flows past untouched. We re-emit a webview event
+                // the `pet:` id namespace; everything else (future app
+                // menus) flows past untouched. We re-emit a webview event
                 // rather than acting in Rust so the existing frontend
                 // commands (pet_save_window_state, open_settings_window,
                 // close_pet_window) stay the single source of truth — the
                 // native menu is just a different *trigger*.
-                let id = event.id().as_ref().to_string();
                 if !id.starts_with(windows::PET_MENU_ID_PREFIX) {
                     return;
                 }
@@ -359,7 +392,7 @@ mod tauri_app {
                     // the window.
                     if let Some(db) = window.app_handle().try_state::<db::AppDatabase>() {
                         let conn = db.conn.clone();
-                        tauri::async_runtime::spawn(async move {
+                        let save = async move {
                             let _ = crate::commands::pet::pet_save_window_state_core(
                                 &conn,
                                 crate::models::pet::PetWindowStatePatch {
@@ -371,23 +404,63 @@ mod tauri_app {
                                 },
                             )
                             .await;
-                        });
+                        };
+                        // During app shutdown the runtime is about to be torn
+                        // down — a fire-and-forget spawn would lose the save
+                        // and `enabled = true` would survive into the next
+                        // launch. Block here so the write lands before
+                        // ExitRequested returns.
+                        if APP_QUITTING.load(Ordering::Relaxed) {
+                            tauri::async_runtime::block_on(save);
+                        } else {
+                            tauri::async_runtime::spawn(save);
+                        }
                     }
                 }
 
-                if label == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                    let app = window.app_handle();
-                    if let Some(cm) = app.try_state::<ConnectionManager>() {
-                        let disconnected =
-                            tauri::async_runtime::block_on(cm.disconnect_by_owner_window(&label));
-                        eprintln!(
-                            "[ACP] main window closing disconnected_connections={}",
-                            disconnected
-                        );
-                    }
-                    if let Some(tm) = app.try_state::<TerminalManager>() {
-                        let killed = tm.kill_by_owner_window(&label);
-                        eprintln!("[TERM] main window closing killed_terminals={}", killed);
+                if label == "main" {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // The close button does one of two things, depending
+                        // on whether the platform can keep the workspace
+                        // recoverable while it's hidden:
+                        //
+                        //   * tray usable (macOS, Windows + tray): WeChat-style
+                        //     hide. App keeps running, tray brings it back.
+                        //   * tray not usable (Linux, tray install failed):
+                        //     force a real app exit. Letting only `main`
+                        //     close would orphan the desktop pet and other
+                        //     aux windows in a process with no workspace and
+                        //     no way to bring it back — `pet` runs with
+                        //     `skip_taskbar(true)`, and the single-instance
+                        //     callback's `show_main_window` is a no-op once
+                        //     main is destroyed.
+                        //
+                        // ExitRequested itself reaches this branch with
+                        // APP_QUITTING already set — that's the only path
+                        // that should fall through to the cleanup below.
+                        if !APP_QUITTING.load(Ordering::Relaxed) {
+                            api.prevent_close();
+                            if windows::can_hide_to_tray() {
+                                let _ = window.hide();
+                            } else {
+                                window.app_handle().exit(0);
+                            }
+                            return;
+                        }
+                        let app = window.app_handle();
+                        if let Some(cm) = app.try_state::<ConnectionManager>() {
+                            let disconnected = tauri::async_runtime::block_on(
+                                cm.disconnect_by_owner_window(&label),
+                            );
+                            eprintln!(
+                                "[ACP] main window closing disconnected_connections={}",
+                                disconnected
+                            );
+                        }
+                        if let Some(tm) = app.try_state::<TerminalManager>() {
+                            let killed = tm.kill_by_owner_window(&label);
+                            eprintln!("[TERM] main window closing killed_terminals={}", killed);
+                        }
                     }
                 }
             })
@@ -496,6 +569,7 @@ mod tauri_app {
                 windows::pet_show_context_menu,
                 windows::update_traffic_light_position,
                 windows::update_appearance_mode,
+                windows::set_tray_locale,
                 pet_commands::pet_list,
                 pet_commands::pet_get,
                 pet_commands::pet_read_spritesheet,
@@ -638,9 +712,17 @@ mod tauri_app {
             ])
             .build(tauri::generate_context!())
             .expect("error while building tauri application")
-            .run(|app, event| {
-                if let tauri::RunEvent::ExitRequested { .. } = event {
+            .run(|app, event| match event {
+                tauri::RunEvent::ExitRequested { .. } => {
                     APP_QUITTING.store(true, Ordering::Relaxed);
+                    // Drop the desktop pet alongside the workspace so it
+                    // never outlives a real quit. Tauri also tears down all
+                    // windows on shutdown, but doing it explicitly here lets
+                    // the pet's CloseRequested handler persist `enabled = false`
+                    // before the runtime races to exit.
+                    if let Some(pet) = app.get_webview_window("pet") {
+                        let _ = pet.close();
+                    }
                     if let Some(ws) = app.try_state::<web::WebServerState>() {
                         tauri::async_runtime::block_on(web::do_stop_web_server(&ws));
                     }
@@ -651,6 +733,19 @@ mod tauri_app {
                         tauri::async_runtime::block_on(cm.disconnect_all());
                     }
                 }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => {
+                    // Dock-icon click: bring the workspace forward
+                    // unconditionally. `has_visible_windows` is true
+                    // whenever any aux window (pet, settings, commit…)
+                    // is alive, so gating on it would suppress recovery
+                    // even though `main` itself is hidden.
+                    // `show_main_window` is idempotent — already-visible
+                    // windows just get re-focused, which is what dock
+                    // activation should do anyway.
+                    windows::show_main_window(app);
+                }
+                _ => {}
             });
     }
 }

@@ -647,6 +647,7 @@ pub async fn open_settings_window(
     state: tauri::State<'_, SettingsWindowState>,
 ) -> Result<(), AppCommandError> {
     let target_route = resolve_settings_target(section.as_deref(), agent_type.as_deref());
+    let owner_label = window.label().to_string();
     if let Some(existing) = app.get_webview_window("settings") {
         post_window_setup(&existing);
         if section.is_some() || agent_type.is_some() {
@@ -659,6 +660,19 @@ pub async fn open_settings_window(
                 AppCommandError::window("Failed to navigate settings window", e.to_string())
             })?;
         }
+        if let Some(prev_owner) = state.take_owner() {
+            if prev_owner != owner_label {
+                if let Some(prev_window) = app.get_webview_window(&prev_owner) {
+                    let _ = prev_window.set_enabled(true);
+                }
+            }
+        }
+        if let Some(owner_window) = app.get_webview_window(&owner_label) {
+            owner_window.set_enabled(false).map_err(|e| {
+                AppCommandError::window("Failed to disable owner window", e.to_string())
+            })?;
+        }
+        state.set_owner(owner_label);
         let _ = existing.unminimize();
         existing.set_focus().map_err(|e| {
             AppCommandError::window("Failed to focus settings window", e.to_string())
@@ -666,18 +680,26 @@ pub async fn open_settings_window(
         return Ok(());
     }
 
-    let owner_label = window.label().to_string();
     let url = WebviewUrl::App(target_route.into());
     let builder = WebviewWindowBuilder::new(&app, "settings", url)
         .title("Settings")
         .inner_size(1080.0, 700.0)
         .min_inner_size(1080.0, 600.0)
+        .always_on_top(true)
         .center();
     let settings_window = apply_platform_window_style(builder)
         .build()
         .map_err(|e| AppCommandError::window("Failed to open settings window", e.to_string()))?;
     post_window_setup(&settings_window);
-
+    if let Some(owner_window) = app.get_webview_window(&owner_label) {
+        if let Err(err) = owner_window.set_enabled(false) {
+            let _ = settings_window.close();
+            return Err(AppCommandError::window(
+                "Failed to disable owner window",
+                err.to_string(),
+            ));
+        }
+    }
     state.set_owner(owner_label);
     settings_window
         .set_focus()
@@ -688,6 +710,7 @@ pub async fn open_settings_window(
 pub fn restore_windows_after_settings(app: &AppHandle, state: &SettingsWindowState) {
     if let Some(owner_label) = state.take_owner() {
         if let Some(window) = app.get_webview_window(&owner_label) {
+            let _ = window.set_enabled(true);
             let _ = window.set_focus();
         }
     }
@@ -1431,4 +1454,250 @@ pub async fn update_appearance_mode(
     let _ = app_metadata_service::upsert_value(&db.conn, APPEARANCE_MODE_DB_KEY, &mode).await;
 
     Ok(())
+}
+
+// ─── System tray icon ──────────────────────────────────────────────────
+
+/// Monochrome template image for the macOS menu bar. AppKit treats an
+/// `NSImage` with `isTemplate = true` as a mask: only the alpha channel
+/// matters and the system tints it to match the menu-bar appearance
+/// (light, dark, accent). The colored window icon won't get this
+/// treatment and looks out of place next to other system icons.
+#[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
+const MACOS_TRAY_TEMPLATE_PNG: &[u8] =
+    include_bytes!("../../icons/tray-icon-template.png");
+
+#[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
+fn load_macos_tray_template_icon() -> Result<tauri::image::Image<'static>, String> {
+    let decoded = image::load_from_memory(MACOS_TRAY_TEMPLATE_PNG)
+        .map_err(|e| format!("decode tray template png: {e}"))?
+        .to_rgba8();
+    let (w, h) = (decoded.width(), decoded.height());
+    Ok(tauri::image::Image::new_owned(decoded.into_raw(), w, h))
+}
+
+/// Stable id namespace for tray menu items. Routed through the app-wide
+/// `on_menu_event` handler in `lib.rs`.
+pub const TRAY_MENU_ID_PREFIX: &str = "tray:";
+pub const TRAY_MENU_ID_SHOW: &str = "tray:show";
+pub const TRAY_MENU_ID_QUIT: &str = "tray:quit";
+pub const TRAY_ICON_ID: &str = "codeg-tray";
+
+/// True after `install_tray_icon` returns `Ok`. The hide-on-close path
+/// in `lib.rs` consults this so we don't strand the user on systems
+/// where the tray failed to install (Windows tray refused, etc.). On
+/// Linux this is necessary-but-not-sufficient: the StatusNotifierWatcher
+/// may be missing and the icon invisible even when build() returns Ok,
+/// which is why `can_hide_to_tray()` reports false on Linux regardless.
+#[cfg(feature = "tauri-runtime")]
+static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
+/// Whether hide-on-close is safe on this platform/session. When false,
+/// the close handler in `lib.rs` forces a real app exit instead — both
+/// `hide()` and `minimize()` would leave aux windows (pet, settings)
+/// running without a recoverable workspace.
+#[cfg(feature = "tauri-runtime")]
+pub fn can_hide_to_tray() -> bool {
+    // Linux: even with a successfully installed tray icon, modern GNOME
+    // (45+) defaults ship without a StatusNotifierWatcher and the icon
+    // is silently invisible. Refusing here forces the close to pass
+    // through to a real exit on Linux — preferable to a phantom process
+    // with no UI surface.
+    if cfg!(target_os = "linux") {
+        return false;
+    }
+    TRAY_AVAILABLE.load(AtomicOrdering::Relaxed)
+}
+
+/// Bring the hidden / minimized main workspace window back to the
+/// foreground. Used by:
+///   * single-instance plugin (second launch)
+///   * tray icon left-click and "Show Workspace" menu item
+///   * macOS dock-icon reopen
+#[cfg(feature = "tauri-runtime")]
+pub fn show_main_window(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+}
+
+#[cfg(feature = "tauri-runtime")]
+struct TrayLabels {
+    show_workspace: &'static str,
+    quit: &'static str,
+}
+
+#[cfg(feature = "tauri-runtime")]
+fn tray_labels_for(locale: crate::models::system::AppLocale) -> TrayLabels {
+    use crate::models::system::AppLocale;
+    match locale {
+        AppLocale::ZhCn => TrayLabels {
+            show_workspace: "显示工作台",
+            quit: "退出 Codeg",
+        },
+        AppLocale::ZhTw => TrayLabels {
+            show_workspace: "顯示工作臺",
+            quit: "退出 Codeg",
+        },
+        AppLocale::Ja => TrayLabels {
+            show_workspace: "ワークスペースを表示",
+            quit: "Codeg を終了",
+        },
+        AppLocale::Ko => TrayLabels {
+            show_workspace: "워크스페이스 표시",
+            quit: "Codeg 종료",
+        },
+        AppLocale::Es => TrayLabels {
+            show_workspace: "Mostrar el área de trabajo",
+            quit: "Salir de Codeg",
+        },
+        AppLocale::De => TrayLabels {
+            show_workspace: "Arbeitsbereich anzeigen",
+            quit: "Codeg beenden",
+        },
+        AppLocale::Fr => TrayLabels {
+            show_workspace: "Afficher l'espace de travail",
+            quit: "Quitter Codeg",
+        },
+        AppLocale::Pt => TrayLabels {
+            show_workspace: "Mostrar área de trabalho",
+            quit: "Sair do Codeg",
+        },
+        AppLocale::Ar => TrayLabels {
+            show_workspace: "إظهار مساحة العمل",
+            quit: "إنهاء Codeg",
+        },
+        AppLocale::En => TrayLabels {
+            show_workspace: "Show Workspace",
+            quit: "Quit Codeg",
+        },
+    }
+}
+
+/// Install the system tray icon and its right-click menu. Left-click
+/// (Linux/Windows) and dock-style activation behaviors map to
+/// `show_main_window`. Menu wiring lives in the app-wide
+/// `on_menu_event` callback in `lib.rs` so the tray and pet menus share
+/// one dispatcher.
+#[cfg(feature = "tauri-runtime")]
+pub fn install_tray_icon(
+    app: &AppHandle,
+    locale: crate::models::system::AppLocale,
+) -> tauri::Result<()> {
+    use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let labels = tray_labels_for(locale);
+    let show_item = MenuItem::with_id(
+        app,
+        TRAY_MENU_ID_SHOW,
+        labels.show_workspace,
+        true,
+        None::<&str>,
+    )?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit_item =
+        MenuItem::with_id(app, TRAY_MENU_ID_QUIT, labels.quit, true, None::<&str>)?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&show_item, &separator, &quit_item])
+        .build()?;
+
+    let mut builder = TrayIconBuilder::with_id(TRAY_ICON_ID)
+        .tooltip("Codeg")
+        .menu(&menu)
+        // `false` is required for `on_tray_icon_event::Click` to fire on
+        // every platform we ship: the default `true` causes the OS to
+        // consume left-click to pop the menu (notably on macOS — see
+        // tauri-apps/tauri#11413). Right-click still shows the menu
+        // because that's the OS's job, not ours.
+        .show_menu_on_left_click(false);
+
+    // macOS menu bar expects a monochrome template image that adapts to
+    // light/dark mode and the user's accent settings. Other platforms
+    // (Windows tray, Linux indicators) want the regular colored icon.
+    #[cfg(target_os = "macos")]
+    {
+        match load_macos_tray_template_icon() {
+            Ok(icon) => {
+                builder = builder.icon(icon).icon_as_template(true);
+            }
+            Err(err) => {
+                eprintln!("[Tray] failed to load template icon, falling back: {err}");
+                if let Some(icon) = app.default_window_icon() {
+                    builder = builder.icon(icon.clone());
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(icon) = app.default_window_icon() {
+            builder = builder.icon(icon.clone());
+        }
+    }
+
+    builder
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    TRAY_AVAILABLE.store(true, AtomicOrdering::Relaxed);
+    Ok(())
+}
+
+/// Rebuild the tray menu in the supplied locale and swap it onto the
+/// existing tray icon. No-op if the tray hasn't been installed yet
+/// (e.g. the language change races setup, or the platform refused the
+/// initial install).
+#[cfg(feature = "tauri-runtime")]
+pub fn refresh_tray_menu(
+    app: &AppHandle,
+    locale: crate::models::system::AppLocale,
+) -> tauri::Result<()> {
+    use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
+
+    let Some(tray) = app.tray_by_id(TRAY_ICON_ID) else {
+        return Ok(());
+    };
+
+    let labels = tray_labels_for(locale);
+    let show_item = MenuItem::with_id(
+        app,
+        TRAY_MENU_ID_SHOW,
+        labels.show_workspace,
+        true,
+        None::<&str>,
+    )?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit_item =
+        MenuItem::with_id(app, TRAY_MENU_ID_QUIT, labels.quit, true, None::<&str>)?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&show_item, &separator, &quit_item])
+        .build()?;
+
+    tray.set_menu(Some(menu))?;
+    Ok(())
+}
+
+/// Push the current effective UI locale to the system tray. Called by
+/// the i18n provider whenever the resolved app locale changes — covers
+/// both manual selection and OS-driven changes in system mode.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn set_tray_locale(
+    app: AppHandle,
+    locale: crate::models::system::AppLocale,
+) -> Result<(), AppCommandError> {
+    refresh_tray_menu(&app, locale)
+        .map_err(|e| AppCommandError::window("Failed to refresh tray menu", e.to_string()))
 }

@@ -1897,6 +1897,9 @@
         "copied": "Copié",
         "downloadImage": "Télécharger l'image",
         "downloadFailed": "Échec du téléchargement : {message}",
+        "imageGeneration": "Génération d'image",
+        "imageGenerationPending": "Génération de l'image…",
+        "imageGenerationFailed": "Échec de la génération d'image",
         "model": "Modèle",
         "tokenStats": "Utilisation des tokens",
         "tokenInput": "Entrée",
@@ -1904,6 +1907,7 @@
         "tokenCacheRead": "Lecture du cache",
         "tokenCacheWrite": "Écriture du cache",
         "duration": "Durée",
+        "completedAt": "Terminé à",
         "jumpToPreviousUserMessage": "Aller au message utilisateur"
       },
       "liveTurnStats": {
@@ -2462,7 +2466,6 @@
     "marketplace": {
       "openMarketplace": "Marketplace de mascottes",
       "title": "Marketplace de mascottes",
-      "description": "Parcourez les mascottes publiques de codex-pets.net et installez-les localement.",
       "search": "Rechercher des mascottes",
       "kindFilter": {
         "all": "Toutes",

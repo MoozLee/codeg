@@ -1897,6 +1897,9 @@
         "copied": "تم النسخ",
         "downloadImage": "تنزيل الصورة",
         "downloadFailed": "فشل التنزيل: {message}",
+        "imageGeneration": "إنشاء الصورة",
+        "imageGenerationPending": "جارٍ إنشاء الصورة…",
+        "imageGenerationFailed": "فشل إنشاء الصورة",
         "model": "النموذج",
         "tokenStats": "استخدام الرموز",
         "tokenInput": "الإدخال",
@@ -1904,6 +1907,7 @@
         "tokenCacheRead": "قراءة التخزين المؤقت",
         "tokenCacheWrite": "كتابة التخزين المؤقت",
         "duration": "المدة",
+        "completedAt": "وقت الإنجاز",
         "jumpToPreviousUserMessage": "الانتقال إلى رسالة المستخدم"
       },
       "liveTurnStats": {
@@ -2462,7 +2466,6 @@
     "marketplace": {
       "openMarketplace": "متجر الحيوانات الأليفة",
       "title": "متجر الحيوانات الأليفة",
-      "description": "تصفّح الحيوانات الأليفة العامة من codex-pets.net وثبّتها محلياً.",
       "search": "ابحث عن حيوان أليف",
       "kindFilter": {
         "all": "الكل",

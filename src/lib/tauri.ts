@@ -45,6 +45,7 @@ import type {
   GitLogResult,
   AvailableTerminalShells,
   ConversationOpenTarget,
+  AppLocale,
   SystemLanguageSettings,
   SystemOpenTargetSettings,
   SystemProxySettings,
@@ -328,6 +329,10 @@ export async function updateSystemLanguageSettings(
   settings: SystemLanguageSettings
 ): Promise<SystemLanguageSettings> {
   return invoke("update_system_language_settings", { settings })
+}
+
+export async function setTrayLocale(locale: AppLocale): Promise<void> {
+  return invoke("set_tray_locale", { locale })
 }
 
 export async function getSystemTerminalSettings(): Promise<SystemTerminalSettings> {

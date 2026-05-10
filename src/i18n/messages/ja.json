@@ -1897,6 +1897,9 @@
         "copied": "コピー済み",
         "downloadImage": "画像をダウンロード",
         "downloadFailed": "ダウンロードに失敗しました: {message}",
+        "imageGeneration": "画像生成",
+        "imageGenerationPending": "画像を生成中…",
+        "imageGenerationFailed": "画像生成に失敗しました",
         "model": "モデル",
         "tokenStats": "トークン使用量",
         "tokenInput": "入力",
@@ -1904,6 +1907,7 @@
         "tokenCacheRead": "キャッシュ読取",
         "tokenCacheWrite": "キャッシュ書込",
         "duration": "所要時間",
+        "completedAt": "完了時刻",
         "jumpToPreviousUserMessage": "前のユーザーメッセージへ"
       },
       "liveTurnStats": {
@@ -2462,7 +2466,6 @@
     "marketplace": {
       "openMarketplace": "ペットマーケット",
       "title": "ペットマーケット",
-      "description": "codex-pets.net の公開ペットを参照し、ローカルにインストールします。",
       "search": "ペットを検索",
       "kindFilter": {
         "all": "すべて",

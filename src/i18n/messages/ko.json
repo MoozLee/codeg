@@ -1897,6 +1897,9 @@
         "copied": "복사됨",
         "downloadImage": "이미지 다운로드",
         "downloadFailed": "다운로드 실패: {message}",
+        "imageGeneration": "이미지 생성",
+        "imageGenerationPending": "이미지 생성 중…",
+        "imageGenerationFailed": "이미지 생성 실패",
         "model": "모델",
         "tokenStats": "토큰 사용량",
         "tokenInput": "입력",
@@ -1904,6 +1907,7 @@
         "tokenCacheRead": "캐시 읽기",
         "tokenCacheWrite": "캐시 쓰기",
         "duration": "소요 시간",
+        "completedAt": "완료 시각",
         "jumpToPreviousUserMessage": "이전 사용자 메시지로 이동"
       },
       "liveTurnStats": {
@@ -2462,7 +2466,6 @@
     "marketplace": {
       "openMarketplace": "펫 마켓",
       "title": "펫 마켓",
-      "description": "codex-pets.net 의 공개 펫을 둘러보고 로컬에 설치합니다.",
       "search": "펫 검색",
       "kindFilter": {
         "all": "전체",

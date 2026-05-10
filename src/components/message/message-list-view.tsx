@@ -25,7 +25,6 @@ import { TurnStats } from "./turn-stats"
 import { LiveTurnStats } from "./live-turn-stats"
 import { UserResourceLinks } from "./user-resource-links"
 import { UserImageAttachments } from "./user-image-attachments"
-import { AssistantImageAttachments } from "./assistant-image-attachments"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { AgentPlanOverlay } from "@/components/chat/agent-plan-overlay"
 import {
@@ -115,11 +114,17 @@ interface ResolvedMessageGroup {
   parts: AdaptedContentPart[]
   resources: UserResourceDisplay[]
   images: UserImageDisplay[]
-  assistantImages: UserImageDisplay[]
   usage?: import("@/lib/types").TurnUsage | null
   duration_ms?: number | null
   model?: string | null
   models?: string[]
+  /**
+   * Wall-clock completion time supplied by the Rust parser. For merged
+   * sub-turns this reflects the last sub-turn's completion (inherited
+   * automatically via `{ ...last.group }`), not first-start + accumulated
+   * duration.
+   */
+  completed_at?: string | null
 }
 
 type ThreadRenderItem =
@@ -286,7 +291,6 @@ function isEmptyTurnItem(item: ThreadRenderItem): boolean {
   if (g.parts.length > 0) return false
   if (g.resources.length > 0) return false
   if (g.images.length > 0) return false
-  if (g.assistantImages.length > 0) return false
   return true
 }
 
@@ -319,9 +323,6 @@ function mergeConsecutiveAssistantTurns(
       const mergedParts = mergeAdjacentToolGroups(allParts)
       const last = buffer[buffer.length - 1]
       const first = buffer[0]
-      const mergedAssistantImages = buffer.flatMap(
-        (it) => it.group.assistantImages
-      )
 
       // Aggregate stats across the merged sub-turns so the post-stream
       // stats row reflects the whole assistant response, not just the
@@ -365,7 +366,6 @@ function mergeConsecutiveAssistantTurns(
           ...last.group,
           id: first.group.id,
           parts: mergedParts,
-          assistantImages: mergedAssistantImages,
           usage: mergedUsage,
           duration_ms: mergedDuration,
           model: mergedModels[0] ?? last.group.model,
@@ -468,12 +468,6 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
         {group.role === "user" && group.images.length > 0 ? (
           <UserImageAttachments images={group.images} className="self-end" />
         ) : null}
-        {group.role === "assistant" && group.assistantImages.length > 0 ? (
-          <AssistantImageAttachments
-            images={group.assistantImages}
-            className="self-start"
-          />
-        ) : null}
         {group.role === "user" ? (
           <div className="group/user-msg flex w-fit ml-auto max-w-full items-start gap-1">
             <UserMessageCopyButton parts={group.parts} />
@@ -499,6 +493,7 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
           previousUserIndex={previousUserIndex}
           isResponseComplete={isResponseComplete}
           copyText={extractTextFromParts(group.parts)}
+          completedAt={group.completed_at}
         />
       )}
     </div>
@@ -796,10 +791,10 @@ export function MessageListView({
           parts: msg.content,
           resources: msg.userResources ?? [],
           images: msg.userImages ?? [],
-          assistantImages: msg.assistantImages ?? [],
           usage: msg.usage,
           duration_ms: msg.duration_ms,
           model: msg.model,
+          completed_at: msg.completed_at,
         }
         groupCache.set(msg, group)
       }

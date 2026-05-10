@@ -17,7 +17,6 @@ import { toast } from "sonner"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -201,7 +200,10 @@ export function PetMarketplaceDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent
+          className="max-w-3xl gap-3 p-4"
+          aria-describedby={undefined}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Store className="h-4 w-4 text-primary" />
@@ -212,7 +214,6 @@ export function PetMarketplaceDialog({
                 </span>
               ) : null}
             </DialogTitle>
-            <DialogDescription>{t("description")}</DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -276,8 +277,8 @@ export function PetMarketplaceDialog({
             </Button>
           </div>
 
-          <ScrollArea className="-mx-6 max-h-[60vh] min-h-[12rem]">
-            <div className="px-6 py-1">
+          <ScrollArea className="-mx-4 max-h-[60vh] min-h-[12rem]">
+            <div className="px-4 py-0.5">
               {loading && pets.length === 0 ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />

@@ -784,6 +784,7 @@ mod tests {
                 }),
                 duration_ms: None,
                 model: None,
+                completed_at: None,
             },
             MessageTurn {
                 id: "turn-1".to_string(),
@@ -799,6 +800,7 @@ mod tests {
                 }),
                 duration_ms: None,
                 model: None,
+                completed_at: None,
             },
         ];
 

@@ -40,6 +40,7 @@ import type {
   SessionUsageUpdateInfo,
   PromptCapabilitiesInfo,
   PromptInputBlock,
+  ToolCallImageWire,
 } from "@/lib/types"
 import { AGENT_LABELS } from "@/lib/types"
 import {
@@ -63,6 +64,16 @@ import { useActiveFolder } from "@/contexts/active-folder-context"
 /** ACP extensibility metadata attached to tool calls. */
 export type ToolCallMeta = Record<string, unknown> | null
 
+/**
+ * An image attached to a tool call (e.g. codex-acp v0.14+ image generation).
+ * Re-exports the wire-level `ToolCallImageWire` from `@/lib/types` so that
+ * snapshot, live `tool_call(_update)` events, and `ToolCallInfo` share one
+ * shape. `data` is base64 (potentially multi-MB), `mime_type` defaults to
+ * `image/png` when the agent omits it, `uri` is the on-disk path when the
+ * agent persisted the asset (e.g. codex's `~/.codex/generated_images/...`).
+ */
+export type ToolCallImage = ToolCallImageWire
+
 export interface ToolCallInfo {
   tool_call_id: string
   title: string
@@ -74,6 +85,13 @@ export interface ToolCallInfo {
   raw_output_total_bytes: number
   locations: unknown
   meta: ToolCallMeta
+  /**
+   * Replace-on-update: a fresh ToolCallUpdate carrying images replaces this
+   * vec; an absent images field preserves the prior value. Empty array
+   * means "no images on this tool call". Persisted via snapshot so a
+   * frontend reconnecting mid-turn or after refresh sees the same image.
+   */
+  images: ToolCallImage[]
 }
 
 export interface PendingPermission {
@@ -235,6 +253,8 @@ type Action =
       raw_output: string | null
       locations: unknown
       meta: ToolCallMeta
+      /** `null` when the wire event omitted the field (no images). */
+      images: ToolCallImage[] | null
     }
   | {
       type: "TOOL_CALL_UPDATE"
@@ -250,6 +270,12 @@ type Action =
       raw_output_append?: boolean
       locations: unknown
       meta: ToolCallMeta
+      /**
+       * `null` when the wire event omitted the field — preserve prior images.
+       * `[]` (empty array) when the agent explicitly cleared images.
+       * `[a, b]` to replace.
+       */
+      images: ToolCallImage[] | null
     }
   | {
       type: "BATCH_TOOL_CALL_UPDATES"
@@ -268,6 +294,7 @@ type Action =
         locations: any | null
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         meta: any | null
+        images: ToolCallImage[] | null
       }>
     }
   | {
@@ -1399,6 +1426,8 @@ function connectionsReducer(
                   action.raw_output !== null
                     ? action.raw_output.length
                     : block.info.raw_output_total_bytes,
+                images:
+                  action.images !== null ? action.images : block.info.images,
               },
             },
             ...prev.content.slice(existingIndex + 1),
@@ -1423,6 +1452,7 @@ function connectionsReducer(
               raw_output_total_bytes: action.raw_output?.length ?? 0,
               locations: action.locations ?? null,
               meta: action.meta ?? null,
+              images: action.images ?? [],
             },
           },
         ]
@@ -1467,6 +1497,7 @@ function connectionsReducer(
               raw_output_total_bytes: initialBytes,
               locations: action.locations ?? null,
               meta: action.meta ?? null,
+              images: action.images ?? [],
             },
           },
         ]
@@ -1524,6 +1555,8 @@ function connectionsReducer(
               locations: action.locations ?? block.info.locations,
               meta: action.meta ?? block.info.meta,
               raw_output_total_bytes: newTotalBytes,
+              images:
+                action.images !== null ? action.images : block.info.images,
             },
           },
           ...prev.content.slice(existingIndex + 1),
@@ -1610,6 +1643,7 @@ function connectionsReducer(
                   raw_output_total_bytes: 0,
                   locations: null,
                   meta: null,
+                  images: [],
                 },
               },
             ],
@@ -2525,6 +2559,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       raw_output_append?: boolean
       locations: unknown
       meta: ToolCallMeta
+      images: ToolCallImage[] | null
     }>
   >([])
   const toolCallUpdateRafId = useRef<number | null>(null)
@@ -2595,6 +2630,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             raw_output: e.raw_output,
             locations: e.locations ?? null,
             meta: (e.meta as ToolCallMeta) ?? null,
+            images: e.images ?? null,
           })
           break
         case "tool_call_update":
@@ -2612,6 +2648,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             raw_output_append: e.raw_output_append,
             locations: e.locations ?? null,
             meta: (e.meta as ToolCallMeta) ?? null,
+            images: e.images ?? null,
           })
           scheduleToolCallUpdateFlush()
           break

@@ -27,6 +27,7 @@ tauri-runtime = [
     "dep:tauri-plugin-updater",
     "dep:tauri-plugin-process",
     "dep:tauri-plugin-notification",
+    "dep:tauri-plugin-single-instance",
     "dep:keyring",
     "dep:fontdb",
 ]
@@ -45,7 +46,7 @@ required-features = []
 tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api"], optional = true }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"], optional = true }
 tauri-plugin-opener = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 async-trait = "0.1"
@@ -95,6 +96,7 @@ tauri-plugin-window-state = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-process = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-single-instance = { version = "2", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6"

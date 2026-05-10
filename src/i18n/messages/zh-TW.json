@@ -1897,6 +1897,9 @@
         "copied": "已複製",
         "downloadImage": "下載圖片",
         "downloadFailed": "下載失敗：{message}",
+        "imageGeneration": "圖片生成",
+        "imageGenerationPending": "正在生成圖片…",
+        "imageGenerationFailed": "圖片生成失敗",
         "model": "模型",
         "tokenStats": "Token 使用情況",
         "tokenInput": "輸入",
@@ -1904,6 +1907,7 @@
         "tokenCacheRead": "快取讀取",
         "tokenCacheWrite": "快取寫入",
         "duration": "耗時",
+        "completedAt": "完成時間",
         "jumpToPreviousUserMessage": "跳轉到上一條使用者訊息"
       },
       "liveTurnStats": {
@@ -2462,7 +2466,6 @@
     "marketplace": {
       "openMarketplace": "寵物市集",
       "title": "寵物市集",
-      "description": "瀏覽 codex-pets.net 上的公共寵物,一鍵安裝到本機。",
       "search": "搜尋寵物",
       "kindFilter": {
         "all": "全部",

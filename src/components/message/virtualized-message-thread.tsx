@@ -14,6 +14,18 @@ import {
   type MessageScrollContextValue,
 } from "@/components/message/message-scroll-context"
 
+function assignVirtualizerRef(
+  ref: Ref<VirtualizerHandle> | undefined,
+  handle: VirtualizerHandle | null
+) {
+  if (!ref) return
+  if (typeof ref === "function") {
+    ref(handle)
+    return
+  }
+  ;(ref as React.MutableRefObject<VirtualizerHandle | null>).current = handle
+}
+
 interface VirtualizedMessageThreadProps<T> {
   /** Data to virtualise — each entry becomes one virtual row. */
   items: T[]
@@ -98,14 +110,8 @@ export function VirtualizedMessageThread<T>({
 
   const mergedRef = useCallback(
     (handle: VirtualizerHandle | null) => {
-      (virtualizerHandleRef as React.MutableRefObject<VirtualizerHandle | null>).current = handle
-      if (virtualizerRef) {
-        if (typeof virtualizerRef === "function") {
-          virtualizerRef(handle)
-        } else {
-          (virtualizerRef as React.MutableRefObject<VirtualizerHandle | null>).current = handle
-        }
-      }
+      assignVirtualizerRef(virtualizerHandleRef, handle)
+      assignVirtualizerRef(virtualizerRef, handle)
     },
     [virtualizerRef]
   )

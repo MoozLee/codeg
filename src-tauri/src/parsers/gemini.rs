@@ -511,6 +511,7 @@ impl GeminiParser {
                         usage: None,
                         duration_ms: None,
                         model: None,
+                        completed_at: Some(timestamp),
                     });
                 }
                 "gemini" | "assistant" | "model" => {
@@ -532,6 +533,7 @@ impl GeminiParser {
                             .get("model")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string()),
+                        completed_at: Some(timestamp),
                     });
                 }
                 "system" => {
@@ -549,6 +551,7 @@ impl GeminiParser {
                         usage: None,
                         duration_ms: None,
                         model: None,
+                        completed_at: Some(timestamp),
                     });
                 }
                 _ => {}
@@ -674,6 +677,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage: None,
                 duration_ms: None,
                 model: None,
+                completed_at: msg.completed_at,
             });
             i += 1;
             continue;
@@ -689,6 +693,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 usage: None,
                 duration_ms: None,
                 model: None,
+                completed_at: msg.completed_at,
             });
             i += 1;
             continue;
@@ -699,6 +704,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
         let mut duration_ms = msg.duration_ms;
         let mut models: Vec<String> = msg.model.iter().cloned().collect();
         let timestamp = msg.timestamp;
+        let mut completed_at = msg.completed_at;
         i += 1;
 
         // Only absorb immediately following Tool messages
@@ -714,6 +720,9 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
             if let Some(model) = &messages[i].model {
                 models.push(model.clone());
             }
+            if messages[i].completed_at.is_some() {
+                completed_at = messages[i].completed_at;
+            }
             i += 1;
         }
 
@@ -728,6 +737,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
             usage,
             duration_ms,
             model,
+            completed_at,
         });
     }
 
@@ -738,7 +748,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
 mod tests {
     use super::resolve_gemini_base_dir_from;
     use super::GeminiParser;
-    use crate::models::{ContentBlock, MessageRole, UnifiedMessage};
+    use crate::models::{ContentBlock, MessageRole, TurnRole, UnifiedMessage};
     use crate::parsers::{
         stable_user_anchor_id_from_message, stable_user_anchor_id_from_parts, AgentParser,
     };
@@ -826,6 +836,59 @@ mod tests {
             .context_window_usage_percent
             .expect("context window percent");
         assert!((percent - 0.0051).abs() < 1e-9);
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn parse_detail_completion_time_uses_assistant_timestamp_not_next_message_gap() {
+        // Regression: Gemini's `duration_ms` heuristic is `next_msg.ts -
+        // assistant.ts`, which means a quick user follow-up makes the gap
+        // meaningless as a duration. completed_at must NOT be derived from
+        // that gap; it must reflect when the assistant message was logged.
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time ok")
+            .as_nanos();
+        let base: PathBuf = env::temp_dir().join(format!("codeg-gemini-completed-{nanos}"));
+        let chats_dir = base.join("tmp").join("codeg").join("chats");
+        fs::create_dir_all(&chats_dir).expect("create chat dir");
+
+        let file_path = chats_dir.join("session-completed.json");
+        let content = r#"{
+  "sessionId": "completed-1",
+  "projectHash": "abc",
+  "startTime": "2026-03-02T04:30:00.000Z",
+  "lastUpdated": "2026-03-02T04:30:50.000Z",
+  "messages": [
+    {"id": "u1", "timestamp": "2026-03-02T04:30:00.000Z", "type": "user", "content": [{"text": "ping"}]},
+    {"id": "a1", "timestamp": "2026-03-02T04:30:02.000Z", "type": "gemini", "content": "pong", "model": "gemini-3.1-pro-preview"},
+    {"id": "u2", "timestamp": "2026-03-02T04:30:50.000Z", "type": "user", "content": [{"text": "follow-up after 48s"}]}
+  ]
+}"#;
+        fs::write(&file_path, content).expect("write chat file");
+
+        let parser = GeminiParser::with_base_dir(base.clone());
+        let detail = parser
+            .get_conversation("completed-1")
+            .expect("get conversation");
+
+        let assistant = detail
+            .turns
+            .iter()
+            .find(|t| matches!(t.role, TurnRole::Assistant))
+            .expect("assistant turn");
+        let completed_at = assistant.completed_at.expect("completed_at populated");
+        let expected = "2026-03-02T04:30:02.000Z"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        assert_eq!(completed_at, expected);
+        // The naive `timestamp + (next_user.ts - assistant.ts)` would land
+        // on the second user message timestamp.
+        let wrong = "2026-03-02T04:30:50.000Z"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        assert_ne!(completed_at, wrong);
 
         let _ = fs::remove_dir_all(base);
     }
