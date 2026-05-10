@@ -100,14 +100,38 @@ mod tauri_app {
         process::ensure_node_in_path();
         process::ensure_user_npm_prefix_in_path();
 
-        tauri::Builder::default()
-            // Must be the first plugin: it short-circuits second launches by
-            // signalling the running instance and exiting before any other
-            // initialization. The callback runs in the *original* process.
-            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-                windows::show_main_window(app);
-            }))
-            .plugin(tauri_plugin_window_state::Builder::new().build())
+        let builder = tauri::Builder::default();
+
+        // In packaged builds this must be the first plugin: it short-circuits
+        // second launches by signalling the running instance and exiting before
+        // any other initialization. The callback runs in the *original* process.
+        //
+        // In debug/dev builds we intentionally do not install it. On macOS the
+        // plugin derives its Unix socket path from the bundle identifier
+        // (`/tmp/app_codeg_si.sock` for `app.codeg`), so `pnpm tauri dev` and
+        // `/Applications/codeg.app` would otherwise compete for the same
+        // singleton. When the packaged app is still alive in the menu bar/tray
+        // after its window is closed, the dev binary exits with status 0 before
+        // opening any dev window, which looks like a silent startup failure.
+        #[cfg(not(debug_assertions))]
+        let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            windows::show_main_window(app);
+        }));
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[SingleInstance] disabled for debug build so dev and packaged apps can run independently"
+        );
+
+        builder
+            .plugin(
+                tauri_plugin_window_state::Builder::new()
+                    // Settings is created hidden and shown only after modal-owner
+                    // setup. The window-state plugin's initial restore can call
+                    // show()/set_focus() during on_window_ready, which defeats
+                    // that and causes a visible pre-modal position flash.
+                    .skip_initial_state("settings")
+                    .build(),
+            )
             .plugin(tauri_plugin_opener::init())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_updater::Builder::new().build())
@@ -259,9 +283,10 @@ mod tauri_app {
                         .title("Codeg")
                         .inner_size(1260.0, 860.0)
                         .min_inner_size(900.0, 600.0);
-                    if let Ok(w) = windows::apply_platform_window_style(builder).build() {
-                        windows::post_window_setup(&w);
-                    }
+                    let w = windows::apply_platform_window_style(builder)
+                        .build()
+                        .map_err(|e| format!("Failed to create main window: {e}"))?;
+                    windows::post_window_setup(&w);
                 }
 
                 Ok(())

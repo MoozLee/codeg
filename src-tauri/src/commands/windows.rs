@@ -686,7 +686,11 @@ pub async fn open_settings_window(
         .inner_size(1080.0, 700.0)
         .min_inner_size(1080.0, 600.0)
         .always_on_top(true)
-        .center();
+        .center()
+        // Build hidden so platform-specific setup and owner-modal behavior are
+        // complete before the user sees the settings window. This avoids a
+        // one-frame default-position flash during creation on some platforms.
+        .visible(false);
     let settings_window = apply_platform_window_style(builder)
         .build()
         .map_err(|e| AppCommandError::window("Failed to open settings window", e.to_string()))?;
@@ -701,6 +705,9 @@ pub async fn open_settings_window(
         }
     }
     state.set_owner(owner_label);
+    settings_window
+        .show()
+        .map_err(|e| AppCommandError::window("Failed to show settings window", e.to_string()))?;
     settings_window
         .set_focus()
         .map_err(|e| AppCommandError::window("Failed to focus settings window", e.to_string()))?;
