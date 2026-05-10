@@ -1049,8 +1049,8 @@
           "history": "History stats"
         },
         "maxSource": {
-          "live": "Live/runtime max",
-          "configured": "Configured window",
+          "live": "Agent reported max",
+          "configured": "Configured auto-compact window",
           "history": "History stats",
           "unknown": "Unknown"
         },
@@ -1078,7 +1078,9 @@
         "disabled": "Disabled",
         "autoCompaction": "Auto-compaction",
         "autoCompactionThreshold": "Trigger threshold",
-        "configuredContextWindowMax": "Configured window max",
+        "configuredContextWindowMax": "Configured auto-compact window",
+        "runtimeContextWindowMax": "Runtime reported window",
+        "contextWindowClampedWarning": "Configured {configured}, but runtime reports only {runtime}. The runtime/model limit may cap the active window.",
         "compactionSupport": "Compaction support",
         "compactionStatus": "Compaction status",
         "configuredModelSourceState": {
@@ -1088,14 +1090,15 @@
           "selector": "ACP selector fallback"
         },
         "configuredContextWindowMaxSourceState": {
-          "agent_env": "Runtime env",
+          "agent_env": "Configured env",
           "agent_config_env": "config.env",
           "agent_root_config": "Root config"
         },
         "compactionSupportState": {
           "unknown": "Unknown",
           "unsupported": "Unsupported",
-          "agent_managed": "Agent-managed"
+          "agent_managed": "Agent-managed",
+          "native_managed": "Claude Code native"
         },
         "compactionStatusState": {
           "idle": "Idle",

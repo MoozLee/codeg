@@ -1066,7 +1066,8 @@
         "compactionSupportState": {
           "unknown": "Unbekannt",
           "unsupported": "Nicht unterstützt",
-          "agent_managed": "Agent-verwaltet"
+          "agent_managed": "Agent-verwaltet",
+          "native_managed": "Agent-nativ"
         },
         "compactionStatusState": {
           "idle": "Leerlauf",
@@ -1094,14 +1095,16 @@
         },
         "contextMaxSource": "Max-Quelle",
         "maxSource": {
-          "live": "Live-/Runtime-Maximum",
-          "configured": "Konfiguriertes Fenster",
+          "live": "Vom Agent gemeldetes Maximum",
+          "configured": "Konfiguriertes Auto-Compact-Fenster",
           "history": "Verlaufsstatistik",
           "unknown": "Unbekannt"
         },
-        "configuredContextWindowMax": "Konfiguriertes Fenster-Maximum",
+        "configuredContextWindowMax": "Konfiguriertes Auto-Compact-Fenster",
+        "runtimeContextWindowMax": "Vom Runtime gemeldetes Fenster",
+        "contextWindowClampedWarning": "Konfiguriert sind {configured}, aber die Runtime meldet nur {runtime}. Das Runtime-/Modelllimit kann das aktive Fenster begrenzen.",
         "configuredContextWindowMaxSourceState": {
-          "agent_env": "Runtime-Umgebung",
+          "agent_env": "Konfigurierte Umgebung",
           "agent_config_env": "config.env",
           "agent_root_config": "Root-Konfiguration"
         }

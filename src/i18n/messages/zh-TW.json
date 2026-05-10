@@ -1066,7 +1066,8 @@
         "compactionSupportState": {
           "unknown": "未知",
           "unsupported": "不支援",
-          "agent_managed": "Agent 管理"
+          "agent_managed": "Agent 管理",
+          "native_managed": "Agent 原生管理"
         },
         "compactionStatusState": {
           "idle": "閒置",
@@ -1094,14 +1095,16 @@
         },
         "contextMaxSource": "上限來源",
         "maxSource": {
-          "live": "即時/執行時上限",
-          "configured": "設定視窗",
+          "live": "Agent 上報上限",
+          "configured": "設定的自動壓縮視窗",
           "history": "歷史統計",
           "unknown": "未知"
         },
-        "configuredContextWindowMax": "設定視窗上限",
+        "configuredContextWindowMax": "設定的自動壓縮視窗",
+        "runtimeContextWindowMax": "執行階段回報視窗",
+        "contextWindowClampedWarning": "已設定 {configured}，但執行階段僅回報 {runtime}。執行階段/模型限制可能會壓低實際視窗。",
         "configuredContextWindowMaxSourceState": {
-          "agent_env": "執行時環境變數",
+          "agent_env": "設定環境變數",
           "agent_config_env": "config.env",
           "agent_root_config": "頂層設定"
         }

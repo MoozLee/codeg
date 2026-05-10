@@ -1066,7 +1066,8 @@
         "compactionSupportState": {
           "unknown": "알 수 없음",
           "unsupported": "지원 안 함",
-          "agent_managed": "Agent 관리"
+          "agent_managed": "Agent 관리",
+          "native_managed": "Agent 네이티브"
         },
         "compactionStatusState": {
           "idle": "대기",
@@ -1094,14 +1095,16 @@
         },
         "contextMaxSource": "최대값 소스",
         "maxSource": {
-          "live": "실시간/런타임 최대값",
-          "configured": "구성된 창",
+          "live": "Agent 보고 최대값",
+          "configured": "구성된 자동 압축 창",
           "history": "기록 통계",
           "unknown": "알 수 없음"
         },
-        "configuredContextWindowMax": "구성된 창 최대값",
+        "configuredContextWindowMax": "구성된 자동 압축 창",
+        "runtimeContextWindowMax": "런타임 보고 창",
+        "contextWindowClampedWarning": "구성값은 {configured}이지만 런타임은 {runtime}만 보고합니다. 런타임/모델 제한으로 활성 창이 낮아질 수 있습니다.",
         "configuredContextWindowMaxSourceState": {
-          "agent_env": "런타임 환경 변수",
+          "agent_env": "구성된 환경 변수",
           "agent_config_env": "config.env",
           "agent_root_config": "루트 설정"
         }
