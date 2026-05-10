@@ -80,11 +80,17 @@ export function StatusBarTokens() {
     rawLiveSize != null && rawLiveSize > 0 ? rawLiveSize : null
   const historicalContextUsed = sessionStats?.context_window_used_tokens ?? null
   const historicalContextMax = sessionStats?.context_window_max_tokens ?? null
-  const hasActiveConnectionContextMax =
+  const hasActiveConnectionConfiguredContextMax =
     activeConn != null && configuredContextMax != null
 
   const contextUsed = liveContextUsed ?? historicalContextUsed
-  const contextMax = hasActiveConnectionContextMax
+  const runtimeContextMax =
+    contextManagement?.runtimeContextWindowMaxTokens ?? liveContextMax
+  const runtimeContextWindowClamped =
+    configuredContextMax != null &&
+    runtimeContextMax != null &&
+    runtimeContextMax < configuredContextMax
+  const contextMax = hasActiveConnectionConfiguredContextMax
     ? configuredContextMax
     : (liveContextMax ?? historicalContextMax)
   const contextPercentRaw =
@@ -96,7 +102,7 @@ export function StatusBarTokens() {
       ? null
       : Math.max(0, Math.min(100, contextPercentRaw))
   const contextSource = liveContextUsed != null ? "live" : "history"
-  const contextMaxSource = hasActiveConnectionContextMax
+  const contextMaxSource = hasActiveConnectionConfiguredContextMax
     ? "configured"
     : liveContextMax != null
       ? "live"
@@ -329,6 +335,25 @@ export function StatusBarTokens() {
                     }`}
               </span>
             </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("runtimeContextWindowMax")}</span>
+              <span
+                className="max-w-36 truncate text-right"
+                title={runtimeContextMax?.toLocaleString()}
+              >
+                {runtimeContextMax == null
+                  ? t("unknown")
+                  : formatTokenCount(runtimeContextMax)}
+              </span>
+            </div>
+            {runtimeContextWindowClamped ? (
+              <div className="text-xs leading-snug text-amber-600 dark:text-amber-400">
+                {t("contextWindowClampedWarning", {
+                  configured: formatTokenCount(configuredContextMax ?? 0),
+                  runtime: formatTokenCount(runtimeContextMax ?? 0),
+                })}
+              </div>
+            ) : null}
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>{t("compactionSupport")}</span>
               <span>{t(`compactionSupportState.${compactionSupport}`)}</span>

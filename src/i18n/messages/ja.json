@@ -1066,7 +1066,8 @@
         "compactionSupportState": {
           "unknown": "不明",
           "unsupported": "未対応",
-          "agent_managed": "Agent 管理"
+          "agent_managed": "Agent 管理",
+          "native_managed": "Agent ネイティブ"
         },
         "compactionStatusState": {
           "idle": "アイドル",
@@ -1094,14 +1095,16 @@
         },
         "contextMaxSource": "上限ソース",
         "maxSource": {
-          "live": "ライブ/ランタイム上限",
-          "configured": "設定済みウィンドウ",
+          "live": "Agent 報告上限",
+          "configured": "設定済み自動圧縮ウィンドウ",
           "history": "履歴統計",
           "unknown": "不明"
         },
-        "configuredContextWindowMax": "設定済みウィンドウ上限",
+        "configuredContextWindowMax": "設定済み自動圧縮ウィンドウ",
+        "runtimeContextWindowMax": "ランタイム報告ウィンドウ",
+        "contextWindowClampedWarning": "設定は {configured} ですが、ランタイムは {runtime} のみを報告しています。ランタイム/モデル制限により実効ウィンドウが下がる可能性があります。",
         "configuredContextWindowMaxSourceState": {
-          "agent_env": "ランタイム環境変数",
+          "agent_env": "設定環境変数",
           "agent_config_env": "config.env",
           "agent_root_config": "ルート設定"
         }

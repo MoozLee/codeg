@@ -62,6 +62,7 @@ import {
   setConversationActiveAnchor,
 } from "@/lib/conversation-anchor-storage"
 import type { AgentType, ConnectionStatus, SessionStats } from "@/lib/types"
+import type { LiveMessage } from "@/contexts/acp-connections-context"
 import { cn, copyTextToClipboard } from "@/lib/utils"
 import { VirtualizedMessageThread } from "@/components/message/virtualized-message-thread"
 import {
@@ -107,6 +108,7 @@ interface ProgrammaticAnchorScrollLock {
 const RESTORE_SCROLL_PASSES = 12
 const RESTORE_BOTTOM_SETTLED_FRAMES = 2
 const PROGRAMMATIC_SCROLL_LOCK_TIMEOUT_MS = 900
+const LIVE_TAIL_FOLLOW_THRESHOLD_PX = 96
 
 interface ResolvedMessageGroup {
   id: string
@@ -538,6 +540,219 @@ const AutoScrollOnSend = memo(function AutoScrollOnSend({
   return null
 })
 
+function buildLiveTailSignature(liveMessage: LiveMessage | null): string {
+  if (!liveMessage) return "none"
+
+  return liveMessage.content
+    .map((block) => {
+      switch (block.type) {
+        case "text":
+        case "thinking":
+          return `${block.type}:${block.text.length}`
+        case "plan":
+          return `plan:${block.entries
+            .map(
+              (entry) =>
+                `${entry.status}:${entry.priority}:${entry.content.length}`
+            )
+            .join(",")}`
+        case "tool_call": {
+          const info = block.info
+          return [
+            "tool",
+            info.tool_call_id,
+            info.title,
+            info.kind,
+            info.status,
+            info.content?.length ?? 0,
+            info.raw_input?.length ?? 0,
+            info.raw_output_chunks.length,
+            info.raw_output_total_bytes,
+            info.images
+              .map(
+                (image) =>
+                  `${image.mime_type}:${image.uri ?? ""}:${image.data.length}`
+              )
+              .join(","),
+          ].join(":")
+        }
+        default:
+          return "unknown"
+      }
+    })
+    .join("|")
+}
+
+function buildContentPartSignature(part: AdaptedContentPart): string {
+  switch (part.type) {
+    case "text":
+      return `text:${part.text.length}`
+    case "reasoning":
+      return `reasoning:${part.isStreaming}:${part.content.length}`
+    case "tool-call":
+      return [
+        "tool-call",
+        part.toolCallId,
+        part.toolName,
+        part.displayTitle ?? "",
+        part.state,
+        part.input?.length ?? 0,
+        part.output?.length ?? 0,
+        part.errorText?.length ?? 0,
+      ].join(":")
+    case "tool-result":
+      return [
+        "tool-result",
+        part.toolCallId,
+        part.state,
+        part.output?.length ?? 0,
+        part.errorText?.length ?? 0,
+      ].join(":")
+    case "tool-group":
+      return `tool-group:${part.isStreaming}:${part.items
+        .map(buildContentPartSignature)
+        .join(",")}`
+    case "generated-image":
+      return [
+        "generated-image",
+        part.status ?? "unknown",
+        part.revisedPrompt?.length ?? 0,
+        part.image?.mime_type ?? "",
+        part.image?.uri ?? "",
+        part.image?.data.length ?? 0,
+      ].join(":")
+  }
+}
+
+function buildThreadTailSignature(items: ThreadRenderItem[]): string {
+  const tail = items[items.length - 1]
+  if (!tail) return "empty"
+  if (tail.kind === "typing") return `${items.length}:typing`
+
+  return [
+    items.length,
+    tail.key,
+    tail.phase,
+    tail.group.role,
+    tail.group.parts.length,
+    tail.group.parts.map(buildContentPartSignature).join(","),
+  ].join("|")
+}
+
+const AutoScrollOnLiveTail = memo(function AutoScrollOnLiveTail({
+  isStreaming,
+  tailSignature,
+}: {
+  isStreaming: boolean
+  tailSignature: string
+}) {
+  const { isAtBottom, scrollRef, scrollToBottom, state } =
+    useStickToBottomContext()
+  const lastSignatureRef = useRef(tailSignature)
+  const wasStreamingRef = useRef(isStreaming)
+  const shouldFollowTailRef = useRef(isAtBottom)
+  const frameRef = useRef<number | null>(null)
+  const stateAtBottom = state.isAtBottom
+  const escapedFromLock = state.escapedFromLock
+
+  const scheduleFollowTail = useCallback(() => {
+    if (!shouldFollowTailRef.current || frameRef.current !== null) {
+      return
+    }
+
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = null
+      if (!shouldFollowTailRef.current) return
+      scrollToBottom({ animation: "instant" })
+    })
+  }, [scrollToBottom])
+
+  useEffect(() => {
+    const viewport = scrollRef.current
+    if (!viewport) {
+      shouldFollowTailRef.current = isAtBottom
+      return
+    }
+
+    const updateFollowIntent = () => {
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
+      const nearBottom = distanceFromBottom <= LIVE_TAIL_FOLLOW_THRESHOLD_PX
+      const shouldFollow = nearBottom || (stateAtBottom && !escapedFromLock)
+      const becameFollowed = shouldFollow && !shouldFollowTailRef.current
+
+      shouldFollowTailRef.current = shouldFollow
+      if (becameFollowed) {
+        scheduleFollowTail()
+      }
+    }
+
+    updateFollowIntent()
+    viewport.addEventListener("scroll", updateFollowIntent, { passive: true })
+
+    return () => {
+      viewport.removeEventListener("scroll", updateFollowIntent)
+    }
+  }, [
+    escapedFromLock,
+    isAtBottom,
+    scheduleFollowTail,
+    scrollRef,
+    stateAtBottom,
+  ])
+
+  useEffect(() => {
+    if (tailSignature === lastSignatureRef.current) {
+      return
+    }
+
+    lastSignatureRef.current = tailSignature
+    const justFinishedStreaming = wasStreamingRef.current && !isStreaming
+    wasStreamingRef.current = isStreaming
+    if (!shouldFollowTailRef.current || justFinishedStreaming) {
+      return
+    }
+
+    scheduleFollowTail()
+  }, [isStreaming, scheduleFollowTail, tailSignature])
+
+  useEffect(() => {
+    if (!isStreaming || typeof ResizeObserver === "undefined") {
+      return
+    }
+
+    const viewport = scrollRef.current
+    if (!viewport) return
+
+    const observer = new ResizeObserver(() => {
+      if (shouldFollowTailRef.current) {
+        scheduleFollowTail()
+      }
+    })
+
+    observer.observe(viewport)
+    for (const child of Array.from(viewport.children)) {
+      observer.observe(child)
+    }
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [isStreaming, scheduleFollowTail, scrollRef])
+
+  useEffect(
+    () => () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+    },
+    []
+  )
+
+  return null
+})
+
 const ActiveUserAnchorTracker = memo(function ActiveUserAnchorTracker({
   detailLoading,
   userAnchors,
@@ -899,6 +1114,15 @@ export function MessageListView({
   const historicalPlanKey = useMemo(
     () => buildPlanKey(historicalPlanEntries),
     [historicalPlanEntries]
+  )
+  const liveTailSignature = useMemo(
+    () =>
+      [
+        showPromptingState ? "streaming" : "idle",
+        buildLiveTailSignature(liveMessage),
+        buildThreadTailSignature(threadItems),
+      ].join("||"),
+    [liveMessage, showPromptingState, threadItems]
   )
   const userAnchorMap = useMemo(
     () => new Map(userAnchors.map((anchor) => [anchor.anchorId, anchor])),
@@ -1412,6 +1636,10 @@ export function MessageListView({
         contextRef={stickToBottomRef}
       >
         <AutoScrollOnSend signal={sendSignal} />
+        <AutoScrollOnLiveTail
+          isStreaming={showPromptingState}
+          tailSignature={liveTailSignature}
+        />
         <ActiveUserAnchorTracker
           detailLoading={detailLoading}
           userAnchors={userAnchors}

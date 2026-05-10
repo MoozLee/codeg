@@ -129,7 +129,11 @@ export interface LiveMessage {
 
 // ── Per-connection state ──
 
-export type CompactionSupport = "unknown" | "unsupported" | "agent_managed"
+export type CompactionSupport =
+  | "unknown"
+  | "unsupported"
+  | "agent_managed"
+  | "native_managed"
 export type CompactionTriggerStatus =
   | "idle"
   | "triggered"
@@ -168,6 +172,8 @@ export interface ContextManagementState {
   runtimeModel: string | null
   configuredContextWindowMaxTokens: number | null
   contextWindowMaxSource: ContextWindowMaxSource | null
+  runtimeContextWindowMaxTokens: number | null
+  runtimeContextWindowClamped: boolean
   autoCompactionEnabled: boolean | null
   autoCompactionThreshold: number | null
   compactionSupport: CompactionSupport
@@ -390,6 +396,19 @@ const MAX_BUFFERED_UNMAPPED_EVENTS_PER_CONNECTION = 64
 const MAX_BUFFERED_UNMAPPED_CONNECTIONS = 128
 const DEFAULT_AUTO_COMPACTION_THRESHOLD = 80
 const COMPACTION_COMPLETE_RESET_DELAY_MS = 5000
+const CLAUDE_NATIVE_AUTO_COMPACTION_ENV_KEYS = [
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+]
+
+const CLAUDE_NATIVE_AUTO_COMPACTION_CONFIG_KEYS = [
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+  "claudeCodeAutoCompactWindow",
+  "claude_code_auto_compact_window",
+  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+  "claudeAutocompactPctOverride",
+  "claude_autocompact_pct_override",
+]
 
 const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementState = {
   configuredModel: null,
@@ -397,6 +416,8 @@ const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementState = {
   runtimeModel: null,
   configuredContextWindowMaxTokens: null,
   contextWindowMaxSource: null,
+  runtimeContextWindowMaxTokens: null,
+  runtimeContextWindowClamped: false,
   autoCompactionEnabled: null,
   autoCompactionThreshold: null,
   compactionSupport: "unknown",
@@ -606,6 +627,44 @@ function firstPositiveIntegerRecordValue(
   return null
 }
 
+function firstPercentRecordValue(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[]
+): number | null {
+  for (const key of keys) {
+    const raw = record?.[key]
+    if (typeof raw !== "string" && typeof raw !== "number") continue
+    const value = parsePercentValue(raw)
+    if (value != null) return value
+  }
+  return null
+}
+
+function hasScalarRecordValue(
+  record: Record<string, unknown> | null | undefined,
+  key: string
+): boolean {
+  const value = record?.[key]
+  if (typeof value === "string") return value.trim().length > 0
+  return typeof value === "number" || typeof value === "boolean"
+}
+
+function hasNativeClaudeAutoCompactionConfig(
+  env: Record<string, string> | null | undefined,
+  configEnv: Record<string, unknown> | null | undefined,
+  config: Record<string, unknown> | null | undefined
+): boolean {
+  return (
+    CLAUDE_NATIVE_AUTO_COMPACTION_ENV_KEYS.some(
+      (key) =>
+        envValue(env, key) != null || hasScalarRecordValue(configEnv, key)
+    ) ||
+    CLAUDE_NATIVE_AUTO_COMPACTION_CONFIG_KEYS.some((key) =>
+      hasScalarRecordValue(config, key)
+    )
+  )
+}
+
 function debugContextManagement(
   label: string,
   details: Record<string, unknown>
@@ -647,12 +706,16 @@ function contextManagementFromAgentStatus(
         : null
   const configuredModel = agentConfiguredModel ?? previous.configuredModel
 
-  const claudeAutoCompactPercent = parsePercentValue(
-    envValue(agent.env, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
-      stringFromRecord(configEnv, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
-      stringFromRecord(config, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
-      stringFromRecord(config, "claudeAutocompactPctOverride")
-  )
+  const claudeAutoCompactPercent =
+    parsePercentValue(
+      envValue(agent.env, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
+        stringFromRecord(configEnv, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
+    ) ??
+    firstPercentRecordValue(config, [
+      "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+      "claudeAutocompactPctOverride",
+      "claude_autocompact_pct_override",
+    ])
   const envConfiguredContextWindowMax = firstPositiveIntegerEnvValue(
     agent.env,
     contextWindowMaxKeys
@@ -684,6 +747,9 @@ function contextManagementFromAgentStatus(
           : previous.contextWindowMaxSource
   const hasClaudeAutoCompactionConfig =
     claudeAutoCompactPercent != null || claudeAutoCompactWindow != null
+  const hasNativeAutoCompactionConfig =
+    agent.agent_type === "claude_code" &&
+    hasNativeClaudeAutoCompactionConfig(agent.env, configEnv, config)
   const runtimeConfig: RuntimeConfigSnapshot = {
     agentType: agent.agent_type,
     configFilePath: agent.config_file_path ?? null,
@@ -704,8 +770,8 @@ function contextManagementFromAgentStatus(
       : previous.autoCompactionEnabled,
     autoCompactionThreshold:
       claudeAutoCompactPercent ?? previous.autoCompactionThreshold,
-    compactionSupport: hasClaudeAutoCompactionConfig
-      ? "agent_managed"
+    compactionSupport: hasNativeAutoCompactionConfig
+      ? "native_managed"
       : previous.compactionSupport,
     runtimeConfig,
   }
@@ -740,6 +806,7 @@ function contextManagementFromAgentStatus(
     finalSource: next.configuredModelSource,
     compactionPercent: claudeAutoCompactPercent,
     compactionWindow: claudeAutoCompactWindow,
+    nativeAutoCompactionConfig: hasNativeAutoCompactionConfig,
     configuredContextWindowMaxTokens: next.configuredContextWindowMaxTokens,
     contextWindowMaxSource: next.contextWindowMaxSource,
   })
@@ -1057,11 +1124,14 @@ function contextManagementFromSelectors(
   const autoCompactionThreshold =
     parsePercentConfigValue(thresholdOption) ?? previous.autoCompactionThreshold
   const compactionCommand = findCompactionCommand(commands)
-  const compactionSupport = compactionCommand
-    ? "agent_managed"
-    : commands
-      ? "unsupported"
-      : previous.compactionSupport
+  const compactionSupport: CompactionSupport =
+    previous.compactionSupport === "native_managed"
+      ? "native_managed"
+      : compactionCommand
+        ? "agent_managed"
+        : commands
+          ? "unsupported"
+          : previous.compactionSupport
   const runtimeConfig = previous.runtimeConfig
     ? {
         ...previous.runtimeConfig,
@@ -1987,18 +2057,29 @@ function connectionsReducer(
       ) {
         return state
       }
+      const configuredMax =
+        conn.contextManagement.configuredContextWindowMaxTokens
+      const runtimeMax = action.usage.size > 0 ? action.usage.size : null
+      const runtimeContextWindowClamped =
+        configuredMax != null &&
+        runtimeMax != null &&
+        runtimeMax < configuredMax
+      const contextManagement = {
+        ...conn.contextManagement,
+        runtimeContextWindowMaxTokens: runtimeMax,
+        runtimeContextWindowClamped,
+        ...(conn.contextManagement.compactionStatus === "failed"
+          ? {
+              compactionStatus: "idle" as const,
+              lastCompactionError: null,
+            }
+          : null),
+      }
       const next = new Map(state)
       next.set(action.contextKey, {
         ...conn,
         usage: action.usage,
-        contextManagement:
-          conn.contextManagement.compactionStatus === "failed"
-            ? {
-                ...conn.contextManagement,
-                compactionStatus: "idle",
-                lastCompactionError: null,
-              }
-            : conn.contextManagement,
+        contextManagement,
       })
       return next
     }
@@ -2419,6 +2500,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn?.usage || conn.usage.used <= 0) return
       const management = conn.contextManagement
+      // Claude's native auto-compaction env vars are handled inside the agent
+      // process. CodeG must not also send `/compact`, otherwise the frontend
+      // can compact from stale ACP usage/window values before the configured
+      // native threshold is reached.
       if (management.compactionSupport !== "agent_managed") return
       if (management.autoCompactionEnabled !== true) return
       if (
@@ -2433,6 +2518,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       const effectiveContextMax =
         conn.contextManagement.configuredContextWindowMaxTokens ??
         conn.usage.size
+      if (effectiveContextMax <= 0) return
       const percent = (conn.usage.used / effectiveContextMax) * 100
       const threshold =
         management.autoCompactionThreshold ?? DEFAULT_AUTO_COMPACTION_THRESHOLD
@@ -2444,6 +2530,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       compactionTriggerZonesRef.current.add(triggerKey)
       debugContextManagement("autoCompactionTrigger", {
         contextKey,
+        support: management.compactionSupport,
         used: conn.usage.used,
         liveSize: conn.usage.size,
         effectiveContextMax,

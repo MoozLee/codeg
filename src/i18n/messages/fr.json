@@ -1066,7 +1066,8 @@
         "compactionSupportState": {
           "unknown": "Inconnu",
           "unsupported": "Non pris en charge",
-          "agent_managed": "Géré par Agent"
+          "agent_managed": "Géré par Agent",
+          "native_managed": "Agent natif"
         },
         "compactionStatusState": {
           "idle": "Inactif",
@@ -1094,14 +1095,16 @@
         },
         "contextMaxSource": "Source du maximum",
         "maxSource": {
-          "live": "Maximum live/runtime",
-          "configured": "Fenêtre configurée",
+          "live": "Maximum signalé par l’Agent",
+          "configured": "Fenêtre d’auto-compactage configurée",
           "history": "Statistiques historiques",
           "unknown": "Inconnu"
         },
-        "configuredContextWindowMax": "Maximum de fenêtre configuré",
+        "configuredContextWindowMax": "Fenêtre d’auto-compactage configurée",
+        "runtimeContextWindowMax": "Fenêtre signalée par le runtime",
+        "contextWindowClampedWarning": "Configuré à {configured}, mais le runtime ne signale que {runtime}. La limite du runtime/modèle peut réduire la fenêtre active.",
         "configuredContextWindowMaxSourceState": {
-          "agent_env": "Environnement runtime",
+          "agent_env": "Environnement configuré",
           "agent_config_env": "config.env",
           "agent_root_config": "Configuration racine"
         }

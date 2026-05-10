@@ -1315,6 +1315,7 @@ fn persist_codex_local_config(config_patch_json: Option<&str>) -> Result<(), Acp
         api_key,
         model,
         env,
+        ..
     } = runtime;
 
     let config_path = codex_config_toml_path();
@@ -1978,6 +1979,18 @@ struct AgentRuntimeConfig {
     model: Option<String>,
     #[serde(default)]
     env: BTreeMap<String, String>,
+    #[serde(
+        default,
+        alias = "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+        alias = "claude_code_auto_compact_window"
+    )]
+    claude_code_auto_compact_window: Option<serde_json::Value>,
+    #[serde(
+        default,
+        alias = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+        alias = "claude_autocompact_pct_override"
+    )]
+    claude_autocompact_pct_override: Option<serde_json::Value>,
 }
 
 fn trim_non_empty(value: Option<String>) -> Option<String> {
@@ -1989,6 +2002,31 @@ fn trim_non_empty(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn trim_non_empty_config_scalar(value: Option<serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn insert_env_if_missing(env: &mut BTreeMap<String, String>, key: &str, value: Option<String>) {
+    if has_non_empty_env_value(env, key) {
+        return;
+    }
+    if let Some(value) = value {
+        env.insert(key.to_string(), value);
+    }
 }
 
 fn has_non_empty_env_value(env: &BTreeMap<String, String>, key: &str) -> bool {
@@ -2067,6 +2105,9 @@ fn debug_context_config(label: &str, agent_type: AgentType, payload: serde_json:
     if !context_config_debug_enabled() {
         return;
     }
+    if label == "agent_list_return" && agent_type != AgentType::ClaudeCode {
+        return;
+    }
     eprintln!("[context-config] {label} agent_type={agent_type:?} {payload}");
 }
 
@@ -2135,6 +2176,19 @@ pub(crate) fn build_runtime_env_from_setting(
         if !has_non_empty_env_value(&merged, model_key) {
             merged.insert(model_key.to_string(), value);
         }
+    }
+
+    if agent_type == AgentType::ClaudeCode {
+        insert_env_if_missing(
+            &mut merged,
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+            trim_non_empty_config_scalar(config.claude_code_auto_compact_window),
+        );
+        insert_env_if_missing(
+            &mut merged,
+            "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+            trim_non_empty_config_scalar(config.claude_autocompact_pct_override),
+        );
     }
 
     debug_context_config(
@@ -2397,9 +2451,7 @@ pub async fn acp_connect(
     // accounts configured in Settings → Version Control, mirroring what
     // the built-in terminal already does.
     if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
-        if let Some(cred_env) =
-            crate::commands::terminal::prepare_credential_env(&app_data_dir)
-        {
+        if let Some(cred_env) = crate::commands::terminal::prepare_credential_env(&app_data_dir) {
             for (key, value) in cred_env {
                 runtime_env.insert(key, value);
             }
@@ -2411,7 +2463,6 @@ pub async fn acp_connect(
     if agent_type == AgentType::OpenClaw && session_id.is_none() {
         runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
     }
-
 
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
@@ -2728,6 +2779,18 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
                     if let Some(value) = trim_non_empty(local_cfg.model) {
                         env.insert(model_key.to_string(), value);
                     }
+                }
+                if agent_type == AgentType::ClaudeCode {
+                    insert_env_if_missing(
+                        &mut env,
+                        "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+                        trim_non_empty_config_scalar(local_cfg.claude_code_auto_compact_window),
+                    );
+                    insert_env_if_missing(
+                        &mut env,
+                        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+                        trim_non_empty_config_scalar(local_cfg.claude_autocompact_pct_override),
+                    );
                 }
             }
         }

@@ -1049,8 +1049,8 @@
           "history": "历史统计"
         },
         "maxSource": {
-          "live": "实时/运行时上限",
-          "configured": "配置窗口",
+          "live": "Agent 上报上限",
+          "configured": "配置的自动压缩窗口",
           "history": "历史统计",
           "unknown": "未知"
         },
@@ -1078,7 +1078,9 @@
         "disabled": "已禁用",
         "autoCompaction": "自动压缩",
         "autoCompactionThreshold": "触发阈值",
-        "configuredContextWindowMax": "配置窗口上限",
+        "configuredContextWindowMax": "配置的自动压缩窗口",
+        "runtimeContextWindowMax": "运行时报告窗口",
+        "contextWindowClampedWarning": "已配置 {configured}，但运行时仅报告 {runtime}。运行时/模型限制可能会压低实际窗口。",
         "compactionSupport": "压缩支持",
         "compactionStatus": "压缩状态",
         "configuredModelSourceState": {
@@ -1088,14 +1090,15 @@
           "selector": "ACP 选择器兜底"
         },
         "configuredContextWindowMaxSourceState": {
-          "agent_env": "运行时环境变量",
+          "agent_env": "配置环境变量",
           "agent_config_env": "config.env",
           "agent_root_config": "顶层配置"
         },
         "compactionSupportState": {
           "unknown": "未知",
           "unsupported": "不支持",
-          "agent_managed": "Agent 管理"
+          "agent_managed": "Agent 管理",
+          "native_managed": "Claude Code 原生管理"
         },
         "compactionStatusState": {
           "idle": "空闲",
