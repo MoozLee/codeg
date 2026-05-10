@@ -24,6 +24,8 @@ import {
   ListChecks,
   Loader2,
   Palette,
+  Pin,
+  PinOff,
   Plus,
   Rocket,
   XCircle,
@@ -49,6 +51,9 @@ import type { ConversationStatus, DbConversationSummary } from "@/lib/types"
 import {
   loadFolderExpanded,
   saveFolderExpanded,
+  loadSectionExpanded,
+  saveSectionExpanded,
+  type SidebarSection,
   type SidebarSortMode,
 } from "@/lib/sidebar-view-mode-storage"
 import { SidebarConversationCard } from "./sidebar-conversation-card"
@@ -166,6 +171,7 @@ const FolderHeader = memo(function FolderHeader({
   expanded,
   importing,
   color,
+  isPinned,
   onToggle,
   onRemoveFromWorkspace,
   onNewConversation,
@@ -173,6 +179,7 @@ const FolderHeader = memo(function FolderHeader({
   onImport,
   onManageConversations,
   onChangeColor,
+  onTogglePin,
   onOpenInSystemExplorer,
   onOpenInTerminal,
   isDragging,
@@ -186,6 +193,7 @@ const FolderHeader = memo(function FolderHeader({
   expanded: boolean
   importing: boolean
   color: string
+  isPinned: boolean
   onToggle: (folderId: number) => void
   onRemoveFromWorkspace: (folderId: number) => void
   onNewConversation: (folderId: number) => void
@@ -193,6 +201,7 @@ const FolderHeader = memo(function FolderHeader({
   onImport: (folderId: number) => void
   onManageConversations: (folderId: number) => void
   onChangeColor: (folderId: number, color: string) => void
+  onTogglePin: (folderId: number) => void
   onOpenInSystemExplorer: (folderId: number) => void
   onOpenInTerminal: (folderId: number) => void
   isDragging?: boolean
@@ -345,6 +354,14 @@ const FolderHeader = memo(function FolderHeader({
           <ListChecks className="h-4 w-4" />
           {t("folderHeaderMenu.manageConversations")}
         </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onTogglePin(folderId)}>
+          {isPinned ? (
+            <PinOff className="h-4 w-4" />
+          ) : (
+            <Pin className="h-4 w-4" />
+          )}
+          {isPinned ? t("folderHeaderMenu.unpin") : t("folderHeaderMenu.pin")}
+        </ContextMenuItem>
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <Palette className="h-4 w-4" />
@@ -401,6 +418,7 @@ interface FolderGroupItemProps {
   selectedConversation: { id: number; agentType: string } | null
   openTabKeys: Set<string>
   color: string
+  isPinned: boolean
   onToggle: (folderId: number) => void
   onRemoveFromWorkspace: (folderId: number) => void
   onNewConversationForFolder: (folderId: number) => void
@@ -408,6 +426,7 @@ interface FolderGroupItemProps {
   onImport: (folderId: number) => void
   onManageConversations: (folderId: number) => void
   onChangeColor: (folderId: number, color: string) => void
+  onTogglePin: (folderId: number) => void
   onOpenInSystemExplorer: (folderId: number) => void
   onOpenInTerminal: (folderId: number) => void
   onSelect: (id: number, agentType: string) => void
@@ -439,6 +458,7 @@ function FolderGroupItem({
   selectedConversation,
   openTabKeys,
   color,
+  isPinned,
   onToggle,
   onRemoveFromWorkspace,
   onNewConversationForFolder,
@@ -446,6 +466,7 @@ function FolderGroupItem({
   onImport,
   onManageConversations,
   onChangeColor,
+  onTogglePin,
   onOpenInSystemExplorer,
   onOpenInTerminal,
   onSelect,
@@ -517,6 +538,7 @@ function FolderGroupItem({
             expanded={expanded}
             importing={importing}
             color={color}
+            isPinned={isPinned}
             onToggle={handleToggle}
             onRemoveFromWorkspace={onRemoveFromWorkspace}
             onNewConversation={onNewConversationForFolder}
@@ -524,6 +546,7 @@ function FolderGroupItem({
             onImport={onImport}
             onManageConversations={onManageConversations}
             onChangeColor={onChangeColor}
+            onTogglePin={onTogglePin}
             onOpenInSystemExplorer={onOpenInSystemExplorer}
             onOpenInTerminal={onOpenInTerminal}
             isDragging={dragging}
@@ -571,6 +594,75 @@ function FolderGroupItem({
   )
 }
 
+interface SidebarSectionBlockProps {
+  section: SidebarSection
+  label: string
+  expanded: boolean
+  folderIds: number[]
+  onToggle: (section: SidebarSection) => void
+  onReorder: (section: SidebarSection, ids: number[]) => void
+  renderItem: (folderId: number, indexInSection: number) => React.ReactNode
+}
+
+function SidebarSectionBlock({
+  section,
+  label,
+  expanded,
+  folderIds,
+  onToggle,
+  onReorder,
+  renderItem,
+}: SidebarSectionBlockProps) {
+  const handleReorder = useCallback(
+    (nextIds: number[]) => {
+      onReorder(section, nextIds)
+    },
+    [section, onReorder]
+  )
+
+  return (
+    <div className="flex flex-col">
+      <button
+        type="button"
+        onClick={() => onToggle(section)}
+        className={cn(
+          "group flex h-[1.5rem] w-full cursor-pointer items-center gap-[0.375rem]",
+          "px-[0.625rem] text-left text-muted-foreground/80",
+          "outline-none hover:text-sidebar-foreground"
+        )}
+      >
+        <span
+          aria-hidden
+          className="inline-flex h-[0.75rem] w-[0.75rem] items-center justify-center text-muted-foreground/75"
+        >
+          {expanded ? (
+            <ChevronDown className="h-[0.6875rem] w-[0.6875rem]" />
+          ) : (
+            <ChevronRight className="h-[0.6875rem] w-[0.6875rem]" />
+          )}
+        </span>
+        <span className="text-[0.6875rem] font-semibold uppercase tracking-[0.05em]">
+          {label}
+        </span>
+        <span className="ml-auto text-[0.625rem] font-semibold leading-none tabular-nums text-muted-foreground/70">
+          {folderIds.length}
+        </span>
+      </button>
+      {expanded && (
+        <Reorder.Group
+          as="div"
+          axis="y"
+          values={folderIds}
+          onReorder={handleReorder}
+          className="flex flex-col"
+        >
+          {folderIds.map((folderId, index) => renderItem(folderId, index))}
+        </Reorder.Group>
+      )}
+    </div>
+  )
+}
+
 export interface SidebarConversationListHandle {
   scrollToActive: () => void
   expandAll: () => void
@@ -606,6 +698,7 @@ export function SidebarConversationList({
     updateConversationLocal,
     removeFolderFromWorkspace,
     reorderFolders,
+    togglePinFolder,
     openFolder,
     refreshFolder,
   } = useAppWorkspace()
@@ -624,9 +717,17 @@ export function SidebarConversationList({
   const openConversation = useOpenConversation()
 
   const folderIndex = useMemo(() => {
-    const map = new Map<number, { name: string; path: string; color: string }>()
+    const map = new Map<
+      number,
+      { name: string; path: string; color: string; isPinned: boolean }
+    >()
     for (const f of allFolders)
-      map.set(f.id, { name: f.name, path: f.path, color: f.color })
+      map.set(f.id, {
+        name: f.name,
+        path: f.path,
+        color: f.color,
+        isPinned: f.is_pinned,
+      })
     return map
   }, [allFolders])
 
@@ -653,6 +754,9 @@ export function SidebarConversationList({
   const [folderExpanded, setFolderExpanded] = useState<Record<number, boolean>>(
     {}
   )
+  const [sectionExpanded, setSectionExpanded] = useState<
+    Record<SidebarSection, boolean>
+  >({ pinned: true, projects: true })
   const [removeConfirm, setRemoveConfirm] = useState<{
     folderId: number
     folderName: string
@@ -665,13 +769,23 @@ export function SidebarConversationList({
   const [browserOpen, setBrowserOpen] = useState(false)
   const [dragging, setDragging] = useState<number | null>(null)
   const [reordering, setReordering] = useState(false)
-  const [dragOrder, setDragOrder] = useState<number[] | null>(null)
-  const pendingOrderRef = useRef<number[] | null>(null)
+  const [dragOrder, setDragOrder] = useState<{
+    section: SidebarSection
+    ids: number[]
+  } | null>(null)
+  const pendingOrderRef = useRef<{
+    section: SidebarSection
+    ids: number[]
+  } | null>(null)
 
   useEffect(() => {
     // Hydrate from localStorage after mount to keep SSR/CSR markup consistent.
 
     setFolderExpanded(loadFolderExpanded())
+    setSectionExpanded({
+      pinned: loadSectionExpanded("pinned"),
+      projects: loadSectionExpanded("projects"),
+    })
   }, [])
 
   const handleChangeFolderColor = useCallback(
@@ -741,39 +855,54 @@ export function SidebarConversationList({
     return map
   }, [conversations])
 
-  const orderedFolderIds = useMemo(() => {
-    const folderIdSet = new Set(folders.map((f) => f.id))
-    // During drag we honour the optimistic order so sibling folders shift live
-    // as the user hovers over slots. We still filter/append against the source
-    // of truth so newly-added or -removed folders don't disappear mid-drag.
-    if (dragOrder) {
-      const seen = new Set<number>()
-      const ids: number[] = []
-      for (const id of dragOrder) {
-        if (folderIdSet.has(id) && !seen.has(id)) {
-          seen.add(id)
-          ids.push(id)
-        }
-      }
+  const { pinnedFolderIds, projectFolderIds, orderedFolderIds } =
+    useMemo(() => {
+      const basePinned: number[] = []
+      const baseProjects: number[] = []
       for (const f of folders) {
-        if (!seen.has(f.id)) {
-          seen.add(f.id)
-          ids.push(f.id)
-        }
+        if (f.is_pinned) basePinned.push(f.id)
+        else baseProjects.push(f.id)
       }
-      return ids
-    }
 
-    const seen = new Set<number>()
-    const ids: number[] = []
-    for (const f of folders) {
-      if (!seen.has(f.id)) {
-        seen.add(f.id)
-        ids.push(f.id)
+      // During drag we honour the optimistic order so sibling folders shift
+      // live as the user hovers over slots. We still filter/append against
+      // the source of truth so newly-added or -removed folders do not
+      // disappear mid-drag. Cross-section drags are disallowed, so overrides
+      // only affect their own section.
+      const resolveOrder = (
+        section: SidebarSection,
+        baseIds: number[]
+      ): number[] => {
+        if (dragOrder && dragOrder.section === section) {
+          const baseSet = new Set(baseIds)
+          const seen = new Set<number>()
+          const ids: number[] = []
+          for (const id of dragOrder.ids) {
+            if (baseSet.has(id) && !seen.has(id)) {
+              seen.add(id)
+              ids.push(id)
+            }
+          }
+          for (const id of baseIds) {
+            if (!seen.has(id)) {
+              seen.add(id)
+              ids.push(id)
+            }
+          }
+          return ids
+        }
+        return baseIds
       }
-    }
-    return ids
-  }, [folders, dragOrder])
+
+      const pinnedIds = resolveOrder("pinned", basePinned)
+      const projectIds = resolveOrder("projects", baseProjects)
+
+      return {
+        pinnedFolderIds: pinnedIds,
+        projectFolderIds: projectIds,
+        orderedFolderIds: [...pinnedIds, ...projectIds],
+      }
+    }, [folders, dragOrder])
 
   useImperativeHandle(ref, () => ({
     scrollToActive() {
@@ -837,6 +966,26 @@ export function SidebarConversationList({
       return next
     })
   }, [])
+
+  const toggleSection = useCallback((section: SidebarSection) => {
+    setSectionExpanded((prev) => {
+      const nextValue = !prev[section]
+      saveSectionExpanded(section, nextValue)
+      return { ...prev, [section]: nextValue }
+    })
+  }, [])
+
+  const handleTogglePin = useCallback(
+    async (folderId: number) => {
+      try {
+        await togglePinFolder(folderId)
+      } catch (err) {
+        const msg = toErrorMessage(err)
+        toast.error(t("toasts.togglePinFailed", { message: msg }))
+      }
+    },
+    [togglePinFolder, t]
+  )
 
   const handleRemoveFolder = useCallback(
     (folderId: number) => {
@@ -1051,10 +1200,13 @@ export function SidebarConversationList({
     [reorderFolders, t]
   )
 
-  const handleReorder = useCallback((nextIds: number[]) => {
-    pendingOrderRef.current = nextIds
-    setDragOrder(nextIds)
-  }, [])
+  const handleReorder = useCallback(
+    (section: SidebarSection, nextIds: number[]) => {
+      pendingOrderRef.current = { section, ids: nextIds }
+      setDragOrder({ section, ids: nextIds })
+    },
+    []
+  )
 
   const handleDragStart = useCallback((folderId: number) => {
     setDragging(folderId)
@@ -1062,14 +1214,14 @@ export function SidebarConversationList({
 
   const handleDragEnd = useCallback(async () => {
     setDragging(null)
-    const order = pendingOrderRef.current
+    const pending = pendingOrderRef.current
     pendingOrderRef.current = null
-    if (!order) {
+    if (!pending) {
       setDragOrder(null)
       return
     }
     try {
-      await persistReorder(order)
+      await persistReorder(pending.ids)
     } finally {
       // Clear the optimistic override once the workspace context's folders
       // have absorbed the new order (or on failure, the rollback in the
@@ -1178,11 +1330,7 @@ export function SidebarConversationList({
                   "[overflow-anchor:none]"
                 )}
               >
-                <Reorder.Group
-                  as="div"
-                  axis="y"
-                  values={orderedFolderIds}
-                  onReorder={handleReorder}
+                <div
                   className="flex flex-col"
                   style={
                     {
@@ -1190,69 +1338,148 @@ export function SidebarConversationList({
                     } as React.CSSProperties
                   }
                 >
-                  {orderedFolderIds.map((folderId, index) => {
-                    const folderEntry = folderIndex.get(folderId)
-                    const folderName = folderEntry?.name ?? String(folderId)
-                    const folderPath = folderEntry?.path ?? ""
-                    const convs = byFolder.get(folderId) ?? []
-                    const expanded = folderExpanded[folderId] ?? true
-                    const convsWithKey = convs.map((conv) => ({
-                      ...conv,
-                    }))
-                    // Earlier folders get a higher stacking index so their
-                    // sticky headers paint above later folders' conversation
-                    // cards when scrolled. Framer's `layout` prop sets
-                    // `will-change: transform`, which would otherwise trap
-                    // each sticky inside its own Reorder.Item.
-                    const stackIndex = orderedFolderIds.length - index
-                    return (
-                      <FolderGroupItem
-                        key={folderId}
-                        folderId={folderId}
-                        folderName={folderName}
-                        folderPath={folderPath}
-                        conversations={convsWithKey}
-                        totalConversationCount={
-                          folderTotalCounts.get(folderId) ?? 0
-                        }
-                        expanded={expanded}
-                        importing={importing}
-                        reordering={reordering}
-                        dragging={dragging === folderId}
-                        sortMode={sortMode}
-                        selectedConversation={selectedConversation}
-                        openTabKeys={openTabKeys}
-                        color={folderEntry?.color ?? "#22c55e"}
-                        onToggle={toggleFolder}
-                        onRemoveFromWorkspace={handleRemoveFolder}
-                        onNewConversationForFolder={
-                          handleNewConversationForFolder
-                        }
-                        onNewConversationInWindowForFolder={
-                          handleNewConversationInWindowForFolder
-                        }
-                        onImport={handleImportForFolder}
-                        onManageConversations={handleManageConversations}
-                        onChangeColor={handleChangeFolderColor}
-                        onOpenInSystemExplorer={
-                          handleOpenFolderInSystemExplorer
-                        }
-                        onOpenInTerminal={handleOpenFolderInTerminal}
-                        onSelect={handleSelect}
-                        onDoubleClick={handleDoubleClick}
-                        onOpenInWindow={handleOpenConversationInWindow}
-                        onRename={handleRename}
-                        onDelete={handleDelete}
-                        onStatusChange={handleStatusChange}
-                        onNewConversation={handleNewConversation}
-                        onDragStart={handleDragStart}
-                        onDragEnd={handleDragEnd}
-                        stackIndex={stackIndex}
-                        t={t}
-                      />
-                    )
-                  })}
-                </Reorder.Group>
+                  {pinnedFolderIds.length > 0 && (
+                    <SidebarSectionBlock
+                      section="pinned"
+                      label={t("sections.pinned")}
+                      expanded={sectionExpanded.pinned}
+                      onToggle={toggleSection}
+                      folderIds={pinnedFolderIds}
+                      onReorder={handleReorder}
+                      renderItem={(folderId, indexInSection) => {
+                        const folderEntry = folderIndex.get(folderId)
+                        const folderName = folderEntry?.name ?? String(folderId)
+                        const folderPath = folderEntry?.path ?? ""
+                        const convs = byFolder.get(folderId) ?? []
+                        const expanded = folderExpanded[folderId] ?? true
+                        const convsWithKey = convs.map((conv) => ({
+                          ...conv,
+                        }))
+                        // Earlier folders in this section get a higher
+                        // stacking index so their sticky headers paint above
+                        // later folders' conversation rows while scrolled.
+                        const stackIndex =
+                          pinnedFolderIds.length - indexInSection
+                        return (
+                          <FolderGroupItem
+                            key={folderId}
+                            folderId={folderId}
+                            folderName={folderName}
+                            folderPath={folderPath}
+                            conversations={convsWithKey}
+                            totalConversationCount={
+                              folderTotalCounts.get(folderId) ?? 0
+                            }
+                            expanded={expanded}
+                            importing={importing}
+                            reordering={reordering}
+                            dragging={dragging === folderId}
+                            sortMode={sortMode}
+                            selectedConversation={selectedConversation}
+                            openTabKeys={openTabKeys}
+                            color={folderEntry?.color ?? "#22c55e"}
+                            isPinned={folderEntry?.isPinned ?? true}
+                            onToggle={toggleFolder}
+                            onRemoveFromWorkspace={handleRemoveFolder}
+                            onNewConversationForFolder={
+                              handleNewConversationForFolder
+                            }
+                            onNewConversationInWindowForFolder={
+                              handleNewConversationInWindowForFolder
+                            }
+                            onImport={handleImportForFolder}
+                            onManageConversations={handleManageConversations}
+                            onChangeColor={handleChangeFolderColor}
+                            onTogglePin={handleTogglePin}
+                            onOpenInSystemExplorer={
+                              handleOpenFolderInSystemExplorer
+                            }
+                            onOpenInTerminal={handleOpenFolderInTerminal}
+                            onSelect={handleSelect}
+                            onDoubleClick={handleDoubleClick}
+                            onOpenInWindow={handleOpenConversationInWindow}
+                            onRename={handleRename}
+                            onDelete={handleDelete}
+                            onStatusChange={handleStatusChange}
+                            onNewConversation={handleNewConversation}
+                            onDragStart={handleDragStart}
+                            onDragEnd={handleDragEnd}
+                            stackIndex={stackIndex}
+                            t={t}
+                          />
+                        )
+                      }}
+                    />
+                  )}
+                  <SidebarSectionBlock
+                    section="projects"
+                    label={t("sections.projects")}
+                    expanded={sectionExpanded.projects}
+                    onToggle={toggleSection}
+                    folderIds={projectFolderIds}
+                    onReorder={handleReorder}
+                    renderItem={(folderId, indexInSection) => {
+                      const folderEntry = folderIndex.get(folderId)
+                      const folderName = folderEntry?.name ?? String(folderId)
+                      const folderPath = folderEntry?.path ?? ""
+                      const convs = byFolder.get(folderId) ?? []
+                      const expanded = folderExpanded[folderId] ?? true
+                      const convsWithKey = convs.map((conv) => ({
+                        ...conv,
+                      }))
+                      const stackIndex =
+                        projectFolderIds.length - indexInSection
+                      return (
+                        <FolderGroupItem
+                          key={folderId}
+                          folderId={folderId}
+                          folderName={folderName}
+                          folderPath={folderPath}
+                          conversations={convsWithKey}
+                          totalConversationCount={
+                            folderTotalCounts.get(folderId) ?? 0
+                          }
+                          expanded={expanded}
+                          importing={importing}
+                          reordering={reordering}
+                          dragging={dragging === folderId}
+                          sortMode={sortMode}
+                          selectedConversation={selectedConversation}
+                          openTabKeys={openTabKeys}
+                          color={folderEntry?.color ?? "#22c55e"}
+                          isPinned={folderEntry?.isPinned ?? false}
+                          onToggle={toggleFolder}
+                          onRemoveFromWorkspace={handleRemoveFolder}
+                          onNewConversationForFolder={
+                            handleNewConversationForFolder
+                          }
+                          onNewConversationInWindowForFolder={
+                            handleNewConversationInWindowForFolder
+                          }
+                          onImport={handleImportForFolder}
+                          onManageConversations={handleManageConversations}
+                          onChangeColor={handleChangeFolderColor}
+                          onTogglePin={handleTogglePin}
+                          onOpenInSystemExplorer={
+                            handleOpenFolderInSystemExplorer
+                          }
+                          onOpenInTerminal={handleOpenFolderInTerminal}
+                          onSelect={handleSelect}
+                          onDoubleClick={handleDoubleClick}
+                          onOpenInWindow={handleOpenConversationInWindow}
+                          onRename={handleRename}
+                          onDelete={handleDelete}
+                          onStatusChange={handleStatusChange}
+                          onNewConversation={handleNewConversation}
+                          onDragStart={handleDragStart}
+                          onDragEnd={handleDragEnd}
+                          stackIndex={stackIndex}
+                          t={t}
+                        />
+                      )
+                    }}
+                  />
+                </div>
               </ScrollArea>
             </div>
           </ContextMenuTrigger>

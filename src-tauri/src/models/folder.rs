@@ -21,6 +21,7 @@ pub struct FolderDetail {
     pub last_opened_at: DateTime<Utc>,
     pub sort_order: i32,
     pub color: String,
+    pub is_pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

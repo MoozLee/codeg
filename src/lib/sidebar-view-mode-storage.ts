@@ -3,8 +3,13 @@
 const FOLDER_EXPANDED_KEY = "workspace:sidebar-folder-expanded"
 const SHOW_COMPLETED_KEY = "workspace:sidebar-show-completed"
 const SORT_MODE_KEY = "workspace:sidebar-sort-mode"
+const SECTION_EXPANDED_PINNED_KEY = "workspace:sidebar-section-expanded-pinned"
+const SECTION_EXPANDED_PROJECTS_KEY =
+  "workspace:sidebar-section-expanded-projects"
 
 export type SidebarSortMode = "created" | "updated"
+
+export type SidebarSection = "pinned" | "projects"
 
 export function loadFolderExpanded(): Record<number, boolean> {
   if (typeof window === "undefined") return {}
@@ -70,6 +75,36 @@ export function saveSortMode(value: SidebarSortMode): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(SORT_MODE_KEY, value)
+  } catch {
+    /* ignore */
+  }
+}
+
+function sectionKey(section: SidebarSection): string {
+  return section === "pinned"
+    ? SECTION_EXPANDED_PINNED_KEY
+    : SECTION_EXPANDED_PROJECTS_KEY
+}
+
+export function loadSectionExpanded(section: SidebarSection): boolean {
+  if (typeof window === "undefined") return true
+  try {
+    const raw = localStorage.getItem(sectionKey(section))
+    if (raw === "false") return false
+    if (raw === "true") return true
+  } catch {
+    /* ignore */
+  }
+  return true
+}
+
+export function saveSectionExpanded(
+  section: SidebarSection,
+  expanded: boolean
+): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(sectionKey(section), String(expanded))
   } catch {
     /* ignore */
   }

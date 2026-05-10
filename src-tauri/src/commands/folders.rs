@@ -580,6 +580,19 @@ pub async fn update_folder_color(
         .ok_or_else(|| AppCommandError::not_found("Folder not found"))
 }
 
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_folder_pinned(
+    db: tauri::State<'_, AppDatabase>,
+    folder_id: i32,
+    is_pinned: bool,
+) -> Result<crate::models::FolderDetail, AppCommandError> {
+    folder_service::update_folder_pinned(&db.conn, folder_id, is_pinned)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found("Folder not found"))
+}
+
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn create_folder_directory(path: String) -> Result<(), AppCommandError> {
     std::fs::create_dir_all(&path).map_err(AppCommandError::io)

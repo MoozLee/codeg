@@ -888,7 +888,8 @@
         "openFolderFailed": "開啟資料夾失敗",
         "removeFolderFailed": "移除資料夾失敗：{message}",
         "reorderFoldersFailed": "重新排序資料夾失敗：{message}",
-        "changeFolderColorFailed": "修改顏色失敗：{message}"
+        "changeFolderColorFailed": "修改顏色失敗：{message}",
+        "togglePinFailed": "切換置頂失敗：{message}"
       },
       "statsLabel": "{folders} 個資料夾 · {convos} 個對話",
       "reorderHandle": "拖拽排序",
@@ -910,7 +911,13 @@
       "folderHeaderMenu": {
         "manageConversations": "會話管理…",
         "changeColor": "修改顏色",
-        "removeFromWorkspace": "從工作區移除"
+        "removeFromWorkspace": "從工作區移除",
+        "pin": "置頂",
+        "unpin": "取消置頂"
+      },
+      "sections": {
+        "pinned": "置頂",
+        "projects": "專案"
       },
       "manageConversations": {
         "title": "會話管理 — {name}",

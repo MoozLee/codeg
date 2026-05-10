@@ -757,6 +757,13 @@ export async function updateFolderColor(
   return getTransport().call("update_folder_color", { folderId, color })
 }
 
+export async function updateFolderPinned(
+  folderId: number,
+  isPinned: boolean
+): Promise<FolderDetail> {
+  return getTransport().call("update_folder_pinned", { folderId, isPinned })
+}
+
 export async function importLocalConversations(
   folderId: number
 ): Promise<ImportResult> {

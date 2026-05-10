@@ -2,7 +2,7 @@ use chrono::Utc;
 use sea_orm::DatabaseConnection;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, ConnectionTrait, DbBackend, EntityTrait,
-    IntoActiveModel, QueryFilter, QueryOrder, Set, Statement,
+    IntoActiveModel, QueryFilter, QueryOrder, Set, Statement, TransactionTrait,
 };
 
 use crate::db::entities::folder;
@@ -40,6 +40,7 @@ fn to_detail(m: folder::Model) -> FolderDetail {
         last_opened_at: m.last_opened_at,
         sort_order: m.sort_order,
         color: m.color,
+        is_pinned: m.is_pinned,
     }
 }
 
@@ -98,6 +99,7 @@ pub async fn add_folder(
             is_open: Set(true),
             sort_order: Set(max_order + 1),
             color: Set(DEFAULT_FOLDER_COLOR.to_string()),
+            is_pinned: Set(false),
         };
         active.insert(conn).await?
     };
@@ -123,6 +125,51 @@ pub async fn update_folder_color(
     active.color = Set(color.to_string());
     active.updated_at = Set(Utc::now());
     let updated = active.update(conn).await?;
+    Ok(Some(to_detail(updated)))
+}
+
+/// Pin or unpin a folder. Places the target folder at the top of its new
+/// section by shifting every other folder in that section (same `is_pinned`
+/// value) down by one `sort_order`, then setting the target's `sort_order` to
+/// 1. Runs inside a transaction so the shift and the update stay consistent.
+pub async fn update_folder_pinned(
+    conn: &DatabaseConnection,
+    folder_id: i32,
+    is_pinned: bool,
+) -> Result<Option<FolderDetail>, DbError> {
+    let txn = conn.begin().await?;
+
+    let row = folder::Entity::find_by_id(folder_id)
+        .filter(folder::Column::DeletedAt.is_null())
+        .one(&txn)
+        .await?;
+
+    let Some(row) = row else {
+        txn.commit().await?;
+        return Ok(None);
+    };
+
+    let now = Utc::now();
+    let now_str = now.format("%Y-%m-%d %H:%M:%S %:z").to_string();
+    let target_section: i32 = if is_pinned { 1 } else { 0 };
+
+    // Shift every other folder already in the destination section down by one
+    // so the target folder can take sort_order = 1 at the top. The target
+    // folder itself is excluded because we rewrite its sort_order below.
+    let shift_sql = format!(
+        "UPDATE folder SET sort_order = sort_order + 1, updated_at = '{now_str}' \
+         WHERE is_pinned = {target_section} AND deleted_at IS NULL AND id != {folder_id}"
+    );
+    txn.execute(Statement::from_string(DbBackend::Sqlite, shift_sql))
+        .await?;
+
+    let mut active = row.into_active_model();
+    active.is_pinned = Set(is_pinned);
+    active.sort_order = Set(1);
+    active.updated_at = Set(now);
+    let updated = active.update(&txn).await?;
+
+    txn.commit().await?;
     Ok(Some(to_detail(updated)))
 }
 
@@ -188,6 +235,7 @@ pub async fn list_open_folder_details(
     let rows = folder::Entity::find()
         .filter(folder::Column::DeletedAt.is_null())
         .filter(folder::Column::IsOpen.eq(true))
+        .order_by_desc(folder::Column::IsPinned)
         .order_by_asc(folder::Column::SortOrder)
         .order_by_desc(folder::Column::LastOpenedAt)
         .all(conn)
@@ -201,6 +249,7 @@ pub async fn list_all_folder_details(
 ) -> Result<Vec<FolderDetail>, DbError> {
     let rows = folder::Entity::find()
         .filter(folder::Column::DeletedAt.is_null())
+        .order_by_desc(folder::Column::IsPinned)
         .order_by_asc(folder::Column::SortOrder)
         .order_by_desc(folder::Column::LastOpenedAt)
         .all(conn)

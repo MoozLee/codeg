@@ -20,6 +20,7 @@ import {
   removeFolderFromWorkspace as apiRemoveFolderFromWorkspace,
   reorderFolders as apiReorderFolders,
   getFolder as apiGetFolder,
+  updateFolderPinned as apiUpdateFolderPinned,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import { useAcpEvent } from "@/contexts/acp-connections-context"
@@ -70,7 +71,9 @@ interface AppWorkspaceContextValue {
   addFolderToWorkspaceById: (folderId: number) => Promise<FolderDetail>
   removeFolderFromWorkspace: (folderId: number) => Promise<void>
   reorderFolders: (ids: number[]) => Promise<void>
+  togglePinFolder: (folderId: number) => Promise<void>
   refreshFolder: (id: number) => Promise<void>
+  refreshFolders: () => Promise<void>
 
   stats: AgentStats | null
 
@@ -425,6 +428,32 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     }
   }, [])
 
+  const refreshFolders = useCallback(async () => {
+    await fetchFolders()
+  }, [fetchFolders])
+
+  const togglePinFolder = useCallback(
+    async (folderId: number) => {
+      // Look up the current pin state from either list (folders is the open
+      // list, allFolders is the full list) before flipping it on the server.
+      const existing =
+        folders.find((f) => f.id === folderId) ??
+        allFolders.find((f) => f.id === folderId)
+      if (!existing) return
+      const nextPinned = !existing.is_pinned
+      try {
+        await apiUpdateFolderPinned(folderId, nextPinned)
+        // Reload ordering from the backend so both sections reflect the
+        // canonical sort_order after the transactional top-insert.
+        await fetchFolders()
+      } catch (err) {
+        console.error("[AppWorkspace] togglePinFolder failed:", err)
+        throw err
+      }
+    },
+    [folders, allFolders, fetchFolders]
+  )
+
   // Branch polling: only poll the active folder.
   useEffect(() => {
     if (activeFolderId == null) return
@@ -488,7 +517,9 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       addFolderToWorkspaceById,
       removeFolderFromWorkspace,
       reorderFolders,
+      togglePinFolder,
       refreshFolder,
+      refreshFolders,
       stats,
       activeFolderId,
       setActiveFolderId,
@@ -512,7 +543,9 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       addFolderToWorkspaceById,
       removeFolderFromWorkspace,
       reorderFolders,
+      togglePinFolder,
       refreshFolder,
+      refreshFolders,
       stats,
       activeFolderId,
     ]

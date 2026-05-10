@@ -888,7 +888,8 @@
         "openFolderFailed": "Échec de l'ouverture du dossier",
         "removeFolderFailed": "Échec de la suppression du dossier : {message}",
         "reorderFoldersFailed": "Échec du réordonnancement des dossiers : {message}",
-        "changeFolderColorFailed": "Échec du changement de couleur : {message}"
+        "changeFolderColorFailed": "Échec du changement de couleur : {message}",
+        "togglePinFailed": "Échec du basculement de l'épinglage : {message}"
       },
       "statsLabel": "{folders} dossiers · {convos} conversations",
       "reorderHandle": "Glisser pour réorganiser",
@@ -910,7 +911,13 @@
       "folderHeaderMenu": {
         "manageConversations": "Gérer les conversations…",
         "changeColor": "Changer la couleur",
-        "removeFromWorkspace": "Retirer de l'espace de travail"
+        "removeFromWorkspace": "Retirer de l'espace de travail",
+        "pin": "Épingler",
+        "unpin": "Désépingler"
+      },
+      "sections": {
+        "pinned": "Épinglés",
+        "projects": "Projets"
       },
       "manageConversations": {
         "title": "Gérer les conversations — {name}",

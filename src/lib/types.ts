@@ -209,6 +209,7 @@ export interface FolderDetail {
   last_opened_at: string
   sort_order: number
   color: string
+  is_pinned: boolean
 }
 
 export interface OpenedTab {
