@@ -15,6 +15,7 @@ mod m20260423_000001_drop_folder_parent_branch;
 mod m20260424_000001_folder_color;
 mod m20260424_000002_quick_message;
 mod m20260510_000001_folder_is_pinned;
+mod m20260511_000001_paired_devices;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -36,6 +37,29 @@ impl MigratorTrait for Migrator {
             Box::new(m20260424_000001_folder_color::Migration),
             Box::new(m20260424_000002_quick_message::Migration),
             Box::new(m20260510_000001_folder_is_pinned::Migration),
+            Box::new(m20260511_000001_paired_devices::Migration),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm_migration::MigratorTrait;
+
+    use super::Migrator;
+
+    #[test]
+    fn includes_archived_mobile_paired_devices_migration() {
+        let names: Vec<String> = Migrator::migrations()
+            .iter()
+            .map(|migration| migration.name().to_string())
+            .collect();
+
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "m20260511_000001_paired_devices"),
+            "release builds must keep historical migration names from archived builds"
+        );
     }
 }

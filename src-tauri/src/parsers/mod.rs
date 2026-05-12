@@ -849,6 +849,7 @@ mod tests {
                 text: "hello world".to_string(),
             }],
             timestamp,
+            completed_at: None,
             usage: None,
             duration_ms: None,
             model: None,

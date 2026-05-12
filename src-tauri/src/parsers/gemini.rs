@@ -1128,6 +1128,7 @@ mod tests {
             role: MessageRole::User,
             content: blocks.clone(),
             timestamp,
+            completed_at: None,
             usage: None,
             duration_ms: None,
             model: None,
