@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -42,6 +43,8 @@ import {
 } from "@/components/ui/select"
 import { installMarketplacePet, listMarketplacePets } from "@/lib/pet/api"
 import type { MarketplacePet } from "@/lib/pet/types"
+import { cn } from "@/lib/utils"
+import { PetActionPreviewGrid } from "./pet-action-preview-grid"
 
 const PAGE_SIZE = 30
 const SEARCH_DEBOUNCE_MS = 300
@@ -67,7 +70,7 @@ export function PetMarketplaceDialog({
   const t = useTranslations("Pet.marketplace")
 
   const [searchInput, setSearchInput] = useState("")
-  const [query, setQuery] = useState("")
+  const [q, setQ] = useState("")
   const [kind, setKind] = useState<KindFilter>("all")
   const [sort, setSort] = useState<SortFilter>("latest")
   const [page, setPage] = useState(1)
@@ -78,6 +81,7 @@ export function PetMarketplaceDialog({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [installingId, setInstallingId] = useState<string | null>(null)
+  const [previewPetId, setPreviewPetId] = useState<string | null>(null)
   const [reinstallTarget, setReinstallTarget] = useState<MarketplacePet | null>(
     null
   )
@@ -92,10 +96,10 @@ export function PetMarketplaceDialog({
     }
   }, [])
 
-  // Debounce the search input → query
+  // Debounce the search input before issuing marketplace requests.
   useEffect(() => {
     const handle = window.setTimeout(() => {
-      setQuery(searchInput.trim())
+      setQ(searchInput.trim())
       setPage(1)
     }, SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(handle)
@@ -110,7 +114,7 @@ export function PetMarketplaceDialog({
       const response = await listMarketplacePets({
         page,
         pageSize: PAGE_SIZE,
-        query: query || undefined,
+        q: q || undefined,
         kind: kind === "all" ? undefined : kind,
         sort: sort === "latest" ? undefined : sort,
       })
@@ -128,7 +132,7 @@ export function PetMarketplaceDialog({
         setLoading(false)
       }
     }
-  }, [page, query, kind, sort, t])
+  }, [page, q, kind, sort, t])
 
   useEffect(() => {
     if (!open) return
@@ -140,8 +144,13 @@ export function PetMarketplaceDialog({
     if (!open) {
       setReinstallTarget(null)
       setInstallingId(null)
+      setPreviewPetId(null)
     }
   }, [open])
+
+  useEffect(() => {
+    setPreviewPetId(null)
+  }, [page, q, kind, sort])
 
   const performInstall = useCallback(
     async (pet: MarketplacePet, overwrite: boolean) => {
@@ -297,11 +306,15 @@ export function PetMarketplaceDialog({
                     <PetMarketCard
                       key={pet.id}
                       pet={pet}
+                      previewOpen={previewPetId === pet.id}
                       installed={
                         installedIds.has(pet.id) || pet.alreadyInstalled
                       }
                       busy={installingId === pet.id}
                       busyAny={Boolean(installingId)}
+                      onPreviewOpenChange={(nextOpen) =>
+                        setPreviewPetId(nextOpen ? pet.id : null)
+                      }
                       onInstall={() => handleInstallClick(pet)}
                       labels={{
                         install: t("install"),
@@ -389,107 +402,173 @@ interface PetMarketCardLabels {
 
 interface PetMarketCardProps {
   pet: MarketplacePet
+  previewOpen: boolean
   installed: boolean
   busy: boolean
   busyAny: boolean
+  onPreviewOpenChange: (open: boolean) => void
   onInstall: () => void
   labels: PetMarketCardLabels
 }
 
 function PetMarketCard({
   pet,
+  previewOpen,
   installed,
   busy,
   busyAny,
+  onPreviewOpenChange,
   onInstall,
   labels,
 }: PetMarketCardProps) {
   const previewSrc = pet.posterUrl ?? pet.previewUrl ?? null
   const tags = pet.tags.slice(0, 3)
+
+  const togglePreview = useCallback(() => {
+    onPreviewOpenChange(!previewOpen)
+  }, [onPreviewOpenChange, previewOpen])
+
   return (
-    <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40">
-      <div className="flex h-24 w-full items-center justify-center bg-muted/40 p-1.5">
-        {previewSrc ? (
+    <Popover open={previewOpen} onOpenChange={onPreviewOpenChange}>
+      <PopoverAnchor asChild>
+        <div
+          onClick={togglePreview}
+          className={cn(
+            "flex cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            previewOpen && "border-primary/60 ring-1 ring-primary/30"
+          )}
+        >
+          <button
+            type="button"
+            aria-expanded={previewOpen}
+            onClick={(event) => {
+              event.stopPropagation()
+              togglePreview()
+            }}
+            className="flex min-h-0 flex-1 flex-col rounded-t-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+          >
+            <div className="flex h-24 w-full items-center justify-center bg-muted/40 p-1.5">
+              {previewSrc ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={previewSrc}
+                  alt={pet.displayName}
+                  loading="lazy"
+                  className="max-h-full max-w-full object-contain"
+                />
+              ) : null}
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-2 p-3 pb-1">
+              <div className="flex items-start justify-between gap-2">
+                <div
+                  className="min-w-0 truncate text-sm font-medium"
+                  title={pet.displayName}
+                >
+                  {pet.displayName}
+                </div>
+                {pet.kind ? (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                    {pet.kind}
+                  </span>
+                ) : null}
+              </div>
+              {pet.description ? (
+                <p
+                  className="line-clamp-2 text-xs text-muted-foreground"
+                  title={pet.description}
+                >
+                  {pet.description}
+                </p>
+              ) : null}
+              {tags.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </button>
+          <div className="mt-auto flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+              <span title={labels.views} className="flex items-center gap-0.5">
+                <Eye className="h-3 w-3" />
+                {pet.viewCount}
+              </span>
+              <span
+                title={labels.downloads}
+                className="flex items-center gap-0.5"
+              >
+                <Download className="h-3 w-3" />
+                {pet.downloadCount}
+              </span>
+              <span title={labels.likes} className="flex items-center gap-0.5">
+                <Heart className="h-3 w-3" />
+                {pet.likeCount}
+              </span>
+            </div>
+            <Button
+              type="button"
+              size="xs"
+              variant={installed ? "outline" : "default"}
+              disabled={busyAny && !busy}
+              onClick={(event) => {
+                event.stopPropagation()
+                onInstall()
+              }}
+              title={installed ? labels.reinstall : labels.install}
+            >
+              {busy ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : installed ? (
+                labels.reinstall
+              ) : (
+                labels.install
+              )}
+            </Button>
+          </div>
+        </div>
+      </PopoverAnchor>
+      <PopoverContent
+        side="right"
+        align="start"
+        sideOffset={10}
+        collisionPadding={12}
+        className="z-[60] w-72 rounded-lg p-2"
+      >
+        <PetMarketplacePreviewGrid pet={pet} />
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function PetMarketplacePreviewGrid({ pet }: { pet: MarketplacePet }) {
+  if (!pet.previewUrl) {
+    return (
+      <div className="flex h-48 items-center justify-center rounded-md bg-muted/40 p-2">
+        {pet.posterUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={previewSrc}
+            src={pet.posterUrl}
             alt={pet.displayName}
             loading="lazy"
             className="max-h-full max-w-full object-contain"
           />
         ) : null}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
-        <div className="flex items-start justify-between gap-2">
-          <div
-            className="min-w-0 truncate text-sm font-medium"
-            title={pet.displayName}
-          >
-            {pet.displayName}
-          </div>
-          {pet.kind ? (
-            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
-              {pet.kind}
-            </span>
-          ) : null}
-        </div>
-        {pet.description ? (
-          <p
-            className="line-clamp-2 text-xs text-muted-foreground"
-            title={pet.description}
-          >
-            {pet.description}
-          </p>
-        ) : null}
-        {tags.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-            <span title={labels.views} className="flex items-center gap-0.5">
-              <Eye className="h-3 w-3" />
-              {pet.viewCount}
-            </span>
-            <span
-              title={labels.downloads}
-              className="flex items-center gap-0.5"
-            >
-              <Download className="h-3 w-3" />
-              {pet.downloadCount}
-            </span>
-            <span title={labels.likes} className="flex items-center gap-0.5">
-              <Heart className="h-3 w-3" />
-              {pet.likeCount}
-            </span>
-          </div>
-          <Button
-            type="button"
-            size="xs"
-            variant={installed ? "outline" : "default"}
-            disabled={busyAny && !busy}
-            onClick={onInstall}
-            title={installed ? labels.reinstall : labels.install}
-          >
-            {busy ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : installed ? (
-              labels.reinstall
-            ) : (
-              labels.install
-            )}
-          </Button>
-        </div>
-      </div>
-    </div>
+    )
+  }
+
+  return (
+    <PetActionPreviewGrid
+      petName={pet.displayName}
+      source={{ type: "marketplace", url: pet.previewUrl }}
+    />
   )
 }
 

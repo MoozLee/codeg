@@ -17,12 +17,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useMessageScroll } from "@/components/message/message-scroll-context"
+import { formatTokenCount } from "@/lib/token-format"
 import { cn, copyTextToClipboard } from "@/lib/utils"
 import type { TurnUsage } from "@/lib/types"
-
-function formatTokenCount(n: number, formatter: Intl.NumberFormat): string {
-  return formatter.format(n)
-}
 
 function formatDuration(ms: number): string {
   if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`
@@ -59,14 +56,6 @@ export function TurnStats({
   const scroll = useMessageScroll()
   const [isCopied, setIsCopied] = useState(false)
   const timeoutRef = useRef<number>(0)
-  const compactNumberFormatter = useMemo(
-    () =>
-      new Intl.NumberFormat(locale, {
-        notation: "compact",
-        maximumFractionDigits: 1,
-      }),
-    [locale]
-  )
   const shortTimeFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -192,29 +181,20 @@ export function TurnStats({
                 <div className="flex justify-between gap-3">
                   <span>{t("tokenInput")}</span>
                   <span className="font-mono tabular-nums">
-                    {formatTokenCount(
-                      usage.input_tokens,
-                      compactNumberFormatter
-                    )}
+                    {formatTokenCount(usage.input_tokens)}
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span>{t("tokenOutput")}</span>
                   <span className="font-mono tabular-nums">
-                    {formatTokenCount(
-                      usage.output_tokens,
-                      compactNumberFormatter
-                    )}
+                    {formatTokenCount(usage.output_tokens)}
                   </span>
                 </div>
                 {usage.cache_read_input_tokens > 0 && (
                   <div className="flex justify-between gap-3">
                     <span>{t("tokenCacheRead")}</span>
                     <span className="font-mono tabular-nums">
-                      {formatTokenCount(
-                        usage.cache_read_input_tokens,
-                        compactNumberFormatter
-                      )}
+                      {formatTokenCount(usage.cache_read_input_tokens)}
                     </span>
                   </div>
                 )}
@@ -222,10 +202,7 @@ export function TurnStats({
                   <div className="flex justify-between gap-3">
                     <span>{t("tokenCacheWrite")}</span>
                     <span className="font-mono tabular-nums">
-                      {formatTokenCount(
-                        usage.cache_creation_input_tokens,
-                        compactNumberFormatter
-                      )}
+                      {formatTokenCount(usage.cache_creation_input_tokens)}
                     </span>
                   </div>
                 )}

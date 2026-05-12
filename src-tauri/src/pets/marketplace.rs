@@ -93,7 +93,7 @@ pub struct MarketplaceListParams {
     #[serde(default)]
     pub page_size: Option<u32>,
     #[serde(default)]
-    pub query: Option<String>,
+    pub q: Option<String>,
     #[serde(default)]
     pub kind: Option<String>,
     #[serde(default)]
@@ -222,18 +222,15 @@ pub async fn list(
     params: MarketplaceListParams,
 ) -> Result<MarketplaceListResponse, AppCommandError> {
     let url = format!("{MARKETPLACE_BASE_URL}/api/pets");
-    let mut qs: Vec<(&str, String)> = Vec::new();
+    let mut qs: Vec<(&'static str, String)> = Vec::new();
     if let Some(p) = params.page {
         qs.push(("page", p.to_string()));
     }
     if let Some(s) = params.page_size {
         qs.push(("pageSize", s.to_string()));
     }
-    if let Some(q) = params.query.as_ref() {
-        let trimmed = q.trim();
-        if !trimmed.is_empty() {
-            qs.push(("query", trimmed.to_string()));
-        }
+    if let Some(q) = params.q.as_ref() {
+        push_q_param(&mut qs, q);
     }
     if let Some(k) = params.kind.as_ref() {
         let trimmed = k.trim();
@@ -287,6 +284,13 @@ pub async fn list(
         total: upstream.total,
         total_pages: upstream.total_pages,
     })
+}
+
+fn push_q_param(qs: &mut Vec<(&'static str, String)>, q: &str) {
+    let trimmed = q.trim();
+    if !trimmed.is_empty() {
+        qs.push(("q", trimmed.to_string()));
+    }
 }
 
 fn project_pet(p: UpstreamPet, installed: &HashSet<String>) -> MarketplacePetSummary {
@@ -607,6 +611,16 @@ fn write_staging(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn push_q_param_trims_and_skips_empty_values() {
+        let mut qs = Vec::new();
+
+        push_q_param(&mut qs, "  cat  ");
+        push_q_param(&mut qs, " ");
+
+        assert_eq!(qs, vec![("q", "cat".to_string())]);
+    }
 
     #[test]
     fn absolute_download_url_accepts_relative_paths() {

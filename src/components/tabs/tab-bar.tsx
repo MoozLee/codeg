@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Reorder } from "motion/react"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
+import type { TabItem as TabItemData } from "@/contexts/tab-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useOpenConversation } from "@/hooks/use-open-conversation"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
@@ -36,7 +38,11 @@ export function TabBar() {
 
   const { shortcuts } = useShortcutSettings()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const isCoarsePointer = useIsCoarsePointer()
   const [isHovered, setIsHovered] = useState(false)
+  const [touchSortingTabId, setTouchSortingTabId] = useState<string | null>(
+    null
+  )
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     if (e.deltaY !== 0 && scrollRef.current) {
@@ -84,6 +90,19 @@ export function TabBar() {
     [openConversation]
   )
 
+  const handleReorder = useCallback(
+    (nextTabs: TabItemData[]) => {
+      if (isCoarsePointer && !touchSortingTabId) return
+      reorderTabs(nextTabs)
+    },
+    [isCoarsePointer, reorderTabs, touchSortingTabId]
+  )
+
+  const handleTouchSortingEnd = useCallback(
+    () => setTouchSortingTabId(null),
+    []
+  )
+
   if (tabs.length === 0) return null
 
   return (
@@ -93,7 +112,7 @@ export function TabBar() {
       role="tablist"
       axis="x"
       values={tabs}
-      onReorder={reorderTabs}
+      onReorder={handleReorder}
       onWheel={handleWheel}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -128,6 +147,10 @@ export function TabBar() {
             onPin={pinTab}
             onToggleTile={toggleTileMode}
             onOpenInWindow={handleOpenInWindow}
+            isCoarsePointer={isCoarsePointer}
+            isTouchSorting={touchSortingTabId === tab.id}
+            onTouchSortingStart={setTouchSortingTabId}
+            onTouchSortingEnd={handleTouchSortingEnd}
           />
         )
       })}

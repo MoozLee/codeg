@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
 use crate::web::{
-    do_get_web_server_status, do_probe_web_service_port, do_stop_web_server, WebServerInfo,
+    do_get_web_server_status, do_probe_web_service_port, do_stop_web_server,
+    load_web_service_config, update_web_service_config_core, WebServerInfo, WebServiceConfig,
     WebServicePortProbe,
 };
 
@@ -15,6 +16,27 @@ pub async fn get_web_server_status(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<Option<WebServerInfo>>, AppCommandError> {
     Ok(Json(do_get_web_server_status(&state.web_server_state)))
+}
+
+pub async fn get_web_service_config(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<WebServiceConfig>, AppCommandError> {
+    load_web_service_config(&state.db.conn).await.map(Json)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateWebServiceConfigParams {
+    pub config: WebServiceConfig,
+}
+
+pub async fn update_web_service_config(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdateWebServiceConfigParams>,
+) -> Result<Json<WebServiceConfig>, AppCommandError> {
+    update_web_service_config_core(&state.db.conn, params.config)
+        .await
+        .map(Json)
 }
 
 #[derive(Deserialize)]

@@ -584,6 +584,14 @@ pub fn build_router(
             post(handlers::web_server::get_web_server_status),
         )
         .route(
+            "/get_web_service_config",
+            post(handlers::web_server::get_web_service_config),
+        )
+        .route(
+            "/update_web_service_config",
+            post(handlers::web_server::update_web_service_config),
+        )
+        .route(
             "/start_web_server",
             post(handlers::web_server::start_web_server),
         )

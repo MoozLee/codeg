@@ -288,10 +288,8 @@ export function PetWindow({ petId }: PetWindowProps) {
     if (!isDesktop()) return
     void (async () => {
       try {
-        const { getTransport } = await import("@/lib/transport")
-        await getTransport().call("open_settings_window", {
-          section: "appearance",
-        })
+        const { openSettingsWindow } = await import("@/lib/api")
+        await openSettingsWindow("appearance")
       } catch (err) {
         console.warn("[Pet] failed to open manager:", err)
       }

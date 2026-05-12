@@ -29,6 +29,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import {
   isCodexImportAvailable,
   listPets,
@@ -50,6 +51,7 @@ import {
 } from "@/lib/pet/animation"
 import { PetEditor } from "./pet-editor"
 import { PetImporter } from "./pet-importer"
+import { PetActionPreviewGrid } from "./pet-action-preview-grid"
 import { PetMarketplaceDialog } from "./pet-marketplace-dialog"
 
 const SPRITE_PREVIEW_CONCURRENCY = 4
@@ -68,6 +70,7 @@ export function PetManagerSection() {
   const [deleteTarget, setDeleteTarget] = useState<PetSummary | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [previewPetId, setPreviewPetId] = useState<string | null>(null)
   const [sheetUrls, setSheetUrls] = useState<Record<string, string>>({})
   const sheetUrlsRef = useRef<Record<string, string>>({})
   const mountedRef = useRef(true)
@@ -95,6 +98,7 @@ export function PetManagerSection() {
       setPets(list)
       setActiveId(settings?.activePetId ?? null)
       setCodexAvailable(importerAvail.available)
+      setPreviewPetId(null)
       replaceSheetUrls({})
       setLoading(false)
 
@@ -276,85 +280,127 @@ export function PetManagerSection() {
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {pets.map((pet) => {
                 const active = pet.id === activeId
+                const sheetUrl = sheetUrls[pet.id] ?? ""
+                const previewOpen = previewPetId === pet.id && Boolean(sheetUrl)
                 return (
-                  <div
+                  <Popover
                     key={pet.id}
-                    className={`rounded-lg border p-3 transition-colors ${
-                      active
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/40"
-                    }`}
+                    open={previewOpen}
+                    onOpenChange={(nextOpen) =>
+                      setPreviewPetId(nextOpen && sheetUrl ? pet.id : null)
+                    }
                   >
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-border bg-background p-1.5">
-                        <div
-                          className="h-full"
-                          style={{
-                            aspectRatio: "192 / 208",
-                            backgroundImage: sheetUrls[pet.id]
-                              ? `url("${sheetUrls[pet.id]}")`
-                              : undefined,
-                            backgroundSize: SPRITE_BACKGROUND_SIZE,
-                            backgroundPosition: backgroundPositionFor(0, 0),
-                            backgroundRepeat: "no-repeat",
-                            imageRendering: "pixelated",
+                    <PopoverAnchor asChild>
+                      <div
+                        onClick={() => {
+                          if (!sheetUrl) return
+                          setPreviewPetId(previewOpen ? null : pet.id)
+                        }}
+                        className={`cursor-pointer rounded-lg border p-3 transition-colors ${
+                          active
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:border-primary/40"
+                        } ${previewOpen ? "ring-1 ring-primary/30" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          disabled={!sheetUrl}
+                          aria-expanded={previewOpen}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            if (!sheetUrl) return
+                            setPreviewPetId(previewOpen ? null : pet.id)
                           }}
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div
-                          className="truncate text-sm font-medium"
-                          title={pet.displayName}
+                          className="flex w-full items-start gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-default"
                         >
-                          {pet.displayName}
-                        </div>
-                        {pet.description ? (
-                          <div
-                            className="mt-1 line-clamp-2 text-xs text-muted-foreground"
-                            title={pet.description}
-                          >
-                            {pet.description}
+                          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-border bg-background p-1.5">
+                            <div
+                              className="h-full"
+                              style={{
+                                aspectRatio: "192 / 208",
+                                backgroundImage: sheetUrl
+                                  ? `url("${sheetUrl}")`
+                                  : undefined,
+                                backgroundSize: SPRITE_BACKGROUND_SIZE,
+                                backgroundPosition: backgroundPositionFor(0, 0),
+                                backgroundRepeat: "no-repeat",
+                                imageRendering: "pixelated",
+                              }}
+                            />
                           </div>
-                        ) : null}
+                          <div className="min-w-0 flex-1">
+                            <div
+                              className="truncate text-sm font-medium"
+                              title={pet.displayName}
+                            >
+                              {pet.displayName}
+                            </div>
+                            {pet.description ? (
+                              <div
+                                className="mt-1 line-clamp-2 text-xs text-muted-foreground"
+                                title={pet.description}
+                              >
+                                {pet.description}
+                              </div>
+                            ) : null}
+                          </div>
+                        </button>
+                        <div
+                          className="mt-3 flex flex-nowrap items-center gap-2"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            type="button"
+                            className="min-w-0 flex-1"
+                            onClick={() => handleSetActive(pet.id)}
+                            disabled={active}
+                          >
+                            <span className="truncate">
+                              {active ? t("active") : t("setActive")}
+                            </span>
+                          </Button>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            type="button"
+                            onClick={() => openEditor(pet)}
+                            title={t("edit")}
+                            aria-label={t("edit")}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            type="button"
+                            className="text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeleteTarget(pet)}
+                            disabled={active}
+                            title={t("delete")}
+                            aria-label={t("delete")}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-3 flex flex-nowrap items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        type="button"
-                        className="min-w-0 flex-1"
-                        onClick={() => handleSetActive(pet.id)}
-                        disabled={active}
+                    </PopoverAnchor>
+                    {sheetUrl ? (
+                      <PopoverContent
+                        side="right"
+                        align="start"
+                        sideOffset={10}
+                        collisionPadding={12}
+                        className="z-[60] w-72 rounded-lg p-2"
                       >
-                        <span className="truncate">
-                          {active ? t("active") : t("setActive")}
-                        </span>
-                      </Button>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        type="button"
-                        onClick={() => openEditor(pet)}
-                        title={t("edit")}
-                        aria-label={t("edit")}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        type="button"
-                        className="text-destructive hover:bg-destructive/10"
-                        onClick={() => setDeleteTarget(pet)}
-                        disabled={active}
-                        title={t("delete")}
-                        aria-label={t("delete")}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
+                        <PetActionPreviewGrid
+                          petName={pet.displayName}
+                          source={{ type: "spritesheet", url: sheetUrl }}
+                        />
+                      </PopoverContent>
+                    ) : null}
+                  </Popover>
                 )
               })}
             </div>
@@ -421,7 +467,6 @@ export function PetManagerSection() {
     </Collapsible>
   )
 }
-
 async function loadSpritePreviews(
   pets: PetSummary[]
 ): Promise<Record<string, string>> {

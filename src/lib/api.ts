@@ -1,5 +1,6 @@
 import { buildWorkspaceBootstrapUrl } from "@/contexts/tab-shared"
 import { getTransport } from "./transport"
+import { getCurrentEffectiveAppLocale } from "./i18n"
 import type {
   AgentType,
   ConversationSummary,
@@ -970,11 +971,13 @@ export async function openMergeWindow(
   operation: string,
   upstreamCommit?: string | null
 ): Promise<void> {
+  const locale = getCurrentEffectiveAppLocale()
   if (getTransport().isDesktop()) {
     return getTransport().call("open_merge_window", {
       folderId,
       operation,
       upstreamCommit: upstreamCommit ?? null,
+      locale,
     })
   }
   const result = await getTransport().call<{ path: string }>(
@@ -983,29 +986,32 @@ export async function openMergeWindow(
       folderId,
       operation,
       upstreamCommit: upstreamCommit ?? null,
+      locale,
     }
   )
   window.open(result.path, `merge-${folderId}`)
 }
 
 export async function openStashWindow(folderId: number): Promise<void> {
+  const locale = getCurrentEffectiveAppLocale()
   if (getTransport().isDesktop()) {
-    return getTransport().call("open_stash_window", { folderId })
+    return getTransport().call("open_stash_window", { folderId, locale })
   }
   const result = await getTransport().call<{ path: string }>(
     "open_stash_window",
-    { folderId }
+    { folderId, locale }
   )
   window.open(result.path, `stash-${folderId}`)
 }
 
 export async function openPushWindow(folderId: number): Promise<void> {
+  const locale = getCurrentEffectiveAppLocale()
   if (getTransport().isDesktop()) {
-    return getTransport().call("open_push_window", { folderId })
+    return getTransport().call("open_push_window", { folderId, locale })
   }
   const result = await getTransport().call<{ path: string }>(
     "open_push_window",
-    { folderId }
+    { folderId, locale }
   )
   window.open(result.path, `push-${folderId}`)
 }
@@ -1192,12 +1198,13 @@ export async function openFolder(path: string): Promise<FolderDetail> {
 }
 
 export async function openCommitWindow(folderId: number): Promise<void> {
+  const locale = getCurrentEffectiveAppLocale()
   if (getTransport().isDesktop()) {
-    return getTransport().call("open_commit_window", { folderId })
+    return getTransport().call("open_commit_window", { folderId, locale })
   }
   const result = await getTransport().call<{ path: string }>(
     "open_commit_window",
-    { folderId }
+    { folderId, locale }
   )
   window.open(result.path, `commit-${folderId}`)
 }
@@ -1386,10 +1393,12 @@ export async function openSettingsWindow(
   section?: SettingsSection,
   options?: OpenSettingsWindowOptions
 ): Promise<void> {
+  const locale = getCurrentEffectiveAppLocale()
   if (getTransport().isDesktop()) {
     return getTransport().call("open_settings_window", {
       section: section ?? null,
       agentType: options?.agentType ?? null,
+      locale,
     })
   }
   // Web mode: open in new window
@@ -1398,6 +1407,7 @@ export async function openSettingsWindow(
     {
       section: section ?? null,
       agentType: options?.agentType ?? null,
+      locale,
     }
   )
   window.open(result.path, `settings-${section ?? "system"}`)
@@ -1405,7 +1415,10 @@ export async function openSettingsWindow(
 
 export async function openProjectBootWindow(source?: string): Promise<void> {
   if (getTransport().isDesktop()) {
-    return getTransport().call("open_project_boot_window", { source })
+    return getTransport().call("open_project_boot_window", {
+      source,
+      locale: getCurrentEffectiveAppLocale(),
+    })
   }
   if (typeof window !== "undefined") {
     window.open("/project-boot", "project-boot")
@@ -1793,10 +1806,17 @@ export async function getWebServerStatus(): Promise<WebServerInfo | null> {
 export interface WebServiceConfig {
   token: string | null
   port: number | null
+  autoStart: boolean
 }
 
 export async function getWebServiceConfig(): Promise<WebServiceConfig> {
   return getTransport().call("get_web_service_config")
+}
+
+export async function updateWebServiceConfig(
+  config: WebServiceConfig
+): Promise<WebServiceConfig> {
+  return getTransport().call("update_web_service_config", { config })
 }
 
 export type WebServicePortState = "free" | "occupied" | "unknown"

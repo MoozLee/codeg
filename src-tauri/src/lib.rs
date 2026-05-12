@@ -51,6 +51,36 @@ mod tauri_app {
 
     static APP_QUITTING: AtomicBool = AtomicBool::new(false);
 
+    fn summarize_web_auto_start_error(err: &crate::app_error::AppCommandError) -> String {
+        match err
+            .detail
+            .as_deref()
+            .filter(|detail| !detail.trim().is_empty())
+        {
+            Some(detail) if detail != err.message.as_str() => {
+                format!("{}: {}", err.message, detail)
+            }
+            _ => err.message.clone(),
+        }
+    }
+
+    fn notify_web_auto_start_failed(
+        app: &tauri::AppHandle,
+        port: u16,
+        err: &crate::app_error::AppCommandError,
+    ) {
+        let app = app.clone();
+        let body = format!(
+            "Could not start the Web service on port {}: {}",
+            port,
+            summarize_web_auto_start_error(err)
+        );
+        tauri::async_runtime::spawn(async move {
+            let _ =
+                notification::send_notification(app, "Codeg Web service".to_string(), body).await;
+        });
+    }
+
     /// On Windows, opt-out users can disable WebView2 hardware acceleration to
     /// work around AMD/Intel GPU driver bugs that produce a black-screen
     /// webview. The flag is stored in a tiny sidecar file at
@@ -260,6 +290,27 @@ mod tauri_app {
                         cm,
                         broadcaster,
                     ));
+                }
+
+                match tauri::async_runtime::block_on(web::load_web_service_config(&db.conn)) {
+                    Ok(config) if config.auto_start => {
+                        let port = config.port.unwrap_or(web::DEFAULT_WEB_SERVICE_PORT);
+                        let ws = app.state::<web::WebServerState>();
+                        if let Err(err) =
+                            tauri::async_runtime::block_on(web::do_start_web_server_tauri(
+                                app.handle().clone(),
+                                &ws,
+                                config.port,
+                                None,
+                                config.token,
+                            ))
+                        {
+                            eprintln!("[WEB] auto-start failed: {err}");
+                            notify_web_auto_start_failed(app.handle(), port, &err);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(err) => eprintln!("[WEB] failed to load auto-start config: {err}"),
                 }
 
                 // Spawn the idle sweep so connections abandoned without an
@@ -738,6 +789,7 @@ mod tauri_app {
                 web::stop_web_server,
                 web::get_web_server_status,
                 web::get_web_service_config,
+                web::update_web_service_config,
                 web::probe_web_service_port,
             ])
             .build(tauri::generate_context!())

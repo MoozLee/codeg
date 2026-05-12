@@ -348,7 +348,7 @@ pub async fn pet_codex_import_available() -> Result<PetCodexImportAvailability, 
 pub async fn pet_marketplace_list(
     page: Option<u32>,
     page_size: Option<u32>,
-    query: Option<String>,
+    q: Option<String>,
     kind: Option<String>,
     sort: Option<String>,
     tags: Option<Vec<String>>,
@@ -356,7 +356,7 @@ pub async fn pet_marketplace_list(
     pet_marketplace_list_core(MarketplaceListParams {
         page,
         page_size,
-        query,
+        q,
         kind,
         sort,
         tags,

@@ -100,7 +100,7 @@ export interface MarketplacePet {
 export interface MarketplaceListParams {
   page?: number
   pageSize?: number
-  query?: string
+  q?: string
   kind?: string
   sort?: string
   tags?: string[]
