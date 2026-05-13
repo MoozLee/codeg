@@ -303,8 +303,10 @@ mod tauri_app {
                         .state::<std::sync::Arc<crate::commands::provider_usage::UsageCache>>()
                         .inner()
                         .clone();
-                    crate::commands::provider_usage::spawn_startup_refresh(
-                        db_conn, emitter, cache,
+                    tauri::async_runtime::spawn(
+                        crate::commands::provider_usage::initial_refresh_sweep(
+                            db_conn, emitter, cache,
+                        ),
                     );
                 }
 

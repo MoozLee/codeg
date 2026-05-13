@@ -474,17 +474,20 @@ async fn schedule_after_mutation(
     service::reschedule_config(conn_arc, emitter.clone(), cache.clone(), id).await;
 }
 
-/// Startup hook reused by both desktop and server entry points. Spawns a
-/// detached task so the caller never blocks on the initial refresh sweep.
-pub fn spawn_startup_refresh(
+/// Initial refresh sweep used by both desktop and server entry points.
+///
+/// Caller decides which runtime to spawn this on. Tauri must use
+/// `tauri::async_runtime::spawn` (the synchronous `setup` callback has no
+/// ambient Tokio reactor and `tokio::spawn` would panic with "there is no
+/// reactor running"); the server binary runs inside `#[tokio::main]`, so a
+/// plain `tokio::spawn` is fine there.
+pub async fn initial_refresh_sweep(
     conn: DatabaseConnection,
     emitter: EventEmitter,
     cache: Arc<UsageCache>,
 ) {
-    tokio::spawn(async move {
-        let conn_arc = Arc::new(conn);
-        service::refresh_all_enabled(conn_arc, emitter, cache).await;
-    });
+    let conn_arc = Arc::new(conn);
+    service::refresh_all_enabled(conn_arc, emitter, cache).await;
 }
 
 // ---------------------------------------------------------------------------

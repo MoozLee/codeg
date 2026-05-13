@@ -178,11 +178,11 @@ async fn async_main() {
     // Kick off initial provider-usage refresh + arm periodic tasks for any
     // config marked `enabled`. Runs detached so a slow upstream can't block
     // the HTTP server from starting.
-    codeg_lib::commands::provider_usage::spawn_startup_refresh(
+    tokio::spawn(codeg_lib::commands::provider_usage::initial_refresh_sweep(
         state.db.conn.clone(),
         state.emitter.clone(),
         provider_usage_cache.clone(),
-    );
+    ));
 
     // Build router
     let shutdown_signal = state.web_server_state.shutdown_signal();
