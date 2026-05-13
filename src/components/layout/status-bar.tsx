@@ -4,6 +4,7 @@ import { StatusBarStats } from "@/components/layout/status-bar-stats"
 import { StatusBarSessionInfo } from "@/components/layout/status-bar-session-info"
 import { StatusBarTasks } from "@/components/layout/status-bar-tasks"
 import { StatusBarTokens } from "@/components/layout/status-bar-tokens"
+import { StatusBarProviderUsage } from "@/components/layout/status-bar-provider-usage"
 import { StatusBarConnection } from "@/components/layout/status-bar-connection"
 import { StatusBarAlerts } from "@/components/layout/status-bar-alerts"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -32,6 +33,7 @@ export function StatusBar() {
         <StatusBarTasks />
         <StatusBarSessionInfo />
         <StatusBarTokens />
+        <StatusBarProviderUsage />
         <StatusBarConnection />
         <StatusBarAlerts />
       </div>

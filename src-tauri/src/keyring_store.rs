@@ -9,6 +9,10 @@ fn channel_token_key(channel_id: i32) -> String {
     format!("chat-channel:{}", channel_id)
 }
 
+fn provider_usage_token_key(config_id: i32) -> String {
+    format!("provider-usage-token:{}", config_id)
+}
+
 // ── Tauri mode: OS keyring ──
 
 #[cfg(feature = "tauri-runtime")]
@@ -148,6 +152,57 @@ pub fn get_channel_token(channel_id: i32) -> Option<String> {
 pub fn delete_channel_token(channel_id: i32) -> Result<(), String> {
     let mut tokens = read_tokens();
     tokens.remove(&channel_token_key(channel_id));
+    write_tokens(&tokens)
+}
+
+// ── Provider usage token helpers ──
+// Keyed under `provider-usage-token:{id}`; stored in the OS keyring on desktop
+// and in `tokens.json` on the server mode, same as the chat channel tokens.
+
+#[cfg(feature = "tauri-runtime")]
+pub fn set_provider_usage_token(config_id: i32, token: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(SERVICE_NAME, &provider_usage_token_key(config_id))
+        .map_err(|e| format!("keyring init error: {e}"))?;
+    entry
+        .set_password(token)
+        .map_err(|e| format!("keyring set error: {e}"))
+}
+
+#[cfg(feature = "tauri-runtime")]
+pub fn get_provider_usage_token(config_id: i32) -> Option<String> {
+    let entry = keyring::Entry::new(SERVICE_NAME, &provider_usage_token_key(config_id)).ok()?;
+    entry.get_password().ok()
+}
+
+#[cfg(feature = "tauri-runtime")]
+pub fn delete_provider_usage_token(config_id: i32) -> Result<(), String> {
+    let entry = keyring::Entry::new(SERVICE_NAME, &provider_usage_token_key(config_id))
+        .map_err(|e| format!("keyring init error: {e}"))?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("keyring delete error: {e}")),
+    }
+}
+
+#[cfg(not(feature = "tauri-runtime"))]
+pub fn set_provider_usage_token(config_id: i32, token: &str) -> Result<(), String> {
+    let mut tokens = read_tokens();
+    tokens.insert(provider_usage_token_key(config_id), token.to_string());
+    write_tokens(&tokens)
+}
+
+#[cfg(not(feature = "tauri-runtime"))]
+pub fn get_provider_usage_token(config_id: i32) -> Option<String> {
+    read_tokens()
+        .get(&provider_usage_token_key(config_id))
+        .cloned()
+}
+
+#[cfg(not(feature = "tauri-runtime"))]
+pub fn delete_provider_usage_token(config_id: i32) -> Result<(), String> {
+    let mut tokens = read_tokens();
+    tokens.remove(&provider_usage_token_key(config_id));
     write_tokens(&tokens)
 }
 

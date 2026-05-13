@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::acp::manager::ConnectionManager;
 use crate::chat_channel::manager::ChatChannelManager;
+use crate::commands::provider_usage::UsageCache;
 use crate::db::AppDatabase;
 use crate::pet_state_mapper::PetStateHandle;
 use crate::terminal::manager::TerminalManager;
@@ -22,6 +23,10 @@ pub struct AppState {
     /// Read by `pet_get_current_state` so a freshly-opened pet window can
     /// pick up the current state without waiting for the next transition.
     pub pet_state: PetStateHandle,
+    /// Shared cache of provider usage query results + auto-refresh task
+    /// handles. Populated lazily by `refresh_all_enabled` at startup and by
+    /// CRUD operations that re-run the outbound query.
+    pub provider_usage_cache: Arc<UsageCache>,
 }
 
 pub fn default_connection_manager() -> ConnectionManager {
@@ -34,4 +39,8 @@ pub fn default_terminal_manager() -> TerminalManager {
 
 pub fn default_chat_channel_manager() -> ChatChannelManager {
     ChatChannelManager::new()
+}
+
+pub fn default_provider_usage_cache() -> Arc<UsageCache> {
+    Arc::new(UsageCache::new())
 }

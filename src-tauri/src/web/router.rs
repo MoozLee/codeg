@@ -705,6 +705,47 @@ pub fn build_router(
             "/delete_model_provider",
             post(handlers::model_provider::delete_model_provider),
         )
+        // ─── Provider Usage ───
+        .route(
+            "/list_provider_usage_configs",
+            post(handlers::provider_usage::list_provider_usage_configs),
+        )
+        .route(
+            "/create_provider_usage_config",
+            post(handlers::provider_usage::create_provider_usage_config),
+        )
+        .route(
+            "/update_provider_usage_config",
+            post(handlers::provider_usage::update_provider_usage_config),
+        )
+        .route(
+            "/delete_provider_usage_config",
+            post(handlers::provider_usage::delete_provider_usage_config),
+        )
+        .route(
+            "/reorder_provider_usage_configs",
+            post(handlers::provider_usage::reorder_provider_usage_configs),
+        )
+        .route(
+            "/save_provider_usage_token",
+            post(handlers::provider_usage::save_provider_usage_token),
+        )
+        .route(
+            "/delete_provider_usage_token",
+            post(handlers::provider_usage::delete_provider_usage_token),
+        )
+        .route(
+            "/test_provider_usage_config",
+            post(handlers::provider_usage::test_provider_usage_config),
+        )
+        .route(
+            "/query_provider_usage",
+            post(handlers::provider_usage::query_provider_usage),
+        )
+        .route(
+            "/list_provider_usage_results",
+            post(handlers::provider_usage::list_provider_usage_results),
+        )
         // ─── Quick Messages ───
         .route(
             "/quick_messages_list",

@@ -74,6 +74,8 @@ import type {
   ChatChannelMessageLog,
   ModelProviderInfo,
   PluginCheckSummary,
+  ProviderUsageConfigInfo,
+  ProviderUsageResult,
   QuickMessage,
 } from "./types"
 
@@ -2006,4 +2008,107 @@ export async function updateModelProvider(params: {
 
 export async function deleteModelProvider(id: number): Promise<void> {
   return getTransport().call("delete_model_provider", { id })
+}
+
+// ---------------------------------------------------------------------------
+// Provider Usage Query
+// ---------------------------------------------------------------------------
+
+export async function listProviderUsageConfigs(): Promise<
+  ProviderUsageConfigInfo[]
+> {
+  return getTransport().call("list_provider_usage_configs")
+}
+
+export async function createProviderUsageConfig(params: {
+  name: string
+  queryKind: string
+  baseUrl: string
+  userId: string
+  enabled: boolean
+  showInStatusBar: boolean
+  refreshIntervalMinutes: number
+  timeoutSeconds: number
+  sortOrder: number
+}): Promise<ProviderUsageConfigInfo> {
+  return getTransport().call("create_provider_usage_config", params)
+}
+
+export async function updateProviderUsageConfig(params: {
+  id: number
+  name?: string | null
+  queryKind?: string | null
+  baseUrl?: string | null
+  userId?: string | null
+  enabled?: boolean | null
+  showInStatusBar?: boolean | null
+  refreshIntervalMinutes?: number | null
+  timeoutSeconds?: number | null
+  sortOrder?: number | null
+}): Promise<ProviderUsageConfigInfo> {
+  return getTransport().call("update_provider_usage_config", {
+    id: params.id,
+    name: params.name ?? null,
+    queryKind: params.queryKind ?? null,
+    baseUrl: params.baseUrl ?? null,
+    userId: params.userId ?? null,
+    enabled: params.enabled ?? null,
+    showInStatusBar: params.showInStatusBar ?? null,
+    refreshIntervalMinutes: params.refreshIntervalMinutes ?? null,
+    timeoutSeconds: params.timeoutSeconds ?? null,
+    sortOrder: params.sortOrder ?? null,
+  })
+}
+
+export async function deleteProviderUsageConfig(id: number): Promise<void> {
+  return getTransport().call("delete_provider_usage_config", { id })
+}
+
+export async function reorderProviderUsageConfigs(
+  ids: number[]
+): Promise<void> {
+  return getTransport().call("reorder_provider_usage_configs", { ids })
+}
+
+export async function saveProviderUsageToken(
+  id: number,
+  token: string
+): Promise<void> {
+  return getTransport().call("save_provider_usage_token", { id, token })
+}
+
+export async function deleteProviderUsageToken(id: number): Promise<void> {
+  return getTransport().call("delete_provider_usage_token", { id })
+}
+
+export async function testProviderUsageConfig(params: {
+  id?: number | null
+  queryKind: string
+  baseUrl: string
+  userId: string
+  timeoutSeconds: number
+  token?: string | null
+}): Promise<ProviderUsageResult> {
+  return getTransport().call("test_provider_usage_config", {
+    input: {
+      id: params.id ?? null,
+      queryKind: params.queryKind,
+      baseUrl: params.baseUrl,
+      userId: params.userId,
+      timeoutSeconds: params.timeoutSeconds,
+      token: params.token ?? null,
+    },
+  })
+}
+
+export async function queryProviderUsage(
+  id: number
+): Promise<ProviderUsageResult> {
+  return getTransport().call("query_provider_usage", { id })
+}
+
+export async function listProviderUsageResults(): Promise<
+  ProviderUsageResult[]
+> {
+  return getTransport().call("list_provider_usage_results")
 }

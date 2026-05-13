@@ -42,6 +42,7 @@ mod tauri_app {
         acp as acp_commands, chat_channel as chat_channel_commands, conversations,
         experts as experts_commands, file_io, folder_commands, folders, mcp as mcp_commands,
         model_provider as model_provider_commands, notification, pet as pet_commands, project_boot,
+        provider_usage as provider_usage_commands,
         quick_messages as quick_messages_commands, system_settings, terminal as terminal_commands,
         version_control, windows, workspace_state as workspace_state_commands,
     };
@@ -174,6 +175,7 @@ mod tauri_app {
                 web::event_bridge::WebEventBroadcaster::new(),
             ))
             .manage(crate::pet_state_mapper::new_pet_state_handle())
+            .manage(crate::app_state::default_provider_usage_cache())
             .setup(|app| {
                 let app_data_dir = app.path().app_data_dir()?;
                 let app_version = env!("CARGO_PKG_VERSION");
@@ -289,6 +291,21 @@ mod tauri_app {
                         cm,
                         broadcaster,
                     ));
+                }
+
+                // Kick off initial provider-usage refresh + arm periodic
+                // tasks. Runs detached so a slow upstream can't delay
+                // window creation or web auto-start.
+                {
+                    let db_conn = app.state::<db::AppDatabase>().conn.clone();
+                    let emitter = web::event_bridge::EventEmitter::Tauri(app.handle().clone());
+                    let cache = app
+                        .state::<std::sync::Arc<crate::commands::provider_usage::UsageCache>>()
+                        .inner()
+                        .clone();
+                    crate::commands::provider_usage::spawn_startup_refresh(
+                        db_conn, emitter, cache,
+                    );
                 }
 
                 match tauri::async_runtime::block_on(web::load_web_service_config(&db.conn)) {
@@ -784,6 +801,16 @@ mod tauri_app {
                 model_provider_commands::create_model_provider,
                 model_provider_commands::update_model_provider,
                 model_provider_commands::delete_model_provider,
+                provider_usage_commands::list_provider_usage_configs,
+                provider_usage_commands::create_provider_usage_config,
+                provider_usage_commands::update_provider_usage_config,
+                provider_usage_commands::delete_provider_usage_config,
+                provider_usage_commands::reorder_provider_usage_configs,
+                provider_usage_commands::save_provider_usage_token,
+                provider_usage_commands::delete_provider_usage_token,
+                provider_usage_commands::test_provider_usage_config,
+                provider_usage_commands::query_provider_usage,
+                provider_usage_commands::list_provider_usage_results,
                 web::start_web_server,
                 web::stop_web_server,
                 web::get_web_server_status,

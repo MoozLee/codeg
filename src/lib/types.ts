@@ -1311,3 +1311,46 @@ export interface ModelProviderInfo {
   created_at: string
   updated_at: string
 }
+
+// ─── Provider Usage Query ───
+
+export type QueryKind = "newapi_balance" | "newapi_subscription"
+
+export interface ProviderUsageConfigInfo {
+  id: number
+  name: string
+  query_kind: QueryKind | string
+  base_url: string
+  user_id: string
+  enabled: boolean
+  show_in_status_bar: boolean
+  refresh_interval_minutes: number
+  timeout_seconds: number
+  sort_order: number
+  has_token: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProviderUsageSubscriptionItem {
+  plan_name: string
+  used?: number | null
+  remaining?: number | null
+  total?: number | null
+  expires_at?: string | null
+}
+
+export interface ProviderUsageResult {
+  config_id: number
+  query_kind: QueryKind | string
+  success: boolean
+  plan_name?: string | null
+  used?: number | null
+  remaining?: number | null
+  total?: number | null
+  unit: string
+  subscriptions?: ProviderUsageSubscriptionItem[] | null
+  updated_at: string
+  expires_at?: string | null
+  message?: string | null
+}

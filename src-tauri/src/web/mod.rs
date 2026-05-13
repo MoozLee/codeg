@@ -598,6 +598,13 @@ pub(crate) async fn do_start_web_server_tauri(
             .state::<crate::pet_state_mapper::PetStateHandle>()
             .inner()
             .clone(),
+        // Reuse the shared cache Tauri commands write to; web handlers must
+        // read and write the same `UsageCache` so HTTP snapshots and webview
+        // command results stay in sync.
+        provider_usage_cache: app
+            .state::<std::sync::Arc<crate::commands::provider_usage::UsageCache>>()
+            .inner()
+            .clone(),
     });
 
     // See do_start_web_server_with_state for rationale on the reset.

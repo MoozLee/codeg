@@ -16,6 +16,7 @@ mod m20260424_000001_folder_color;
 mod m20260424_000002_quick_message;
 mod m20260510_000001_folder_is_pinned;
 mod m20260511_000001_paired_devices;
+mod m20260513_000001_provider_usage_config;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -38,6 +39,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260424_000002_quick_message::Migration),
             Box::new(m20260510_000001_folder_is_pinned::Migration),
             Box::new(m20260511_000001_paired_devices::Migration),
+            Box::new(m20260513_000001_provider_usage_config::Migration),
         ]
     }
 }
