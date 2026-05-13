@@ -136,13 +136,12 @@ mod tauri_app {
         // second launches by signalling the running instance and exiting before
         // any other initialization. The callback runs in the *original* process.
         //
-        // In debug/dev builds we intentionally do not install it. On macOS the
-        // plugin derives its Unix socket path from the bundle identifier
-        // (`/tmp/app_codeg_si.sock` for `app.codeg`), so `pnpm tauri dev` and
-        // `/Applications/codeg.app` would otherwise compete for the same
-        // singleton. When the packaged app is still alive in the menu bar/tray
-        // after its window is closed, the dev binary exits with status 0 before
-        // opening any dev window, which looks like a silent startup failure.
+        // Skipped in debug builds so a locally-built `cargo run`/`pnpm tauri dev`
+        // instance can run alongside an installed release build of codeg during
+        // development. Debug desktop builds use an isolated SQLite file, but on
+        // macOS they still share the single-instance socket derived from the
+        // bundle identifier (`/tmp/app_codeg_si.sock` for `app.codeg`) and may
+        // also share other `app.codeg` data-dir artifacts with release.
         #[cfg(not(debug_assertions))]
         let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             windows::show_main_window(app);
