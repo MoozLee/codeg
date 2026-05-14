@@ -9,6 +9,11 @@ use axum::{
 use super::shutdown::ShutdownSignal;
 use crate::app_state::AppState;
 
+// MUST match `WS_READY_CHANNEL` in `src/lib/transport/constants.ts`.
+// Drift between the two values silently breaks the handshake (the client
+// keeps waiting and falls back to the timeout warning path after 5 s).
+const WS_READY_CHANNEL: &str = "__ready__";
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     Extension(state): Extension<Arc<AppState>>,
@@ -31,6 +36,32 @@ async fn handle_ws_connection(
     }
 
     let mut rx = state.event_broadcaster.subscribe();
+
+    // Server→client ready handshake. The broadcaster's `send` drops events
+    // when `receiver_count == 0`; without this signal the client has no way
+    // to know its receiver is registered, and any event emitted between WS
+    // open and the `subscribe()` call above is lost. Sending `__ready__` AFTER
+    // subscribing lets the client gate `acp_connect` until events are safe
+    // to emit — fixes the "正在连接" stuck-on-connecting race in web mode.
+    let ready_payload = serde_json::json!({
+        "channel": WS_READY_CHANNEL,
+        "payload": null,
+    });
+    match serde_json::to_string(&ready_payload) {
+        Ok(text) => {
+            if let Err(e) = socket.send(Message::Text(text.into())).await {
+                // Client likely disconnected mid-handshake. Logged so the
+                // matching client-side timeout warning has a server-side
+                // counterpart when diagnosing "stuck on connecting" reports.
+                eprintln!("[WS][WARN] failed to send __ready__ frame: {e}");
+                return;
+            }
+        }
+        Err(e) => {
+            eprintln!("[WS][WARN] failed to serialize __ready__ frame: {e}");
+            return;
+        }
+    }
 
     loop {
         tokio::select! {

@@ -11,19 +11,33 @@ set -euo pipefail
 REPO="xintaofei/codeg"
 INSTALL_DIR="${CODEG_INSTALL_DIR:-/usr/local/bin}"
 VERSION=""
+# Stale codeg-server binaries elsewhere in PATH are removed by default so the
+# user's `codeg-server` command always runs the freshly installed binary. Set
+# CODEG_NO_CLEANUP=1 (or pass --no-cleanup) to disable.
+CLEANUP_CONFLICTS=1
+if [ "${CODEG_NO_CLEANUP:-0}" = "1" ]; then
+  CLEANUP_CONFLICTS=0
+fi
 
 # ── Parse arguments ──
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version) VERSION="$2"; shift 2 ;;
-    --dir)     INSTALL_DIR="$2"; shift 2 ;;
+    --version)    VERSION="$2"; shift 2 ;;
+    --dir)        INSTALL_DIR="$2"; shift 2 ;;
+    --no-cleanup) CLEANUP_CONFLICTS=0; shift ;;
     --help)
-      echo "Usage: install.sh [--version VERSION] [--dir INSTALL_DIR]"
+      echo "Usage: install.sh [--version VERSION] [--dir INSTALL_DIR] [--no-cleanup]"
       echo ""
       echo "Options:"
-      echo "  --version   Version to install (e.g. v0.5.0). Default: latest"
-      echo "  --dir       Installation directory. Default: /usr/local/bin"
+      echo "  --version     Version to install (e.g. v0.5.0). Default: latest"
+      echo "  --dir         Installation directory. Default: /usr/local/bin"
+      echo "  --no-cleanup  Keep stale codeg-server binaries found elsewhere in PATH"
+      echo "                (default: remove them so the new install is what runs)"
+      echo ""
+      echo "Environment:"
+      echo "  CODEG_INSTALL_DIR  Same as --dir"
+      echo "  CODEG_NO_CLEANUP   Set to 1 to behave like --no-cleanup"
       exit 0
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -61,30 +75,109 @@ if [ -z "$VERSION" ]; then
   fi
 fi
 
-# ── Version detection — skip if already up to date ──
+# ── Helpers ──
+
+# Canonicalize a path (resolve symlinks). Falls back to the input if no tool available.
+canon_path() {
+  local p="$1"
+  [ -z "$p" ] && return 0
+  if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
+    readlink -f "$p" 2>/dev/null || echo "$p"
+  elif command -v realpath >/dev/null 2>&1; then
+    realpath "$p" 2>/dev/null || echo "$p"
+  else
+    echo "$p"
+  fi
+}
+
+# Read the version of a codeg-server binary (with a 3s timeout for old binaries
+# that lack --version support and would otherwise start the full server).
+read_bin_version() {
+  local bin="$1"
+  [ -x "$bin" ] || return 0
+  local tmp pid guard
+  tmp=$(mktemp)
+  "$bin" --version > "$tmp" 2>/dev/null &
+  pid=$!
+  ( sleep 3 && kill "$pid" 2>/dev/null ) &
+  guard=$!
+  wait "$pid" 2>/dev/null || true
+  kill "$guard" 2>/dev/null || true
+  wait "$guard" 2>/dev/null || true
+  head -1 "$tmp" 2>/dev/null | tr -d '[:space:]'
+  rm -f "$tmp"
+}
+
+# ── Scan PATH for codeg-server binaries that shadow the target install ──
+#
+# A binary "shadows" the install only if it appears in PATH BEFORE the
+# destination directory: that's the binary `command -v codeg-server` would
+# return after install. Walk PATH and stop at the destination directory —
+# anything past it cannot affect resolution today, so we leave it alone.
+
+DEST_BIN="${INSTALL_DIR}/codeg-server"
+DEST_BIN_REAL="$(canon_path "$DEST_BIN")"
+INSTALL_DIR_REAL="$(canon_path "$INSTALL_DIR")"
+
+PATH_CONFLICTS=()
+DEST_IN_PATH=0
+_SEEN_REAL=":"
+IFS=':' read -ra _PATH_DIRS <<< "${PATH:-}"
+for _dir in "${_PATH_DIRS[@]}"; do
+  [ -z "$_dir" ] && continue
+  # Match by canonical path string so the destination is recognized even when
+  # the directory doesn't exist yet (e.g. first install into a fresh prefix).
+  if [ "$(canon_path "$_dir")" = "$INSTALL_DIR_REAL" ]; then
+    DEST_IN_PATH=1
+    break
+  fi
+  _bin="$_dir/codeg-server"
+  if [ -f "$_bin" ] && [ -x "$_bin" ]; then
+    _real="$(canon_path "$_bin")"
+    case "$_SEEN_REAL" in
+      *":$_real:"*) continue ;;
+    esac
+    _SEEN_REAL="${_SEEN_REAL}${_real}:"
+    PATH_CONFLICTS+=("$_bin")
+  fi
+done
+
+# If the destination directory isn't on PATH, nothing "shadows" the install —
+# the new binary just won't be reachable as `codeg-server`. Drop any collected
+# entries; the post-install check will tell the user to fix PATH instead.
+if [ "$DEST_IN_PATH" -eq 0 ]; then
+  PATH_CONFLICTS=()
+fi
+
+# What does `codeg-server` actually resolve to right now in PATH?
+ACTIVE_BIN=""
+if command -v codeg-server >/dev/null 2>&1; then
+  ACTIVE_BIN="$(command -v codeg-server)"
+fi
+
+# ── Version detection — prefer the binary the user actually invokes ──
+
+VERSION_CHECK_BIN=""
+if [ -n "$ACTIVE_BIN" ] && [ -x "$ACTIVE_BIN" ]; then
+  VERSION_CHECK_BIN="$ACTIVE_BIN"
+elif [ -x "$DEST_BIN" ]; then
+  VERSION_CHECK_BIN="$DEST_BIN"
+fi
 
 CURRENT_VERSION=""
-EXISTING_BIN="${INSTALL_DIR}/codeg-server"
-
-if [ -x "$EXISTING_BIN" ]; then
-  # Run with timeout to handle old binaries that lack --version support
-  # (old binaries would start the full server and hang)
-  VER_TMP=$(mktemp)
-  "$EXISTING_BIN" --version > "$VER_TMP" 2>/dev/null &
-  VER_PID=$!
-  ( sleep 3 && kill "$VER_PID" 2>/dev/null ) &
-  VER_GUARD=$!
-  wait "$VER_PID" 2>/dev/null || true
-  kill "$VER_GUARD" 2>/dev/null || true
-  wait "$VER_GUARD" 2>/dev/null || true
-  CURRENT_VERSION=$(head -1 "$VER_TMP" 2>/dev/null | tr -d '[:space:]')
-  rm -f "$VER_TMP"
+if [ -n "$VERSION_CHECK_BIN" ]; then
+  CURRENT_VERSION="$(read_bin_version "$VERSION_CHECK_BIN")"
 fi
 
 # Normalize: strip leading "v" for comparison
 TARGET_VER="${VERSION#v}"
 
-if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$TARGET_VER" ]; then
+# Only short-circuit when the active binary is up to date AND the destination
+# itself has it AND no other PATH entries shadow it. Otherwise we still need to
+# install / clean up so the user's `codeg-server` command runs the new version.
+if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$TARGET_VER" ] \
+   && [ "${#PATH_CONFLICTS[@]}" -eq 0 ] \
+   && [ -x "$DEST_BIN" ]; then
   echo "codeg-server is already at version ${TARGET_VER}, nothing to do."
   exit 0
 fi
@@ -93,6 +186,28 @@ if [ -n "$CURRENT_VERSION" ]; then
   echo "Upgrading codeg-server: ${CURRENT_VERSION} -> ${TARGET_VER}..."
 else
   echo "Installing codeg-server ${VERSION} (${PLATFORM}/${ARCH_SUFFIX})..."
+fi
+
+# ── Warn about codeg-server binaries shadowing the target install ──
+
+if [ "${#PATH_CONFLICTS[@]}" -gt 0 ]; then
+  echo ""
+  echo "Found other codeg-server binaries in PATH that may shadow ${DEST_BIN}:"
+  for _c in "${PATH_CONFLICTS[@]}"; do
+    _cv="$(read_bin_version "$_c" 2>/dev/null || true)"
+    if [ -n "$_cv" ]; then
+      echo "  - $_c  (version ${_cv})"
+    else
+      echo "  - $_c"
+    fi
+  done
+  if [ "$CLEANUP_CONFLICTS" = "1" ]; then
+    echo "These will be removed after installation. Pass --no-cleanup to keep them."
+  else
+    echo "Keeping them (--no-cleanup). You may need to remove them manually so that"
+    echo "typing 'codeg-server' runs the new install at ${DEST_BIN}."
+  fi
+  echo ""
 fi
 
 # ── Stop running service before upgrade ──
@@ -152,6 +267,11 @@ else
   sudo chmod +x "${INSTALL_DIR}/codeg-server"
 fi
 
+# Re-canonicalize destination now that the file exists. Pre-install canon may
+# leave the final non-existent component unresolved (notably macOS readlink -f),
+# which would mis-compare against the post-install `command -v` result.
+DEST_BIN_REAL="$(canon_path "$DEST_BIN")"
+
 # ── Install web assets ──
 
 WEB_SRC="${TMP_DIR}/${ARTIFACT}/web"
@@ -166,6 +286,30 @@ if [ -d "$WEB_SRC" ]; then
     sudo mkdir -p "$WEB_DIR"
     sudo cp -r "$WEB_SRC"/* "$WEB_DIR"/
   fi
+fi
+
+# ── Remove shadowing binaries from earlier PATH entries ──
+
+EXIT_STATUS=0
+
+if [ "${#PATH_CONFLICTS[@]}" -gt 0 ] && [ "$CLEANUP_CONFLICTS" = "1" ]; then
+  echo ""
+  echo "Removing stale codeg-server binaries..."
+  for _c in "${PATH_CONFLICTS[@]}"; do
+    _parent="$(dirname "$_c")"
+    _rm_ok=0
+    if [ -w "$_parent" ] && { [ ! -e "$_c" ] || [ -w "$_c" ]; }; then
+      if rm -f "$_c" 2>/dev/null; then _rm_ok=1; fi
+    else
+      if sudo rm -f "$_c" 2>/dev/null; then _rm_ok=1; fi
+    fi
+    if [ "$_rm_ok" -eq 1 ]; then
+      echo "  removed $_c"
+    else
+      echo "  failed to remove $_c (remove it manually so 'codeg-server' resolves to the new install)"
+      EXIT_STATUS=1
+    fi
+  done
 fi
 
 # ── Restart service if it was running ──
@@ -183,6 +327,33 @@ echo ""
 echo "codeg-server installed to ${INSTALL_DIR}/codeg-server"
 INSTALLED_VER=$("${INSTALL_DIR}/codeg-server" --version 2>/dev/null || echo "${TARGET_VER}")
 echo "Version: ${INSTALLED_VER}"
+
+# Verify the user's `codeg-server` command actually resolves to the new binary.
+ACTIVE_BIN_AFTER=""
+if command -v codeg-server >/dev/null 2>&1; then
+  ACTIVE_BIN_AFTER="$(command -v codeg-server)"
+fi
+ACTIVE_BIN_AFTER_REAL="$(canon_path "$ACTIVE_BIN_AFTER")"
+
+if [ -z "$ACTIVE_BIN_AFTER" ]; then
+  echo ""
+  echo "Note: ${INSTALL_DIR} is not on your PATH. Add it so 'codeg-server' resolves directly:"
+  echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+  EXIT_STATUS=1
+elif [ "$ACTIVE_BIN_AFTER_REAL" != "$DEST_BIN_REAL" ]; then
+  echo ""
+  echo "Warning: typing 'codeg-server' still runs ${ACTIVE_BIN_AFTER}, not ${DEST_BIN}."
+  echo "Another binary earlier in PATH is shadowing the new install. To fix, either:"
+  echo "  - re-run without --no-cleanup (the default removes shadowing binaries), or"
+  echo "  - remove the stale binary manually: rm '${ACTIVE_BIN_AFTER}', or"
+  echo "  - put ${INSTALL_DIR} before its directory in PATH."
+  EXIT_STATUS=1
+else
+  # Same path: a previous shell session may have cached the old inode.
+  echo ""
+  echo "Tip: if you ran codeg-server earlier in this shell, run 'hash -r' (bash/zsh) to clear the path cache."
+fi
+
 echo ""
 echo "Quick start:"
 echo "  CODEG_STATIC_DIR=${WEB_DIR} codeg-server"
@@ -191,3 +362,5 @@ echo "Or with custom settings:"
 echo "  CODEG_PORT=3080 CODEG_TOKEN=your-secret CODEG_STATIC_DIR=${WEB_DIR} codeg-server"
 echo ""
 echo "The auth token is printed to stderr on startup if not set via CODEG_TOKEN."
+
+exit "$EXIT_STATUS"

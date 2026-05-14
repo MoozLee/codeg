@@ -26,6 +26,39 @@ export async function subscribe<T>(
 }
 
 /**
+ * Register a callback to run after a WebSocket reconnect (post `__ready__`).
+ * No-op for IPC-only transports (Tauri desktop without remote workspace),
+ * where the underlying channel cannot disconnect mid-session.
+ */
+export function onTransportReconnect(callback: () => void): UnsubscribeFn {
+  // Capture the transport instance once: between two `getTransport()` calls
+  // the remote transport could be swapped via `configureRemoteDesktopTransport`
+  // / `clearRemoteDesktopTransport`, leaving the bound method on a different
+  // object than the one we destructured from.
+  const transport = getTransport()
+  const reconnect = transport.onReconnect
+  if (!reconnect) {
+    return () => {}
+  }
+  return reconnect.call(transport, callback)
+}
+
+/**
+ * Resolve when the transport's WebSocket is ready to relay events emitted
+ * by upcoming HTTP commands. Call this immediately before any HTTP command
+ * whose effects observe a WS event stream (e.g. `acp_connect`); without
+ * the await, the command may race a mid-session WS reconnect and have its
+ * events silently dropped. No-op for IPC-only transports.
+ */
+export async function waitForTransportReady(): Promise<void> {
+  // See onTransportReconnect for why we capture the instance once.
+  const transport = getTransport()
+  const waitForReady = transport.waitForReady
+  if (!waitForReady) return
+  await waitForReady.call(transport)
+}
+
+/**
  * Open a URL in the default browser (desktop) or new tab (web).
  */
 export async function openUrl(url: string): Promise<void> {

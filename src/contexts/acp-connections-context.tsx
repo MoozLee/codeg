@@ -10,7 +10,11 @@ import {
   type ReactNode,
 } from "react"
 import { useTranslations } from "next-intl"
-import { subscribe } from "@/lib/platform"
+import {
+  subscribe,
+  onTransportReconnect,
+  waitForTransportReady,
+} from "@/lib/platform"
 import { randomUUID } from "@/lib/utils"
 import { inferLiveToolName } from "@/lib/tool-call-normalization"
 import {
@@ -1337,6 +1341,12 @@ function connectionsReducer(
     case "HYDRATE_FROM_SNAPSHOT": {
       const current = state.get(action.contextKey)
       if (!current) return state
+      // Identity guard: the connection at this contextKey may have been
+      // disconnected and replaced between the snapshot fetch firing and
+      // its async response. eventSeq alone is not enough — a stale snapshot
+      // from connection A (high seq) would otherwise overwrite a fresh
+      // connection B (lastAppliedSeq=0) at the same contextKey.
+      if (current.connectionId !== action.patch.connectionId) return state
       // Race guard: the snapshot may have been generated BEFORE events
       // that have since arrived and been applied to in-memory state.
       // Hydrating from a stale snapshot would overwrite fresh state.
@@ -3213,6 +3223,47 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     resolveListenerReadyWaiters,
   ])
 
+  // Recover from missed events after a WS reconnect. The web-mode
+  // broadcaster drops events when `receiver_count == 0`, so anything fired
+  // between `onclose` and the next `__ready__` is lost. After the reconnect
+  // settles, refetch backend snapshots for every non-terminal connection so
+  // the store catches up to whatever happened during the disconnect window.
+  // `HYDRATE_FROM_SNAPSHOT`'s `eventSeq <= lastAppliedSeq` guard already
+  // handles races against live events arriving via the resubscribed WS.
+  // No-op on IPC-only transports (Tauri desktop) — `onTransportReconnect`
+  // returns a no-op unsubscribe there.
+  useEffect(() => {
+    return onTransportReconnect(() => {
+      for (const [contextKey, conn] of storeRef.current.connections) {
+        if (conn.status === "disconnected" || conn.status === "error") {
+          continue
+        }
+        const connectionId = conn.connectionId
+        void acpGetSessionSnapshot(connectionId)
+          .then((snapshot) => {
+            if (!snapshot) return
+            const patch = denormalizeSnapshot(snapshot)
+            dispatch({
+              type: "HYDRATE_FROM_SNAPSHOT",
+              contextKey,
+              patch,
+            })
+          })
+          .catch((e: unknown) => {
+            // Snapshot may 404 if the backend GC'd the connection during
+            // the disconnect window (idle sweep). Logged but not surfaced —
+            // the existing per-connection state remains until the next
+            // explicit interaction reveals it's gone.
+            console.warn(
+              "[acp-context] reconnect snapshot fetch failed for",
+              connectionId,
+              e
+            )
+          })
+      }
+    })
+  }, [dispatch])
+
   // ── Backend keepalive timer ──
   // Frontend is the only side that knows which conversation tabs the
   // user has open. Without this, the backend's idle sweep
@@ -3427,6 +3478,17 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         }
 
         await waitForListenerReady()
+        // `waitForListenerReady` only confirms the global subscribe is set
+        // up — `listenerReadyRef` latches to true after the initial connect
+        // and never resets. During a mid-session WS reconnect, the server
+        // broadcaster's `receiver_count` is briefly 0; firing `acp_connect`
+        // in that window means the backend's `Connecting`/`Connected` events
+        // get silently dropped. Snapshot recovery via `onTransportReconnect`
+        // eventually catches up the state, but the user still sees a few
+        // seconds of "正在连接" while it does. Awaiting the current
+        // `readyPromise` here holds the HTTP call until the WS is back so
+        // no event is dropped in the first place.
+        await waitForTransportReady()
         const connectionId = await acpConnect(agentType, workingDir, sessionId)
 
         // If disconnect was requested while connect was in flight,
@@ -3645,6 +3707,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
       lastActivityRef.current.set(contextKey, Date.now())
+      // Gate on WS readiness so backend-emitted content/thinking/tool_call
+      // events for this prompt are not lost in a reconnect window.
+      await waitForTransportReady()
       await acpPrompt(
         conn.connectionId,
         blocks,
@@ -3668,6 +3733,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       })
     }
     lastActivityRef.current.set(contextKey, Date.now())
+    await waitForTransportReady()
     await acpSetMode(conn.connectionId, modeId)
   }, [])
 
@@ -3699,6 +3765,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         saveConfigPreference(conn.agentType, configId, value, allOptions)
       }
       lastActivityRef.current.set(contextKey, Date.now())
+      await waitForTransportReady()
       await acpSetConfigOption(conn.connectionId, configId, value)
     },
     [dispatch]
@@ -3707,6 +3774,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const cancel = useCallback(async (contextKey: string) => {
     const conn = storeRef.current.connections.get(contextKey)
     if (!conn) return
+    await waitForTransportReady()
     await acpCancel(conn.connectionId)
   }, [])
 
@@ -3722,6 +3790,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       }
       try {
         lastActivityRef.current.set(contextKey, Date.now())
+        await waitForTransportReady()
         await acpRespondPermission(conn.connectionId, requestId, optionId)
         dispatch({ type: "PERMISSION_CLEARED", contextKey })
       } catch (e) {

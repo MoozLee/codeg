@@ -3,8 +3,8 @@ import type { RemoteTransportConfig, Transport } from "./types"
 
 export type { RemoteTransportConfig, Transport, UnsubscribeFn } from "./types"
 
-let _transport: Transport | null = null
 let _shellTransport: Transport | null = null
+let _remoteTransport: Transport | null = null
 let _remoteConfig: RemoteTransportConfig | null = null
 
 function createTauriTransport(): Transport {
@@ -38,18 +38,18 @@ export function getShellTransport(): Transport {
 export function configureRemoteDesktopTransport(
   config: RemoteTransportConfig
 ): void {
-  _transport?.destroy?.()
+  _remoteTransport?.destroy?.()
   _remoteConfig = config
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { RemoteDesktopTransport } = require("./remote-desktop-transport") as {
     RemoteDesktopTransport: new (config: RemoteTransportConfig) => Transport
   }
-  _transport = new RemoteDesktopTransport(config)
+  _remoteTransport = new RemoteDesktopTransport(config)
 }
 
 export function clearRemoteDesktopTransport(): void {
-  _transport?.destroy?.()
-  _transport = null
+  _remoteTransport?.destroy?.()
+  _remoteTransport = null
   _remoteConfig = null
 }
 
@@ -58,14 +58,7 @@ export function getActiveRemoteConnectionId(): number | null {
 }
 
 export function getTransport(): Transport {
-  if (_transport) return _transport
-
-  const env = detectEnvironment()
-  _transport =
-    env === "tauri"
-      ? getShellTransport()
-      : createWebTransport(window.location.origin)
-  return _transport
+  return _remoteTransport ?? getShellTransport()
 }
 
 export function isDesktop(): boolean {
