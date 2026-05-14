@@ -33,8 +33,8 @@ export function StatusBar() {
         <StatusBarTasks />
         <StatusBarSessionInfo />
         <StatusBarTokens />
-        <StatusBarProviderUsage />
         <StatusBarConnection />
+        <StatusBarProviderUsage />
         <StatusBarAlerts />
       </div>
     </div>
