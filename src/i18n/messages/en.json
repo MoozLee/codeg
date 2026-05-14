@@ -951,6 +951,8 @@
       "newConversation": "New Conversation",
       "closeConversation": "Close Conversation",
       "copyText": "Copy Text",
+      "openSelectedFile": "Jump to File",
+      "openSelectedFileFailed": "Failed to jump to file",
       "copyTextSuccess": "Copied",
       "copyTextFailed": "Copy failed",
       "forkSession": "Fork Session",

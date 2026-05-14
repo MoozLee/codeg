@@ -951,6 +951,8 @@
       "newConversation": "محادثة جديدة",
       "closeConversation": "إغلاق المحادثة",
       "copyText": "نسخ النص",
+      "openSelectedFile": "الانتقال إلى الملف",
+      "openSelectedFileFailed": "فشل الانتقال إلى الملف",
       "copyTextSuccess": "تم النسخ",
       "copyTextFailed": "فشل النسخ",
       "forkSession": "تفريع الجلسة",

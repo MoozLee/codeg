@@ -13,6 +13,7 @@ import {
   Copy,
   Download,
   FileCode,
+  FileSearch,
   FileImage,
   FileText,
   Focus,
@@ -32,6 +33,9 @@ import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { useTaskContext } from "@/contexts/task-context"
+import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { toErrorMessage } from "@/lib/app-error"
+import { findFirstWorkspaceFileTarget } from "@/lib/local-file-target"
 import { cn, copyTextToClipboard, randomUUID } from "@/lib/utils"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
@@ -1210,6 +1214,7 @@ export function ConversationDetailPanel({
   } = useConversationRuntime()
   const { activeFolder: folder } = useActiveFolder()
   const { conversations, getFolder } = useAppWorkspace()
+  const { openFilePreview } = useWorkspaceContext()
   const {
     tabs,
     activeTabId,
@@ -1397,6 +1402,11 @@ export function ConversationDetailPanel({
     return () => document.removeEventListener("selectionchange", handler)
   }, [])
 
+  const selectedFileTarget = useMemo(
+    () => findFirstWorkspaceFileTarget(contextMenuSelectedText, folder?.path),
+    [contextMenuSelectedText, folder?.path]
+  )
+
   const handleCopySelectedText = useCallback(async () => {
     if (!contextMenuSelectedText) return
     const ok = await copyTextToClipboard(contextMenuSelectedText)
@@ -1406,6 +1416,17 @@ export function ConversationDetailPanel({
       toast.error(t("copyTextFailed"))
     }
   }, [contextMenuSelectedText, t])
+
+  const handleOpenSelectedFile = useCallback(() => {
+    if (!selectedFileTarget) return
+    void openFilePreview(selectedFileTarget.relativePath, {
+      line: selectedFileTarget.line ?? undefined,
+    }).catch((error) => {
+      toast.error(t("openSelectedFileFailed"), {
+        description: toErrorMessage(error),
+      })
+    })
+  }, [openFilePreview, selectedFileTarget, t])
 
   const handleNewConversation = useCallback(() => {
     if (!allowNewConversation || !folder) return
@@ -1600,6 +1621,13 @@ export function ConversationDetailPanel({
         >
           <Copy className="h-4 w-4" />
           {t("copyText")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!selectedFileTarget}
+          onSelect={handleOpenSelectedFile}
+        >
+          <FileSearch className="h-4 w-4" />
+          {t("openSelectedFile")}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem

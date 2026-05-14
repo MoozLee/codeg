@@ -951,6 +951,8 @@
       "newConversation": "新增會話",
       "closeConversation": "關閉會話",
       "copyText": "複製文字",
+      "openSelectedFile": "跳轉到檔案",
+      "openSelectedFileFailed": "跳轉到檔案失敗",
       "copyTextSuccess": "已複製",
       "copyTextFailed": "複製失敗",
       "forkSession": "分叉會話",

@@ -951,6 +951,8 @@
       "newConversation": "Nueva conversación",
       "closeConversation": "Cerrar conversación",
       "copyText": "Copiar texto",
+      "openSelectedFile": "Ir al archivo",
+      "openSelectedFileFailed": "Error al ir al archivo",
       "copyTextSuccess": "Copiado",
       "copyTextFailed": "Error al copiar",
       "forkSession": "Bifurcar sesión",

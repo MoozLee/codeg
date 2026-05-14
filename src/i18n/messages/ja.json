@@ -951,6 +951,8 @@
       "newConversation": "新しい会話",
       "closeConversation": "会話を閉じる",
       "copyText": "テキストをコピー",
+      "openSelectedFile": "ファイルへジャンプ",
+      "openSelectedFileFailed": "ファイルへのジャンプに失敗しました",
       "copyTextSuccess": "コピーしました",
       "copyTextFailed": "コピーに失敗しました",
       "forkSession": "セッションをフォーク",
