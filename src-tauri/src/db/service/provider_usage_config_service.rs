@@ -12,7 +12,7 @@ use crate::db::error::DbError;
 pub async fn create(
     conn: &DatabaseConnection,
     name: String,
-    query_kind: String,
+    query_kinds: String,
     base_url: String,
     user_id: String,
     enabled: bool,
@@ -25,7 +25,7 @@ pub async fn create(
     let active = provider_usage_config::ActiveModel {
         id: NotSet,
         name: Set(name),
-        query_kind: Set(query_kind),
+        query_kinds: Set(query_kinds),
         base_url: Set(base_url),
         user_id: Set(user_id),
         enabled: Set(enabled),
@@ -44,7 +44,7 @@ pub async fn update(
     conn: &DatabaseConnection,
     id: i32,
     name: Option<String>,
-    query_kind: Option<String>,
+    query_kinds: Option<String>,
     base_url: Option<String>,
     user_id: Option<String>,
     enabled: Option<bool>,
@@ -62,8 +62,8 @@ pub async fn update(
     if let Some(v) = name {
         active.name = Set(v);
     }
-    if let Some(v) = query_kind {
-        active.query_kind = Set(v);
+    if let Some(v) = query_kinds {
+        active.query_kinds = Set(v);
     }
     if let Some(v) = base_url {
         active.base_url = Set(v);

@@ -16,11 +16,13 @@ use std::time::Duration;
 use sea_orm::DatabaseConnection;
 
 use crate::db::service::provider_usage_config_service;
-use crate::models::provider_usage::{ProviderUsageResult, QueryKind};
+use crate::models::provider_usage::{
+    decode_query_kinds, ProviderUsageResult, QueryKind,
+};
 use crate::web::event_bridge::{emit_event, EventEmitter};
 
 use super::cache::UsageCache;
-use super::newapi::{query_newapi_balance, query_newapi_subscription, ExecConfig};
+use super::newapi;
 
 /// Event name the frontend subscribes to.
 pub const PROVIDER_USAGE_UPDATED_EVENT: &str = "provider_usage:updated";
@@ -37,58 +39,58 @@ pub async fn refresh_config_core(
     let model = match provider_usage_config_service::get_by_id(conn, id).await {
         Ok(Some(m)) => m,
         Ok(None) => {
-            let result = failure_result(id, QueryKind::NewapiBalance, "Config not found");
+            let result = failure_result(id, "", "Config not found");
             cache.upsert(result.clone()).await;
             emit_event(emitter, PROVIDER_USAGE_UPDATED_EVENT, &result);
             return result;
         }
         Err(e) => {
-            let result = failure_result(
-                id,
-                QueryKind::NewapiBalance,
-                &format!("Failed to load config: {e}"),
-            );
+            let result = failure_result(id, "", &format!("Failed to load config: {e}"));
             cache.upsert(result.clone()).await;
             emit_event(emitter, PROVIDER_USAGE_UPDATED_EVENT, &result);
             return result;
         }
     };
 
-    let kind = match QueryKind::parse(&model.query_kind) {
-        Some(k) => k,
-        None => {
-            let result = failure_result(
-                id,
-                QueryKind::NewapiBalance,
-                &format!("Unknown query kind: {}", model.query_kind),
-            );
-            cache.upsert(result.clone()).await;
-            emit_event(emitter, PROVIDER_USAGE_UPDATED_EVENT, &result);
-            return result;
-        }
-    };
-
-    let token = crate::keyring_store::get_provider_usage_token(id).unwrap_or_default();
-    if token.is_empty() {
-        let result = failure_result(id, kind, "Access token missing");
+    let kind_strings = decode_query_kinds(&model.query_kinds);
+    let kinds: Vec<QueryKind> = kind_strings
+        .iter()
+        .filter_map(|s| QueryKind::parse(s))
+        .collect();
+    if kinds.is_empty() {
+        let result = failure_result(
+            id,
+            &kind_strings.join(","),
+            "No valid query kinds configured",
+        );
         cache.upsert(result.clone()).await;
         emit_event(emitter, PROVIDER_USAGE_UPDATED_EVENT, &result);
         return result;
     }
 
-    let cfg = ExecConfig {
-        config_id: id,
-        query_kind: kind,
-        base_url: model.base_url,
-        user_id: model.user_id,
-        token,
-        timeout_seconds: model.timeout_seconds.max(1) as u64,
-    };
+    let kinds_label = kinds
+        .iter()
+        .map(|k| k.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
 
-    let result = match kind {
-        QueryKind::NewapiBalance => query_newapi_balance(&cfg).await,
-        QueryKind::NewapiSubscription => query_newapi_subscription(&cfg).await,
-    };
+    let token = crate::keyring_store::get_provider_usage_token(id).unwrap_or_default();
+    if token.is_empty() {
+        let result = failure_result(id, &kinds_label, "Access token missing");
+        cache.upsert(result.clone()).await;
+        emit_event(emitter, PROVIDER_USAGE_UPDATED_EVENT, &result);
+        return result;
+    }
+
+    let result = newapi::execute_kinds(
+        id,
+        &kinds,
+        &model.base_url,
+        &model.user_id,
+        &token,
+        model.timeout_seconds.max(1) as u64,
+    )
+    .await;
 
     cache.upsert(result.clone()).await;
     emit_event(emitter, PROVIDER_USAGE_UPDATED_EVENT, &result);
@@ -187,10 +189,10 @@ pub async fn start_auto_refresh(
     cache.register_task(id, handle).await;
 }
 
-fn failure_result(id: i32, kind: QueryKind, message: &str) -> ProviderUsageResult {
+fn failure_result(id: i32, kinds_label: &str, message: &str) -> ProviderUsageResult {
     ProviderUsageResult {
         config_id: id,
-        query_kind: kind.as_str().to_string(),
+        query_kind: kinds_label.to_string(),
         success: false,
         plan_name: None,
         used: None,
@@ -201,5 +203,7 @@ fn failure_result(id: i32, kind: QueryKind, message: &str) -> ProviderUsageResul
         updated_at: chrono::Utc::now().to_rfc3339(),
         expires_at: None,
         message: Some(message.to_string()),
+        balance: None,
+        subscription: None,
     }
 }

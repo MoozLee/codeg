@@ -18,7 +18,6 @@ import {
   SendHorizontal,
   Palette,
   PlugZap,
-  Receipt,
   Server,
   Settings,
   Sparkles,
@@ -40,7 +39,6 @@ interface SettingsNavItem {
     | "appearance"
     | "agents"
     | "model_providers"
-    | "provider_usage_query"
     | "mcp"
     | "skills"
     | "experts"
@@ -88,11 +86,6 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     href: "/settings/model-providers",
     labelKey: "model_providers",
     icon: Server,
-  },
-  {
-    href: "/settings/provider-usage-query",
-    labelKey: "provider_usage_query",
-    icon: Receipt,
   },
   {
     href: "/settings/shortcuts",

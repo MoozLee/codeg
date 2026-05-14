@@ -15,7 +15,13 @@ import {
   queryProviderUsage,
 } from "@/lib/api"
 import { subscribe } from "@/lib/platform"
-import type { ProviderUsageConfigInfo, ProviderUsageResult } from "@/lib/types"
+import type {
+  ProviderUsageAmount,
+  ProviderUsageConfigInfo,
+  ProviderUsageResult,
+  ProviderUsageSubscriptionItem,
+  QueryKind,
+} from "@/lib/types"
 
 const PROVIDER_USAGE_UPDATED_EVENT = "provider_usage:updated"
 const WINDOW_FOCUS_REFRESH_THROTTLE_MS = 30_000
@@ -50,6 +56,32 @@ function formatNumber(value: number | null | undefined): string {
     return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
   }
   return value.toFixed(2)
+}
+
+/**
+ * Clamp floating-point dust around zero to a clean 0. Aggregating balance +
+ * subscription frequently produces values like `-0.02` (used = 0.02, total =
+ * 0 on the subscription side), which renders as a confusing red negative
+ * remaining; anything within half a cent of zero is treated as zero. The
+ * backend applies the same tolerance to top-level aggregates, but we apply
+ * it on every displayed amount (including per-kind slices and detail rows)
+ * so the UI never surfaces dust values to the user.
+ */
+function clampZero(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return value ?? null
+  return Math.abs(value) < 0.005 ? 0 : value
+}
+
+/**
+ * Remaining-percentage tier → Tailwind color token. Status bar uses these so
+ * a healthy balance reads as calm green, running-low as amber, and near-empty
+ * as red; falls back to `text-foreground` when no percentage is computable.
+ */
+function availableToneClass(percent: number | null): string {
+  if (percent == null) return "text-foreground"
+  if (percent > 50) return "text-emerald-600 dark:text-emerald-400"
+  if (percent >= 20) return "text-amber-600 dark:text-amber-400"
+  return "text-red-600 dark:text-red-400"
 }
 
 export function StatusBarProviderUsage() {
@@ -157,27 +189,43 @@ export function StatusBarProviderUsage() {
   if (!activeConfig) return null
 
   const success = result?.success ?? false
-  const used = result?.used ?? null
-  const total = result?.total ?? null
-  const remaining = result?.remaining ?? null
+  const used = clampZero(result?.used ?? null)
+  const remaining = clampZero(result?.remaining ?? null)
   const unit = result?.unit ?? "USD"
-  const planName = result?.plan_name ?? null
+  const percentDenominator = (() => {
+    if (!success) return null
+    const balanceRemaining = clampZero(result?.balance?.remaining ?? null)
+    const subscriptionTotal = clampZero(result?.subscription?.total ?? null)
+    const values = [balanceRemaining, subscriptionTotal].filter(
+      (value): value is number => value != null && Number.isFinite(value)
+    )
+    if (values.length === 0) return null
+    return values.reduce((sum, value) => sum + value, 0)
+  })()
+
+  const availablePercent =
+    success &&
+    remaining != null &&
+    percentDenominator != null &&
+    percentDenominator > 0
+      ? (remaining / percentDenominator) * 100
+      : null
+
+  // When the aggregate has no usable totals, fall back to neutral foreground
+  // so a single-kind config (or an in-flight cold-load) doesn't read as
+  // "healthy green" without any actual quota math behind the color.
+  const hasToneSignal = success && availablePercent != null
+  const availableToneClassName = success
+    ? hasToneSignal
+      ? availableToneClass(availablePercent)
+      : "text-foreground"
+    : "text-red-500"
 
   const primaryText = (() => {
     if (!result) return "--"
     if (!success) return t("errorCompact")
-    if (used != null && total != null) {
-      return t("usedTotal", {
-        used: formatNumber(used),
-        total: formatNumber(total),
-        unit,
-      })
-    }
     if (remaining != null) {
-      return t("remainingOnly", {
-        remaining: formatNumber(remaining),
-        unit,
-      })
+      return `$${formatNumber(remaining)}`
     }
     return "--"
   })()
@@ -190,6 +238,16 @@ export function StatusBarProviderUsage() {
         days: (n) => t("daysAgo", { n }),
       })
     : null
+
+  const activeKinds = (activeConfig.query_kinds ?? []) as QueryKind[]
+  const kindLabel = activeKinds
+    .map((k) =>
+      k === "newapi_subscription" ? t("kindSubscription") : t("kindBalance")
+    )
+    .join(" · ")
+
+  const formatPercent = (pct: number): string =>
+    `${pct.toFixed(pct >= 10 ? 0 : 1)}%`
 
   return (
     <Popover>
@@ -207,7 +265,9 @@ export function StatusBarProviderUsage() {
           ) : (
             <AlertCircle className="size-3.5" />
           )}
-          <span className="tabular-nums">{primaryText}</span>
+          <span className={`tabular-nums ${availableToneClassName}`}>
+            {primaryText}
+          </span>
           {updatedText && (
             <span className="text-muted-foreground">· {updatedText}</span>
           )}
@@ -223,88 +283,90 @@ export function StatusBarProviderUsage() {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="end" className="w-72 gap-2 p-3 text-xs">
-        <div className="space-y-1">
-          <div className="flex items-center justify-between gap-2 text-xs font-medium">
-            <span className="truncate">{activeConfig.name}</span>
-            <span className="text-muted-foreground">
-              {activeConfig.query_kind === "newapi_subscription"
-                ? t("kindSubscription")
-                : t("kindBalance")}
-            </span>
-          </div>
-          {planName && (
-            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{t("planName")}</span>
-              <span className="truncate">{planName}</span>
+      <PopoverContent side="top" align="end" className="w-80 gap-2 p-3 text-xs">
+        <div className="space-y-2">
+          {/* Summary block: configuration name + aggregated available quota */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2 text-xs font-medium">
+              <span className="truncate">{activeConfig.name}</span>
+              <span className="text-muted-foreground shrink-0">
+                {kindLabel}
+              </span>
             </div>
-          )}
-          {result ? (
-            result.success ? (
-              <>
-                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{t("used")}</span>
-                  <span className="tabular-nums">
-                    {used != null ? `${formatNumber(used)} ${unit}` : "--"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{t("remaining")}</span>
-                  <span className="tabular-nums">
-                    {remaining != null
-                      ? `${formatNumber(remaining)} ${unit}`
-                      : "--"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{t("total")}</span>
-                  <span className="tabular-nums">
-                    {total != null ? `${formatNumber(total)} ${unit}` : "--"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{t("updatedAt")}</span>
-                  <span>{updatedText}</span>
-                </div>
-                {result.expires_at && (
+            {result ? (
+              result.success ? (
+                <>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {t("availableQuota")}
+                    </span>
+                    <span
+                      className={`text-base font-semibold tabular-nums ${availableToneClassName}`}
+                    >
+                      {remaining != null ? `$${formatNumber(remaining)}` : "--"}
+                    </span>
+                  </div>
                   <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span>{t("expiresAt")}</span>
-                    <span>{result.expires_at}</span>
+                    <span>{t("historicalConsumption")}</span>
+                    <span className="tabular-nums">
+                      {used != null ? `${formatNumber(used)} ${unit}` : "--"}
+                    </span>
                   </div>
-                )}
-                {result.subscriptions && result.subscriptions.length > 0 && (
-                  <div className="pt-1 border-t border-border">
-                    <div className="text-xs font-medium mb-1">
-                      {t("subscriptions")}
-                    </div>
-                    <div className="space-y-0.5">
-                      {result.subscriptions.map((s, idx) => (
-                        <div
-                          key={`${s.plan_name}-${idx}`}
-                          className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    {availablePercent != null ? (
+                      <>
+                        <span>{t("availableQuotaPct")}</span>
+                        <span
+                          className={`tabular-nums ${availableToneClassName}`}
                         >
-                          <span className="truncate">{s.plan_name}</span>
-                          <span className="tabular-nums shrink-0">
-                            {s.used != null && s.total != null
-                              ? `${formatNumber(s.used)} / ${formatNumber(s.total)} ${unit}`
-                              : s.remaining != null
-                                ? `${formatNumber(s.remaining)} ${unit}`
-                                : "--"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                          {formatPercent(availablePercent)}
+                        </span>
+                      </>
+                    ) : (
+                      <span />
+                    )}
+                    {updatedText && <span>{updatedText}</span>}
                   </div>
-                )}
-              </>
+                </>
+              ) : (
+                <div className="text-xs text-red-500 leading-snug">
+                  {result.message ?? t("errorUnknown")}
+                </div>
+              )
             ) : (
-              <div className="text-xs text-red-500 leading-snug">
-                {result.message ?? t("errorUnknown")}
-              </div>
-            )
-          ) : (
-            <div className="text-xs text-muted-foreground">{t("noData")}</div>
+              <div className="text-xs text-muted-foreground">{t("noData")}</div>
+            )}
+          </div>
+
+          {/* Per-kind sections — only render when the backend returned a
+              per-kind slice. Single-kind configs continue to show only one
+              section so the popover doesn't add empty noise. */}
+          {result?.balance && (
+            <BalanceKindSection
+              title={t("balanceSection")}
+              amount={result.balance}
+              unit={unit}
+              labels={{
+                remaining: t("balance"),
+                errorUnknown: t("errorUnknown"),
+              }}
+            />
           )}
+          {result?.subscription && (
+            <UsageKindSection
+              title={t("subscriptionSection")}
+              amount={result.subscription}
+              unit={unit}
+              labels={{
+                used: t("used"),
+                remaining: t("availableQuota"),
+                total: t("total"),
+                errorUnknown: t("errorUnknown"),
+              }}
+              subscriptionItemsTitle={t("subscriptionItems")}
+            />
+          )}
+
           <div className="pt-1">
             <button
               type="button"
@@ -318,5 +380,135 @@ export function StatusBarProviderUsage() {
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+interface BalanceKindSectionLabels {
+  remaining: string
+  errorUnknown: string
+}
+
+interface UsageKindSectionLabels extends BalanceKindSectionLabels {
+  used: string
+  total: string
+}
+
+interface BalanceKindSectionProps {
+  title: string
+  amount: ProviderUsageAmount
+  unit: string
+  labels: BalanceKindSectionLabels
+}
+
+interface UsageKindSectionProps {
+  title: string
+  amount: ProviderUsageAmount
+  unit: string
+  labels: UsageKindSectionLabels
+  subscriptionItemsTitle?: string
+}
+
+function BalanceKindSection({
+  title,
+  amount,
+  unit,
+  labels,
+}: BalanceKindSectionProps) {
+  const remaining = clampZero(amount.remaining ?? null)
+  const message = amount.message ?? null
+
+  return (
+    <div className="border-t border-border pt-2 space-y-1">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {title}
+      </div>
+      {amount.success ? (
+        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{labels.remaining}</span>
+          <span className="tabular-nums">
+            {remaining != null ? `${formatNumber(remaining)} ${unit}` : "--"}
+          </span>
+        </div>
+      ) : (
+        <div className="text-xs text-red-500 leading-snug">
+          {message ?? labels.errorUnknown}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function UsageKindSection({
+  title,
+  amount,
+  unit,
+  labels,
+  subscriptionItemsTitle,
+}: UsageKindSectionProps) {
+  const used = clampZero(amount.used ?? null)
+  const remaining = clampZero(amount.remaining ?? null)
+  const total = clampZero(amount.total ?? null)
+  const items: ProviderUsageSubscriptionItem[] = amount.subscriptions ?? []
+  const message = amount.message ?? null
+
+  return (
+    <div className="border-t border-border pt-2 space-y-1">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {title}
+      </div>
+      {amount.success ? (
+        <>
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{labels.used}</span>
+            <span className="tabular-nums">
+              {used != null ? `${formatNumber(used)} ${unit}` : "--"}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{labels.total}</span>
+            <span className="tabular-nums">
+              {total != null ? `${formatNumber(total)} ${unit}` : "--"}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{labels.remaining}</span>
+            <span className="tabular-nums">
+              {remaining != null ? `${formatNumber(remaining)} ${unit}` : "--"}
+            </span>
+          </div>
+          {subscriptionItemsTitle && items.length > 0 && (
+            <div className="pt-1 space-y-0.5">
+              <div className="text-[11px] font-medium text-muted-foreground">
+                {subscriptionItemsTitle}
+              </div>
+              {items.map((s, idx) => {
+                const itemUsed = clampZero(s.used ?? null)
+                const itemTotal = clampZero(s.total ?? null)
+                const itemRemaining = clampZero(s.remaining ?? null)
+                return (
+                  <div
+                    key={`${s.plan_name}-${idx}`}
+                    className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
+                  >
+                    <span className="truncate">{s.plan_name}</span>
+                    <span className="tabular-nums shrink-0">
+                      {itemUsed != null && itemTotal != null
+                        ? `${formatNumber(itemUsed)} / ${formatNumber(itemTotal)} ${unit}`
+                        : itemRemaining != null
+                          ? `${formatNumber(itemRemaining)} ${unit}`
+                          : "--"}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-xs text-red-500 leading-snug">
+          {message ?? labels.errorUnknown}
+        </div>
+      )}
+    </div>
   )
 }

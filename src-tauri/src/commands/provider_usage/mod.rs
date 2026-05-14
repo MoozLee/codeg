@@ -26,7 +26,7 @@ use crate::app_error::AppCommandError;
 use crate::db::service::provider_usage_config_service;
 use crate::db::AppDatabase;
 use crate::models::provider_usage::{
-    ProviderUsageConfigInfo, ProviderUsageResult, QueryKind,
+    encode_query_kinds, ProviderUsageConfigInfo, ProviderUsageResult, QueryKind,
 };
 use crate::web::event_bridge::EventEmitter;
 
@@ -61,10 +61,25 @@ fn validate_name(name: &str) -> Result<(), AppCommandError> {
     Ok(())
 }
 
-fn validate_query_kind(query_kind: &str) -> Result<QueryKind, AppCommandError> {
-    QueryKind::parse(query_kind).ok_or_else(|| {
-        AppCommandError::invalid_input(format!("Invalid query kind: {query_kind}"))
-    })
+/// Validate a list of query kinds. Empty lists and unknown values are rejected.
+/// Returns the parsed kinds (de-duplicated, preserving original order) so
+/// callers can iterate without re-parsing.
+fn validate_query_kinds(values: &[String]) -> Result<Vec<QueryKind>, AppCommandError> {
+    if values.is_empty() {
+        return Err(AppCommandError::invalid_input(
+            "At least one query kind is required",
+        ));
+    }
+    let mut kinds: Vec<QueryKind> = Vec::with_capacity(values.len());
+    for value in values {
+        let kind = QueryKind::parse(value).ok_or_else(|| {
+            AppCommandError::invalid_input(format!("Invalid query kind: {value}"))
+        })?;
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    Ok(kinds)
 }
 
 fn validate_user_id(user_id: &str) -> Result<(), AppCommandError> {
@@ -138,7 +153,7 @@ pub async fn create_provider_usage_config_core(
     emitter: &EventEmitter,
     cache: &Arc<UsageCache>,
     name: String,
-    query_kind: String,
+    query_kinds: Vec<String>,
     base_url: String,
     user_id: String,
     enabled: bool,
@@ -148,7 +163,7 @@ pub async fn create_provider_usage_config_core(
     sort_order: i32,
 ) -> Result<ProviderUsageConfigInfo, AppCommandError> {
     validate_name(&name)?;
-    let kind = validate_query_kind(&query_kind)?;
+    let kinds = validate_query_kinds(&query_kinds)?;
     url_safety::ensure_https_url(&base_url)?;
     validate_user_id(&user_id)?;
     validate_timeout_seconds(timeout_seconds)?;
@@ -160,10 +175,11 @@ pub async fn create_provider_usage_config_core(
             .map_err(AppCommandError::from)?;
     }
 
+    let kinds_str: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
     let model = provider_usage_config_service::create(
         &db.conn,
         name,
-        kind.as_str().to_string(),
+        encode_query_kinds(&kinds_str),
         base_url,
         user_id,
         enabled,
@@ -192,7 +208,7 @@ pub async fn update_provider_usage_config_core(
     cache: &Arc<UsageCache>,
     id: i32,
     name: Option<String>,
-    query_kind: Option<String>,
+    query_kinds: Option<Vec<String>>,
     base_url: Option<String>,
     user_id: Option<String>,
     enabled: Option<bool>,
@@ -204,8 +220,10 @@ pub async fn update_provider_usage_config_core(
     if let Some(v) = name.as_deref() {
         validate_name(v)?;
     }
-    let kind_string = if let Some(v) = query_kind.as_deref() {
-        Some(validate_query_kind(v)?.as_str().to_string())
+    let kinds_string = if let Some(v) = query_kinds.as_ref() {
+        let kinds = validate_query_kinds(v)?;
+        let kinds_str: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
+        Some(encode_query_kinds(&kinds_str))
     } else {
         None
     };
@@ -232,7 +250,7 @@ pub async fn update_provider_usage_config_core(
         &db.conn,
         id,
         name,
-        kind_string,
+        kinds_string,
         base_url,
         user_id,
         enabled,
@@ -345,7 +363,7 @@ pub async fn delete_provider_usage_token_core(
 #[serde(rename_all = "camelCase")]
 pub struct TestProviderUsageConfigInput {
     pub id: Option<i32>,
-    pub query_kind: String,
+    pub query_kinds: Vec<String>,
     pub base_url: String,
     pub user_id: String,
     pub timeout_seconds: i32,
@@ -360,7 +378,7 @@ pub async fn test_provider_usage_config_core(
 ) -> Result<ProviderUsageResult, AppCommandError> {
     validate_timeout_seconds(input.timeout_seconds)?;
 
-    let (kind, base_url, user_id, token, config_id) = if let Some(id) = input.id {
+    let (kinds, base_url, user_id, token, config_id) = if let Some(id) = input.id {
         let Some(model) = provider_usage_config_service::get_by_id(&db.conn, id)
             .await
             .map_err(AppCommandError::from)?
@@ -371,12 +389,12 @@ pub async fn test_provider_usage_config_core(
         };
 
         // Draft overrides win when the UI has unsaved edits it wants to try.
-        let kind_str = if input.query_kind.is_empty() {
-            model.query_kind.clone()
+        let kinds_input: Vec<String> = if input.query_kinds.is_empty() {
+            crate::models::provider_usage::decode_query_kinds(&model.query_kinds)
         } else {
-            input.query_kind.clone()
+            input.query_kinds.clone()
         };
-        let kind = validate_query_kind(&kind_str)?;
+        let kinds = validate_query_kinds(&kinds_input)?;
 
         let base_url = if input.base_url.is_empty() {
             model.base_url.clone()
@@ -400,35 +418,31 @@ pub async fn test_provider_usage_config_core(
             _ => crate::keyring_store::get_provider_usage_token(id).unwrap_or_default(),
         };
 
-        (kind, base_url, user_id, token, id)
+        (kinds, base_url, user_id, token, id)
     } else {
-        let kind = validate_query_kind(&input.query_kind)?;
+        let kinds = validate_query_kinds(&input.query_kinds)?;
         url_safety::ensure_https_url(&input.base_url)?;
         validate_user_id(&input.user_id)?;
         let token = input.token.clone().ok_or_else(|| {
             AppCommandError::invalid_input("Token is required for draft test")
         })?;
         validate_token(&token)?;
-        (kind, input.base_url, input.user_id, token, 0)
+        (kinds, input.base_url, input.user_id, token, 0)
     };
 
     if token.is_empty() {
         return Err(AppCommandError::invalid_input("Access token missing"));
     }
 
-    let cfg = newapi::ExecConfig {
+    let result = newapi::execute_kinds(
         config_id,
-        query_kind: kind,
-        base_url,
-        user_id,
-        token,
-        timeout_seconds: input.timeout_seconds.max(1) as u64,
-    };
-
-    let result = match kind {
-        QueryKind::NewapiBalance => newapi::query_newapi_balance(&cfg).await,
-        QueryKind::NewapiSubscription => newapi::query_newapi_subscription(&cfg).await,
-    };
+        &kinds,
+        &base_url,
+        &user_id,
+        &token,
+        input.timeout_seconds.max(1) as u64,
+    )
+    .await;
 
     Ok(result)
 }
@@ -510,7 +524,7 @@ pub async fn create_provider_usage_config(
     cache: tauri::State<'_, Arc<UsageCache>>,
     app: tauri::AppHandle,
     name: String,
-    query_kind: String,
+    query_kinds: Vec<String>,
     base_url: String,
     user_id: String,
     enabled: bool,
@@ -525,7 +539,7 @@ pub async fn create_provider_usage_config(
         &emitter,
         cache.inner(),
         name,
-        query_kind,
+        query_kinds,
         base_url,
         user_id,
         enabled,
@@ -546,7 +560,7 @@ pub async fn update_provider_usage_config(
     app: tauri::AppHandle,
     id: i32,
     name: Option<String>,
-    query_kind: Option<String>,
+    query_kinds: Option<Vec<String>>,
     base_url: Option<String>,
     user_id: Option<String>,
     enabled: Option<bool>,
@@ -562,7 +576,7 @@ pub async fn update_provider_usage_config(
         cache.inner(),
         id,
         name,
-        query_kind,
+        query_kinds,
         base_url,
         user_id,
         enabled,

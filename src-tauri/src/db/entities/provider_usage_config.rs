@@ -6,7 +6,8 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub name: String,
-    pub query_kind: String,
+    /// JSON-encoded array of snake_case query kinds.
+    pub query_kinds: String,
     #[sea_orm(column_type = "Text")]
     pub base_url: String,
     pub user_id: String,

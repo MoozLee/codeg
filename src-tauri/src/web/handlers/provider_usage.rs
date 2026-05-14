@@ -16,7 +16,7 @@ use crate::models::provider_usage::{ProviderUsageConfigInfo, ProviderUsageResult
 #[serde(rename_all = "camelCase")]
 pub struct CreateProviderUsageConfigParams {
     pub name: String,
-    pub query_kind: String,
+    pub query_kinds: Vec<String>,
     pub base_url: String,
     pub user_id: String,
     pub enabled: bool,
@@ -31,7 +31,7 @@ pub struct CreateProviderUsageConfigParams {
 pub struct UpdateProviderUsageConfigParams {
     pub id: i32,
     pub name: Option<String>,
-    pub query_kind: Option<String>,
+    pub query_kinds: Option<Vec<String>>,
     pub base_url: Option<String>,
     pub user_id: Option<String>,
     pub enabled: Option<bool>,
@@ -88,7 +88,7 @@ pub async fn create_provider_usage_config(
         &state.emitter,
         &state.provider_usage_cache,
         params.name,
-        params.query_kind,
+        params.query_kinds,
         params.base_url,
         params.user_id,
         params.enabled,
@@ -111,7 +111,7 @@ pub async fn update_provider_usage_config(
         &state.provider_usage_cache,
         params.id,
         params.name,
-        params.query_kind,
+        params.query_kinds,
         params.base_url,
         params.user_id,
         params.enabled,

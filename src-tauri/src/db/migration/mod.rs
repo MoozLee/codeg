@@ -17,6 +17,7 @@ mod m20260424_000002_quick_message;
 mod m20260510_000001_folder_is_pinned;
 mod m20260511_000001_paired_devices;
 mod m20260513_000001_provider_usage_config;
+mod m20260513_000002_provider_usage_config_query_kinds;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -40,12 +41,14 @@ impl MigratorTrait for Migrator {
             Box::new(m20260510_000001_folder_is_pinned::Migration),
             Box::new(m20260511_000001_paired_devices::Migration),
             Box::new(m20260513_000001_provider_usage_config::Migration),
+            Box::new(m20260513_000002_provider_usage_config_query_kinds::Migration),
         ]
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
     use sea_orm_migration::MigratorTrait;
 
     use super::Migrator;
@@ -62,6 +65,112 @@ mod tests {
                 .iter()
                 .any(|name| name == "m20260511_000001_paired_devices"),
             "release builds must keep historical migration names from archived builds"
+        );
+    }
+
+    #[test]
+    fn includes_provider_usage_config_query_kinds_migration() {
+        let names: Vec<String> = Migrator::migrations()
+            .iter()
+            .map(|migration| migration.name().to_string())
+            .collect();
+
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "m20260513_000002_provider_usage_config_query_kinds"),
+            "query_kinds rename migration must be registered after the \
+             original provider_usage_config migration"
+        );
+    }
+
+    #[tokio::test]
+    async fn migrations_produce_query_kinds_column() {
+        let conn = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("open in-memory sqlite");
+        Migrator::up(&conn, None)
+            .await
+            .expect("run all migrations");
+
+        let stmt = Statement::from_string(
+            DbBackend::Sqlite,
+            "PRAGMA table_info(provider_usage_config)".to_owned(),
+        );
+        let rows = conn
+            .query_all(stmt)
+            .await
+            .expect("inspect provider_usage_config columns");
+
+        let columns: Vec<String> = rows
+            .iter()
+            .map(|row| row.try_get::<String>("", "name").expect("column name"))
+            .collect();
+
+        assert!(
+            columns.iter().any(|c| c == "query_kinds"),
+            "expected `query_kinds` column, got: {columns:?}"
+        );
+        assert!(
+            columns.iter().all(|c| c != "query_kind"),
+            "legacy `query_kind` column must be renamed, got: {columns:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_002_converts_legacy_single_value_to_json_array() {
+        use crate::db::migration::m20260513_000001_provider_usage_config;
+
+        let conn = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("open in-memory sqlite");
+
+        // Simulate a dev DB that only ran the original single-kind migration.
+        let schema_manager = sea_orm_migration::SchemaManager::new(&conn);
+        sea_orm_migration::MigrationTrait::up(
+            &m20260513_000001_provider_usage_config::Migration,
+            &schema_manager,
+        )
+        .await
+        .expect("run original provider_usage_config migration");
+
+        conn.execute(Statement::from_string(
+            DbBackend::Sqlite,
+            "INSERT INTO provider_usage_config (\
+                name, query_kind, base_url, user_id, enabled, show_in_status_bar, \
+                refresh_interval_minutes, timeout_seconds, sort_order, created_at, updated_at\
+             ) VALUES (\
+                'dev', 'newapi_balance', 'https://example.com', 'u', 1, 0, \
+                5, 10, 0, '2026-05-13 00:00:00+00:00', '2026-05-13 00:00:00+00:00'\
+             )"
+            .to_owned(),
+        ))
+        .await
+        .expect("seed legacy row");
+
+        // Apply the new 002 migration manually on top of 001.
+        use crate::db::migration::m20260513_000002_provider_usage_config_query_kinds;
+        sea_orm_migration::MigrationTrait::up(
+            &m20260513_000002_provider_usage_config_query_kinds::Migration,
+            &schema_manager,
+        )
+        .await
+        .expect("run query_kinds rename migration");
+
+        let row = conn
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT query_kinds FROM provider_usage_config WHERE name = 'dev'".to_owned(),
+            ))
+            .await
+            .expect("select migrated row")
+            .expect("row must exist");
+        let kinds: String = row
+            .try_get::<String>("", "query_kinds")
+            .expect("query_kinds value");
+        assert_eq!(
+            kinds, "[\"newapi_balance\"]",
+            "legacy single value must become a JSON array"
         );
     }
 }

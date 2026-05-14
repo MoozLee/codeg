@@ -16,13 +16,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   createProviderUsageConfig,
   saveProviderUsageToken,
   testProviderUsageConfig,
@@ -58,7 +51,8 @@ export function AddProviderUsageQueryDialog({
   const [testResult, setTestResult] = useState<ProviderUsageResult | null>(null)
 
   const [name, setName] = useState("")
-  const [queryKind, setQueryKind] = useState<QueryKind>("newapi_balance")
+  const [balanceChecked, setBalanceChecked] = useState(true)
+  const [subscriptionChecked, setSubscriptionChecked] = useState(false)
   const [baseUrl, setBaseUrl] = useState("")
   const [userId, setUserId] = useState("")
   const [token, setToken] = useState("")
@@ -69,7 +63,8 @@ export function AddProviderUsageQueryDialog({
 
   const resetForm = useCallback(() => {
     setName("")
-    setQueryKind("newapi_balance")
+    setBalanceChecked(true)
+    setSubscriptionChecked(false)
     setBaseUrl("")
     setUserId("")
     setToken("")
@@ -89,6 +84,13 @@ export function AddProviderUsageQueryDialog({
     [onOpenChange, resetForm]
   )
 
+  const collectQueryKinds = useCallback((): QueryKind[] => {
+    const kinds: QueryKind[] = []
+    if (balanceChecked) kinds.push("newapi_balance")
+    if (subscriptionChecked) kinds.push("newapi_subscription")
+    return kinds
+  }, [balanceChecked, subscriptionChecked])
+
   const validate = useCallback((): string | null => {
     if (!name.trim()) return t("nameRequired")
     const urlErr = validateBaseUrl(baseUrl)
@@ -98,9 +100,18 @@ export function AddProviderUsageQueryDialog({
     if (!token.trim()) return t("tokenRequired")
     if (timeout < 2 || timeout > 30) return t("timeoutRange")
     if (refreshInterval < 0) return t("refreshIntervalRange")
-    if (!queryKind) return t("queryKindRequired")
+    if (collectQueryKinds().length === 0) return t("queryKindsRequired")
     return null
-  }, [name, baseUrl, userId, token, timeout, refreshInterval, queryKind, t])
+  }, [
+    name,
+    baseUrl,
+    userId,
+    token,
+    timeout,
+    refreshInterval,
+    collectQueryKinds,
+    t,
+  ])
 
   const handleTest = useCallback(async () => {
     const validationError = validate()
@@ -113,7 +124,7 @@ export function AddProviderUsageQueryDialog({
     setTestResult(null)
     try {
       const result = await testProviderUsageConfig({
-        queryKind,
+        queryKinds: collectQueryKinds(),
         baseUrl: baseUrl.trim(),
         userId: userId.trim(),
         timeoutSeconds: timeout,
@@ -126,11 +137,13 @@ export function AddProviderUsageQueryDialog({
         toast.error(result.message ?? t("testFailed"))
       }
     } catch (err) {
-      setError(toErrorMessage(err))
+      const message = toErrorMessage(err)
+      setError(message)
+      toast.error(message)
     } finally {
       setTesting(false)
     }
-  }, [validate, queryKind, baseUrl, userId, timeout, token, t])
+  }, [validate, collectQueryKinds, baseUrl, userId, timeout, token, t])
 
   const handleSubmit = useCallback(async () => {
     const validationError = validate()
@@ -144,7 +157,7 @@ export function AddProviderUsageQueryDialog({
     try {
       const created = await createProviderUsageConfig({
         name: name.trim(),
-        queryKind,
+        queryKinds: collectQueryKinds(),
         baseUrl: baseUrl.trim(),
         userId: userId.trim(),
         enabled,
@@ -153,19 +166,29 @@ export function AddProviderUsageQueryDialog({
         timeoutSeconds: timeout,
         sortOrder: 0,
       })
-      await saveProviderUsageToken(created.id, token.trim())
+      try {
+        await saveProviderUsageToken(created.id, token.trim())
+      } catch (tokenErr) {
+        const message = toErrorMessage(tokenErr)
+        setError(message)
+        toast.error(message)
+        onConfigAdded()
+        return
+      }
       toast.success(t("createSuccess"))
       handleOpenChange(false)
       onConfigAdded()
     } catch (err) {
-      setError(toErrorMessage(err))
+      const message = toErrorMessage(err)
+      setError(message)
+      toast.error(message)
     } finally {
       setLoading(false)
     }
   }, [
     validate,
     name,
-    queryKind,
+    collectQueryKinds,
     baseUrl,
     userId,
     enabled,
@@ -178,11 +201,13 @@ export function AddProviderUsageQueryDialog({
     t,
   ])
 
+  const canSubmit = collectQueryKinds().length > 0
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t("addConfig")}</DialogTitle>
+          <DialogTitle>{t("addDialogTitle")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
@@ -200,22 +225,26 @@ export function AddProviderUsageQueryDialog({
 
           <div className="space-y-1.5">
             <label className="text-xs font-medium">{t("queryKind")}</label>
-            <Select
-              value={queryKind}
-              onValueChange={(v) => setQueryKind(v as QueryKind)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="newapi_balance">
-                  {t("queryKindBalance")}
-                </SelectItem>
-                <SelectItem value="newapi_subscription">
-                  {t("queryKindSubscription")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex flex-col gap-1">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5"
+                  checked={balanceChecked}
+                  onChange={(e) => setBalanceChecked(e.target.checked)}
+                />
+                <span>{t("queryKindBalance")}</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5"
+                  checked={subscriptionChecked}
+                  onChange={(e) => setSubscriptionChecked(e.target.checked)}
+                />
+                <span>{t("queryKindSubscription")}</span>
+              </label>
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -345,7 +374,7 @@ export function AddProviderUsageQueryDialog({
           <Button
             variant="outline"
             onClick={handleTest}
-            disabled={testing || loading}
+            disabled={testing || loading || !canSubmit}
           >
             {testing && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
             {t("test")}
@@ -357,7 +386,7 @@ export function AddProviderUsageQueryDialog({
           >
             {t("cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={loading}>
+          <Button onClick={handleSubmit} disabled={loading || !canSubmit}>
             {loading && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
             {t("create")}
           </Button>

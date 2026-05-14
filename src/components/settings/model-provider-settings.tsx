@@ -7,7 +7,6 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -35,7 +34,13 @@ import {
 import { AddModelProviderDialog } from "./add-model-provider-dialog"
 import { EditModelProviderDialog } from "./edit-model-provider-dialog"
 
-export function ModelProviderSettings() {
+/**
+ * Model provider management list. Rendered as an inline section inside
+ * `/settings/model-providers` so the parent page owns the outer ScrollArea
+ * and section heading — this component focuses on the list, dialogs, and
+ * delete flow.
+ */
+export function ModelProviderList() {
   const t = useTranslations("ModelProviderSettings")
   const [providers, setProviders] = useState<ModelProviderInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -92,104 +97,93 @@ export function ModelProviderSettings() {
   }, [deleteTarget, loadProviders, t])
 
   return (
-    <ScrollArea className="h-full">
-      <section className="space-y-3 px-3 pt-3 md:px-4 md:pt-4">
-        <div>
-          <h1 className="text-sm font-semibold">{t("sectionTitle")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t("sectionDescription")}
-          </p>
-        </div>
-      </section>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <Select
+          value={filter ?? "__all__"}
+          onValueChange={(v) =>
+            setFilter(v === "__all__" ? null : (v as AgentType))
+          }
+        >
+          <SelectTrigger className="h-8 w-40 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">{t("filterAll")}</SelectItem>
+            {MODEL_PROVIDER_AGENT_TYPES.map((at) => (
+              <SelectItem key={at} value={at}>
+                {AGENT_LABELS[at]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => setAddDialogOpen(true)}
+        >
+          <Plus className="h-3.5 w-3.5 mr-1" />
+          {t("addProvider")}
+        </Button>
+      </div>
 
-      <section className="mt-4 space-y-2 px-3 pb-3 md:px-4 md:pb-4">
-        <div className="flex items-center justify-between gap-2">
-          <Select
-            value={filter ?? "__all__"}
-            onValueChange={(v) =>
-              setFilter(v === "__all__" ? null : (v as AgentType))
-            }
-          >
-            <SelectTrigger className="h-8 w-40 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">{t("filterAll")}</SelectItem>
-              {MODEL_PROVIDER_AGENT_TYPES.map((at) => (
-                <SelectItem key={at} value={at}>
-                  {AGENT_LABELS[at]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => setAddDialogOpen(true)}
-          >
-            <Plus className="h-3.5 w-3.5 mr-1" />
-            {t("addProvider")}
-          </Button>
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : filteredProviders.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-            <Server className="h-8 w-8 mb-2 opacity-40" />
-            <span className="text-xs">{t("noProviders")}</span>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredProviders.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-              >
-                <div className="min-w-0 flex-1 flex items-center gap-3">
-                  <div className="min-w-0 space-y-0.5">
-                    <div className="text-sm font-medium truncate">{p.name}</div>
-                    <div className="truncate text-xs text-muted-foreground font-mono">
-                      {p.api_url}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    {p.agent_types.map((at) => (
-                      <Badge
-                        key={at}
-                        variant="secondary"
-                        className="text-[10px] px-1.5 py-0"
-                      >
-                        {AGENT_LABELS[at as AgentType] ?? at}
-                      </Badge>
-                    ))}
+      ) : filteredProviders.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+          <Server className="h-8 w-8 mb-2 opacity-40" />
+          <span className="text-xs">{t("noProviders")}</span>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filteredProviders.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+            >
+              <div className="min-w-0 flex-1 flex items-center gap-3">
+                <div className="min-w-0 space-y-0.5">
+                  <div className="text-sm font-medium truncate">{p.name}</div>
+                  <div className="truncate text-xs text-muted-foreground font-mono">
+                    {p.api_url}
                   </div>
                 </div>
                 <div className="flex shrink-0 gap-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    onClick={() => setEditTarget(p)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => setDeleteTarget(p)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {p.agent_types.map((at) => (
+                    <Badge
+                      key={at}
+                      variant="secondary"
+                      className="text-[10px] px-1.5 py-0"
+                    >
+                      {AGENT_LABELS[at as AgentType] ?? at}
+                    </Badge>
+                  ))}
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+              <div className="flex shrink-0 gap-1">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  onClick={() => setEditTarget(p)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 text-destructive"
+                  onClick={() => setDeleteTarget(p)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <AddModelProviderDialog
         open={addDialogOpen}
@@ -226,6 +220,6 @@ export function ModelProviderSettings() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </ScrollArea>
+    </div>
   )
 }

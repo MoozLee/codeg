@@ -25,7 +25,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(ProviderUsageConfig::QueryKind)
-                            .string()
+                            .text()
                             .not_null(),
                     )
                     .col(

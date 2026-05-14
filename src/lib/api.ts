@@ -2022,7 +2022,7 @@ export async function listProviderUsageConfigs(): Promise<
 
 export async function createProviderUsageConfig(params: {
   name: string
-  queryKind: string
+  queryKinds: string[]
   baseUrl: string
   userId: string
   enabled: boolean
@@ -2037,7 +2037,7 @@ export async function createProviderUsageConfig(params: {
 export async function updateProviderUsageConfig(params: {
   id: number
   name?: string | null
-  queryKind?: string | null
+  queryKinds?: string[] | null
   baseUrl?: string | null
   userId?: string | null
   enabled?: boolean | null
@@ -2049,7 +2049,7 @@ export async function updateProviderUsageConfig(params: {
   return getTransport().call("update_provider_usage_config", {
     id: params.id,
     name: params.name ?? null,
-    queryKind: params.queryKind ?? null,
+    queryKinds: params.queryKinds ?? null,
     baseUrl: params.baseUrl ?? null,
     userId: params.userId ?? null,
     enabled: params.enabled ?? null,
@@ -2083,7 +2083,7 @@ export async function deleteProviderUsageToken(id: number): Promise<void> {
 
 export async function testProviderUsageConfig(params: {
   id?: number | null
-  queryKind: string
+  queryKinds: string[]
   baseUrl: string
   userId: string
   timeoutSeconds: number
@@ -2092,7 +2092,7 @@ export async function testProviderUsageConfig(params: {
   return getTransport().call("test_provider_usage_config", {
     input: {
       id: params.id ?? null,
-      queryKind: params.queryKind,
+      queryKinds: params.queryKinds,
       baseUrl: params.baseUrl,
       userId: params.userId,
       timeoutSeconds: params.timeoutSeconds,
