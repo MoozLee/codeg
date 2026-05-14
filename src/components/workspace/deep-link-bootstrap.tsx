@@ -219,7 +219,7 @@ export function DeepLinkBootstrap() {
         const conversationId = event.payload?.conversationId
         const ownerLabel = event.payload?.ownerLabel
         if (typeof conversationId !== "number") return
-        if (ownerLabel && ownerLabel !== currentWindowLabel) return
+        if (ownerLabel !== currentWindowLabel) return
 
         try {
           const detail = await getFolderConversation(conversationId)

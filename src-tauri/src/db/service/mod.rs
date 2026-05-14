@@ -9,5 +9,6 @@ pub mod import_service;
 pub mod model_provider_service;
 pub mod provider_usage_config_service;
 pub mod quick_message_service;
+pub mod remote_workspace_connection_service;
 pub mod sender_context_service;
 pub mod tab_service;

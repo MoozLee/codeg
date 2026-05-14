@@ -1,5 +1,8 @@
-import { detectEnvironment } from "./transport/detect"
-import { getTransport } from "./transport"
+import {
+  getActiveRemoteConnectionId,
+  getTransport,
+  isDesktop as isTransportDesktop,
+} from "./transport"
 import type { UnsubscribeFn } from "./transport"
 
 /**
@@ -8,7 +11,7 @@ import type { UnsubscribeFn } from "./transport"
  */
 
 export function isDesktop(): boolean {
-  return detectEnvironment() === "tauri"
+  return isTransportDesktop()
 }
 
 /**
@@ -26,7 +29,7 @@ export async function subscribe<T>(
  * Open a URL in the default browser (desktop) or new tab (web).
  */
 export async function openUrl(url: string): Promise<void> {
-  if (isDesktop()) {
+  if (isTransportDesktop() && getActiveRemoteConnectionId() === null) {
     const { openUrl: tauriOpenUrl } = await import("@tauri-apps/plugin-opener")
     await tauriOpenUrl(url)
   } else {
@@ -39,7 +42,7 @@ export async function openUrl(url: string): Promise<void> {
  * No-op in web mode.
  */
 export async function openPath(path: string): Promise<void> {
-  if (isDesktop()) {
+  if (isTransportDesktop() && getActiveRemoteConnectionId() === null) {
     const { openPath: tauriOpenPath } =
       await import("@tauri-apps/plugin-opener")
     await tauriOpenPath(path)
@@ -51,7 +54,7 @@ export async function openPath(path: string): Promise<void> {
  * No-op in web mode.
  */
 export async function revealItemInDir(path: string): Promise<void> {
-  if (isDesktop()) {
+  if (isTransportDesktop() && getActiveRemoteConnectionId() === null) {
     const { revealItemInDir: tauriReveal } =
       await import("@tauri-apps/plugin-opener")
     await tauriReveal(path)
@@ -67,7 +70,7 @@ export async function openFileDialog(options?: {
   title?: string
   defaultPath?: string
 }): Promise<string | string[] | null> {
-  if (isDesktop()) {
+  if (isTransportDesktop() && getActiveRemoteConnectionId() === null) {
     const { open } = await import("@tauri-apps/plugin-dialog")
     return open(options ?? {})
   }
@@ -100,7 +103,7 @@ export async function openFileDialog(options?: {
  * Returns null in web mode.
  */
 export async function getCurrentWindow() {
-  if (isDesktop()) {
+  if (isTransportDesktop()) {
     const { getCurrentWindow: tauriGetCurrentWindow } =
       await import("@tauri-apps/api/window")
     return tauriGetCurrentWindow()
@@ -113,7 +116,7 @@ export async function getCurrentWindow() {
  * Desktop: closes Tauri window. Web: navigates back or closes tab.
  */
 export async function closeCurrentWindow(): Promise<void> {
-  if (isDesktop()) {
+  if (isTransportDesktop()) {
     const win = await getCurrentWindow()
     await win?.close()
   } else {

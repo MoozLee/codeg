@@ -17,6 +17,7 @@ mod m20260424_000002_quick_message;
 mod m20260510_000001_folder_is_pinned;
 mod m20260511_000001_paired_devices;
 mod m20260513_000001_provider_usage_config;
+mod m20260513_000001_remote_workspace_connection;
 mod m20260513_000002_provider_usage_config_query_kinds;
 pub struct Migrator;
 
@@ -41,6 +42,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260510_000001_folder_is_pinned::Migration),
             Box::new(m20260511_000001_paired_devices::Migration),
             Box::new(m20260513_000001_provider_usage_config::Migration),
+            Box::new(m20260513_000001_remote_workspace_connection::Migration),
             Box::new(m20260513_000002_provider_usage_config_query_kinds::Migration),
         ]
     }

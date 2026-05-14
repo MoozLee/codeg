@@ -834,7 +834,7 @@ pub fn build_router(
 
     let api = public_api.merge(api);
 
-    // WebSocket route (auth via query param)
+    // WebSocket route (auth via Sec-WebSocket-Protocol)
     let ws_route = Router::new()
         .route("/ws/events", get(ws::ws_handler))
         .layer(middleware::from_fn(move |req, next| {

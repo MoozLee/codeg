@@ -7,6 +7,7 @@ pub mod model_provider;
 pub mod pet;
 pub mod provider_usage;
 pub mod quick_message;
+pub mod remote_workspace_connection;
 pub mod system;
 
 pub use agent::AgentType;
@@ -23,6 +24,7 @@ pub use message::{
     TurnRole, TurnUsage, UnifiedMessage,
 };
 pub use quick_message::QuickMessageInfo;
+pub use remote_workspace_connection::RemoteWorkspaceConnectionInfo;
 pub use system::{
     AvailableTerminalShells, GitCredentials, GitDetectResult, GitHubAccountsSettings,
     GitHubTokenValidation, GitSettings, SystemFontFamily, SystemFontFamilyList,

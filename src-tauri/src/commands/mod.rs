@@ -14,6 +14,8 @@ pub mod pet;
 pub mod project_boot;
 pub mod provider_usage;
 pub mod quick_messages;
+#[cfg(feature = "tauri-runtime")]
+pub mod remote_workspace;
 pub mod system_settings;
 pub mod terminal;
 pub mod version_control;
