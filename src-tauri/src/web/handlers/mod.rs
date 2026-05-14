@@ -11,6 +11,7 @@ pub mod mcp;
 pub mod model_provider;
 pub mod pet;
 pub mod project_boot;
+pub mod provider_usage;
 pub mod quick_messages;
 pub mod system_settings;
 pub mod terminal;

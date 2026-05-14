@@ -10,4 +10,5 @@ pub use super::folder::Entity as Folder;
 pub use super::folder_command::Entity as FolderCommand;
 pub use super::model_provider::Entity as ModelProvider;
 pub use super::opened_tab::Entity as OpenedTab;
+pub use super::provider_usage_config::Entity as ProviderUsageConfig;
 pub use super::quick_message::Entity as QuickMessage;

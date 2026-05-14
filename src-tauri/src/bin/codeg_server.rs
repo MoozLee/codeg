@@ -101,6 +101,7 @@ async fn async_main() {
 
     // Build AppState
     let pet_state_handle = codeg_lib::pet_state_mapper::new_pet_state_handle();
+    let provider_usage_cache = codeg_lib::app_state::default_provider_usage_cache();
     let state = Arc::new(AppState {
         db,
         connection_manager: codeg_lib::app_state::default_connection_manager(),
@@ -111,6 +112,7 @@ async fn async_main() {
         web_server_state: WebServerState::new(),
         chat_channel_manager: codeg_lib::app_state::default_chat_channel_manager(),
         pet_state: pet_state_handle.clone(),
+        provider_usage_cache: provider_usage_cache.clone(),
     });
 
     // Install bundled expert skills into the central store
@@ -172,6 +174,15 @@ async fn async_main() {
             std::time::Duration::from_secs(codeg_lib::SWEEP_INTERVAL_SECS),
         ));
     }
+
+    // Kick off initial provider-usage refresh + arm periodic tasks for any
+    // config marked `enabled`. Runs detached so a slow upstream can't block
+    // the HTTP server from starting.
+    tokio::spawn(codeg_lib::commands::provider_usage::initial_refresh_sweep(
+        state.db.conn.clone(),
+        state.emitter.clone(),
+        provider_usage_cache.clone(),
+    ));
 
     // Build router
     let shutdown_signal = state.web_server_state.shutdown_signal();

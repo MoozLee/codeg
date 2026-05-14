@@ -1311,3 +1311,71 @@ export interface ModelProviderInfo {
   created_at: string
   updated_at: string
 }
+
+// ─── Provider Usage Query ───
+
+export type QueryKind = "newapi_balance" | "newapi_subscription"
+
+export interface ProviderUsageConfigInfo {
+  id: number
+  name: string
+  query_kinds: QueryKind[] | string[]
+  base_url: string
+  user_id: string
+  enabled: boolean
+  show_in_status_bar: boolean
+  refresh_interval_minutes: number
+  timeout_seconds: number
+  sort_order: number
+  has_token: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProviderUsageSubscriptionItem {
+  plan_name: string
+  used?: number | null
+  remaining?: number | null
+  total?: number | null
+  expires_at?: string | null
+}
+
+/**
+ * Per-kind slice of an aggregated `ProviderUsageResult`. When a config
+ * enables multiple query kinds, each kind's outcome is preserved here so
+ * tooltips can show per-kind detail even while the top-level fields expose
+ * the summed values.
+ */
+export interface ProviderUsageAmount {
+  success: boolean
+  query_kind: QueryKind | string
+  plan_name?: string | null
+  used?: number | null
+  remaining?: number | null
+  total?: number | null
+  unit: string
+  subscriptions?: ProviderUsageSubscriptionItem[] | null
+  expires_at?: string | null
+  message?: string | null
+}
+
+export interface ProviderUsageResult {
+  config_id: number
+  /**
+   * Comma-delimited list of the kinds that contributed to this result (e.g.
+   * `"newapi_balance"`, `"newapi_subscription"`, or both joined with `","`).
+   */
+  query_kind: string
+  success: boolean
+  plan_name?: string | null
+  used?: number | null
+  remaining?: number | null
+  total?: number | null
+  unit: string
+  subscriptions?: ProviderUsageSubscriptionItem[] | null
+  updated_at: string
+  expires_at?: string | null
+  message?: string | null
+  balance?: ProviderUsageAmount | null
+  subscription?: ProviderUsageAmount | null
+}
