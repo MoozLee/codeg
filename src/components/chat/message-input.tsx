@@ -144,13 +144,10 @@ interface ImageInputAttachment {
   mimeType: string
 }
 
-interface RecentTextPaste {
-  pastedText: string | null
-  beforeText: string
+interface TextInsertionDelta {
+  insertedText: string
   selectionStart: number
   selectionEnd: number
-  timestamp: number
-  collapsedPlaceholder?: string
 }
 
 type InputAttachment = ResourceInputAttachment | ImageInputAttachment
@@ -290,7 +287,6 @@ const TEXT_LIKE_MIME_PREFIXES = [
 const DRAG_DROP_IMAGE_MAX_BYTES = 20_000_000
 const PASTED_TEXT_COLLAPSE_LENGTH_THRESHOLD = 800
 const PASTED_TEXT_COLLAPSE_NEWLINE_THRESHOLD = 2
-const PASTED_TEXT_FALLBACK_WINDOW_MS = 1500
 const PASTED_TEXT_PLACEHOLDER_PATTERN =
   /\[Pasted text #(\d+)(?: \+\d+ lines)?\]/g
 
@@ -366,67 +362,46 @@ function normalizeSelectionRange(
   return { start: normalizedStart, end: normalizedEnd }
 }
 
-function isPasteInputType(inputType: string | null | undefined): boolean {
-  return (
-    inputType === "insertFromPaste" ||
-    inputType === "insertFromPasteAsQuotation"
-  )
-}
-
-function isRecentPasteFallbackActive(paste: RecentTextPaste): boolean {
-  return Date.now() - paste.timestamp <= PASTED_TEXT_FALLBACK_WINDOW_MS
-}
-
-function isTextWithPasteInserted(
+function inferInsertedTextDelta(
+  previousText: string,
   value: string,
-  paste: RecentTextPaste
-): boolean {
-  const { start, end } = normalizeSelectionRange(
-    paste.selectionStart,
-    paste.selectionEnd,
-    paste.beforeText.length
-  )
-  const expected = insertTextAtRange(
-    paste.beforeText,
-    paste.pastedText ?? "",
-    start,
-    end
-  )
-  return value === expected
-}
+  cursorPos: number
+): TextInsertionDelta | null {
+  const boundedCursor = Math.max(0, Math.min(cursorPos, value.length))
+  let prefixLength = 0
+  const maxPrefixLength = Math.min(previousText.length, boundedCursor)
+  while (
+    prefixLength < maxPrefixLength &&
+    previousText[prefixLength] === value[prefixLength]
+  ) {
+    prefixLength += 1
+  }
 
-function isTextWithUnknownPasteInserted(
-  value: string,
-  paste: RecentTextPaste
-): boolean {
-  const { start, end } = normalizeSelectionRange(
-    paste.selectionStart,
-    paste.selectionEnd,
-    paste.beforeText.length
+  let suffixLength = 0
+  const maxSuffixLength = Math.min(
+    previousText.length - prefixLength,
+    value.length - boundedCursor
   )
-  return (
-    value.length > paste.beforeText.length - (end - start) &&
-    value.startsWith(paste.beforeText.slice(0, start)) &&
-    value.endsWith(paste.beforeText.slice(end))
-  )
-}
+  while (
+    suffixLength < maxSuffixLength &&
+    previousText[previousText.length - 1 - suffixLength] ===
+      value[value.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1
+  }
 
-function extractUnknownInsertedPaste(
-  value: string,
-  paste: RecentTextPaste
-): string {
-  const { start, end } = normalizeSelectionRange(
-    paste.selectionStart,
-    paste.selectionEnd,
-    paste.beforeText.length
-  )
-  const suffixLength = paste.beforeText.length - end
-  return value.slice(
-    start,
-    suffixLength === 0
-      ? value.length
-      : Math.max(start, value.length - suffixLength)
-  )
+  const insertedEnd = value.length - suffixLength
+  if (insertedEnd <= prefixLength) return null
+
+  const replacedEnd = previousText.length - suffixLength
+  const insertedText = value.slice(prefixLength, insertedEnd)
+  if (insertedText.length === 0) return null
+
+  return {
+    insertedText,
+    selectionStart: prefixLength,
+    selectionEnd: replacedEnd,
+  }
 }
 
 function isTextLikeFile(file: File): boolean {
@@ -605,8 +580,6 @@ export function MessageInput({
   const cursorPosRef = useRef<number | null>(null)
   const textRef = useRef(text)
   const pastedTextsRef = useRef(pastedTexts)
-  const recentTextPasteRef = useRef<RecentTextPaste | null>(null)
-  const suppressedPasteValueRef = useRef<string | null>(null)
   const disabledRef = useRef(disabled)
   const isPromptingRef = useRef(isPrompting)
 
@@ -639,32 +612,6 @@ export function MessageInput({
     pastedTextsRef.current = next
     setPastedTexts(next)
   }, [])
-
-  const rememberPasteMutation = useCallback(
-    (
-      textarea: HTMLTextAreaElement,
-      pastedText: string | null
-    ): RecentTextPaste => {
-      const current = textRef.current
-      const rawStart = textarea.selectionStart ?? current.length
-      const rawEnd = textarea.selectionEnd ?? rawStart
-      const { start, end } = normalizeSelectionRange(
-        rawStart,
-        rawEnd,
-        current.length
-      )
-      const paste: RecentTextPaste = {
-        pastedText: pastedText || null,
-        beforeText: current,
-        selectionStart: start,
-        selectionEnd: end,
-        timestamp: Date.now(),
-      }
-      recentTextPasteRef.current = paste
-      return paste
-    },
-    []
-  )
 
   const insertCollapsedPastedText = useCallback(
     (
@@ -1265,48 +1212,12 @@ export function MessageInput({
     [appendFilesAsResources, appendImageAttachments, canAttachImages]
   )
 
-  const collapsePasteMutation = useCallback(
-    (
-      paste: RecentTextPaste,
-      pastedText: string
-    ): { nextText: string; placeholder: string } => {
-      const result = insertCollapsedPastedText(
-        pastedText,
-        paste.selectionStart,
-        paste.selectionEnd,
-        paste.beforeText
-      )
-      recentTextPasteRef.current = {
-        ...paste,
-        pastedText,
-        timestamp: Date.now(),
-        collapsedPlaceholder: result.placeholder,
-      }
-      suppressedPasteValueRef.current = result.nextText
-      requestAnimationFrame(() => {
-        const ta = textareaRef.current
-        const recentPaste = recentTextPasteRef.current
-        if (ta?.value === result.nextText) {
-          if (suppressedPasteValueRef.current === result.nextText) {
-            suppressedPasteValueRef.current = null
-          }
-          if (recentPaste?.collapsedPlaceholder === result.placeholder) {
-            recentTextPasteRef.current = null
-          }
-        }
-      })
-      return result
-    },
-    [insertCollapsedPastedText]
-  )
-
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (disabled) return
       const clipboardData = event.clipboardData
       const files = Array.from(clipboardData?.files ?? [])
       if (files.length > 0) {
-        recentTextPasteRef.current = null
         event.preventDefault()
         void appendFilesFromInput(files).catch((error) => {
           console.error("[MessageInput] paste files failed:", error)
@@ -1315,19 +1226,20 @@ export function MessageInput({
       }
 
       const pastedText = clipboardData?.getData("text/plain") ?? ""
-      const paste = rememberPasteMutation(event.currentTarget, pastedText)
-
       if (!pastedText || !shouldCollapsePastedText(pastedText)) return
 
+      const current = textRef.current
+      const rawStart = event.currentTarget.selectionStart ?? current.length
+      const rawEnd = event.currentTarget.selectionEnd ?? rawStart
+      const { start, end } = normalizeSelectionRange(
+        rawStart,
+        rawEnd,
+        current.length
+      )
       event.preventDefault()
-      collapsePasteMutation(paste, pastedText)
+      insertCollapsedPastedText(pastedText, start, end, current)
     },
-    [
-      appendFilesFromInput,
-      collapsePasteMutation,
-      disabled,
-      rememberPasteMutation,
-    ]
+    [appendFilesFromInput, disabled, insertCollapsedPastedText]
   )
 
   useEffect(() => {
@@ -1570,43 +1482,24 @@ export function MessageInput({
 
   const applyTextareaValueChange = useCallback(
     (value: string, cursorPos: number) => {
-      if (suppressedPasteValueRef.current === value) {
-        suppressedPasteValueRef.current = null
-        recentTextPasteRef.current = null
+      const previousText = textRef.current
+      const insertionDelta = inferInsertedTextDelta(
+        previousText,
+        value,
+        cursorPos
+      )
+      if (
+        insertionDelta &&
+        shouldCollapsePastedText(insertionDelta.insertedText)
+      ) {
+        insertCollapsedPastedText(
+          insertionDelta.insertedText,
+          insertionDelta.selectionStart,
+          insertionDelta.selectionEnd,
+          previousText
+        )
         return
       }
-      suppressedPasteValueRef.current = null
-
-      const recentPaste = recentTextPasteRef.current
-      if (recentPaste && isRecentPasteFallbackActive(recentPaste)) {
-        const knownPastedText = recentPaste.pastedText
-        const fallbackPastedText =
-          knownPastedText && isTextWithPasteInserted(value, recentPaste)
-            ? knownPastedText
-            : knownPastedText == null &&
-                isTextWithUnknownPasteInserted(value, recentPaste)
-              ? extractUnknownInsertedPaste(value, recentPaste)
-              : null
-        const rawPasteWasInserted =
-          knownPastedText != null && fallbackPastedText === knownPastedText
-
-        if (
-          fallbackPastedText &&
-          shouldCollapsePastedText(fallbackPastedText)
-        ) {
-          if (rawPasteWasInserted || !recentPaste.collapsedPlaceholder) {
-            insertCollapsedPastedText(
-              fallbackPastedText,
-              recentPaste.selectionStart,
-              recentPaste.selectionEnd,
-              recentPaste.beforeText
-            )
-          }
-          recentTextPasteRef.current = null
-          return
-        }
-      }
-      recentTextPasteRef.current = null
 
       setText(value)
       syncPastedTextsForText(value)
@@ -2162,45 +2055,6 @@ export function MessageInput({
     },
     [appendFilesFromInput, disabled, setDragActiveIfChanged]
   )
-
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-
-    const handleNativeBeforeInput = (event: Event) => {
-      if (event.defaultPrevented || disabledRef.current) return
-      const inputEvent = event as InputEvent
-      if (!isPasteInputType(inputEvent.inputType)) return
-
-      const dataTransfer = inputEvent.dataTransfer
-      const files = Array.from(dataTransfer?.files ?? [])
-      if (files.length > 0) return
-
-      const pastedText =
-        dataTransfer?.getData("text/plain") || inputEvent.data || ""
-      const paste = rememberPasteMutation(textarea, pastedText)
-
-      if (!pastedText || !shouldCollapsePastedText(pastedText)) return
-
-      event.preventDefault()
-      collapsePasteMutation(paste, pastedText)
-    }
-
-    const handleNativeInput = (event: Event) => {
-      const inputEvent = event as InputEvent
-      if (!isPasteInputType(inputEvent.inputType)) return
-      const value = textarea.value
-      const cursorPos = textarea.selectionStart ?? value.length
-      applyTextareaValueChange(value, cursorPos)
-    }
-
-    textarea.addEventListener("beforeinput", handleNativeBeforeInput)
-    textarea.addEventListener("input", handleNativeInput)
-    return () => {
-      textarea.removeEventListener("beforeinput", handleNativeBeforeInput)
-      textarea.removeEventListener("input", handleNativeInput)
-    }
-  }, [applyTextareaValueChange, collapsePasteMutation, rememberPasteMutation])
 
   const hasImageAttachments = imageAttachments.length > 0
   const hasResourceAttachments = resourceAttachments.length > 0
