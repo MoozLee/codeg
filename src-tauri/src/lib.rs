@@ -43,8 +43,9 @@ mod tauri_app {
         experts as experts_commands, file_io, folder_commands, folders, mcp as mcp_commands,
         model_provider as model_provider_commands, notification, pet as pet_commands, project_boot,
         provider_usage as provider_usage_commands,
-        quick_messages as quick_messages_commands, remote_workspace as remote_workspace_commands,
-        system_settings, terminal as terminal_commands, version_control, windows,
+        quick_messages as quick_messages_commands, remote_proxy as remote_proxy_commands,
+        remote_workspace as remote_workspace_commands, system_settings,
+        terminal as terminal_commands, version_control, windows,
         workspace_state as workspace_state_commands,
     };
     use crate::terminal::manager::TerminalManager;
@@ -172,6 +173,13 @@ mod tauri_app {
             .manage(windows::ConversationWindowState::new())
             .manage(windows::MergeWindowState::new())
             .manage(web::WebServerState::new())
+            // Remote-workspace IPC proxy. Routes HTTP / WS for windows
+            // opened against a remote codeg-server through Rust so we
+            // bypass webview mixed-content blocking and can centrally
+            // manage per-window subscriptions.
+            .manage(std::sync::Arc::new(
+                crate::commands::remote_proxy::RemoteProxyState::new(),
+            ))
             .manage(std::sync::Arc::new(
                 web::event_bridge::WebEventBroadcaster::new(),
             ))
@@ -674,6 +682,9 @@ mod tauri_app {
                 remote_workspace_commands::get_remote_workspace_connection,
                 remote_workspace_commands::reorder_remote_workspace_connections,
                 remote_workspace_commands::open_remote_workspace,
+                remote_proxy_commands::remote_http_call,
+                remote_proxy_commands::remote_ws_subscribe,
+                remote_proxy_commands::remote_ws_unsubscribe,
                 windows::open_pet_window,
                 windows::close_pet_window,
                 windows::pet_window_record_position,

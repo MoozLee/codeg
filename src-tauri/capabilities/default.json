@@ -11,6 +11,7 @@
     "push-*",
     "settings",
     "project-boot",
+    "remote-project-boot-*",
     "pet",
     "remote-workspace-*",
     "remote-settings-*",
