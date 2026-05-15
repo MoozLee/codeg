@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "Search commands...",
         "slashSearchEmpty": "No matching commands",
         "booleanOn": "On",
-        "booleanOff": "Off"
+        "booleanOff": "Off",
+        "expandInput": "Expand input",
+        "restoreInput": "Restore input"
       },
       "messageQueue": {
         "addToQueue": "Queue message",

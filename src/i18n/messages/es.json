@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "Buscar comandos...",
         "slashSearchEmpty": "Sin comandos coincidentes",
         "booleanOn": "Activado",
-        "booleanOff": "Desactivado"
+        "booleanOff": "Desactivado",
+        "expandInput": "Ampliar entrada",
+        "restoreInput": "Restaurar entrada"
       },
       "messageQueue": {
         "addToQueue": "Agregar a la cola",

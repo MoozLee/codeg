@@ -13,7 +13,9 @@ import {
   Cog,
   FileSearch,
   GitFork,
+  Maximize2,
   MessageSquareText,
+  Minimize2,
   Paperclip,
   Plus,
   Search,
@@ -435,6 +437,7 @@ export function MessageInput({
     return loadMessageInputDraft(effectiveDraftStorageKey) ?? ""
   })
   const [attachments, setAttachments] = useState<InputAttachment[]>([])
+  const [inputExpanded, setInputExpanded] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
   const [quickMessages, setQuickMessages] = useState<QuickMessage[]>([])
   const [quickMessagesLoading, setQuickMessagesLoading] = useState(false)
@@ -1592,6 +1595,7 @@ export function MessageInput({
       onSaveQueueEdit(draft)
       setText("")
       setAttachments([])
+      setInputExpanded(false)
       return
     }
 
@@ -1600,6 +1604,7 @@ export function MessageInput({
       onEnqueue(draft, showModeSelector ? effectiveModeId : null)
       setText("")
       setAttachments([])
+      setInputExpanded(false)
       return
     }
 
@@ -1609,6 +1614,7 @@ export function MessageInput({
     }
     setText("")
     setAttachments([])
+    setInputExpanded(false)
   }, [
     buildDraft,
     isEditingQueueItem,
@@ -1631,6 +1637,7 @@ export function MessageInput({
     }
     setText("")
     setAttachments([])
+    setInputExpanded(false)
   }, [
     onForkSend,
     buildDraft,
@@ -2018,11 +2025,28 @@ export function MessageInput({
       )}
       <div
         className={cn(
-          "@container flex flex-col rounded-xl border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
-          showDragActive && "ring-1 ring-primary/40",
-          className
+          "@container relative flex flex-col rounded-xl border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+          className,
+          inputExpanded && "h-[min(70dvh,720px)] max-h-[min(70dvh,720px)]",
+          showDragActive && "ring-1 ring-primary/40"
         )}
       >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="absolute right-2 top-2 z-10 h-7 w-7 text-muted-foreground hover:text-foreground"
+          title={inputExpanded ? t("restoreInput") : t("expandInput")}
+          aria-label={inputExpanded ? t("restoreInput") : t("expandInput")}
+          aria-pressed={inputExpanded}
+          onClick={() => setInputExpanded((expanded) => !expanded)}
+        >
+          {inputExpanded ? (
+            <Minimize2 className="size-4" />
+          ) : (
+            <Maximize2 className="size-4" />
+          )}
+        </Button>
         <ConversationContextBar
           hasExtraContent={hasImageAttachments || hasResourceAttachments}
           scrollEndTrigger={attachments.length}
@@ -2097,7 +2121,7 @@ export function MessageInput({
           onPaste={handlePaste}
           onFocus={onFocus}
           placeholder={resolvedPlaceholder}
-          className="min-h-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent text-base md:text-sm shadow-none focus-visible:border-0 focus-visible:ring-0"
+          className="min-h-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent pr-10 text-base shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-sm"
           autoFocus={autoFocus}
         />
         <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">

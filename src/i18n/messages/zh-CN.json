@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "搜索命令...",
         "slashSearchEmpty": "没有匹配的命令",
         "booleanOn": "开",
-        "booleanOff": "关"
+        "booleanOff": "关",
+        "expandInput": "放大输入框",
+        "restoreInput": "恢复输入框"
       },
       "messageQueue": {
         "addToQueue": "加入队列",

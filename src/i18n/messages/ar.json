@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "البحث عن الأوامر...",
         "slashSearchEmpty": "لا توجد أوامر مطابقة",
         "booleanOn": "تشغيل",
-        "booleanOff": "إيقاف"
+        "booleanOff": "إيقاف",
+        "expandInput": "توسيع حقل الإدخال",
+        "restoreInput": "استعادة حقل الإدخال"
       },
       "messageQueue": {
         "addToQueue": "إضافة للقائمة",

@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "コマンドを検索...",
         "slashSearchEmpty": "一致するコマンドがありません",
         "booleanOn": "オン",
-        "booleanOff": "オフ"
+        "booleanOff": "オフ",
+        "expandInput": "入力欄を拡大",
+        "restoreInput": "入力欄を元に戻す"
       },
       "messageQueue": {
         "addToQueue": "キューに追加",
