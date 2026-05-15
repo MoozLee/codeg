@@ -7,20 +7,52 @@ import {
   type TabPersistenceMode,
 } from "@/contexts/tab-shared"
 
-interface PersistedDraftState {
-  text: string
+export interface MessageInputPastedTextEntry {
+  id: number
+  content: string
 }
 
-const STORAGE_PREFIX = "codeg:message-input-draft:v1"
+export interface MessageInputDraftState {
+  text: string
+  pastedTexts: MessageInputPastedTextEntry[]
+}
+
+const V2_STORAGE_PREFIX = "codeg:message-input-draft:v2"
+const V1_STORAGE_PREFIX = "codeg:message-input-draft:v1"
 const SHARED_PERSISTENCE_MODE: TabPersistenceMode = "shared"
 const WINDOW_LOCAL_DRAFT_PREFIX = "window-local:"
-const draftTextCache = new Map<string, string>()
-const pendingPersistDrafts = new Map<string, string>()
+const draftStateCache = new Map<string, MessageInputDraftState>()
+const pendingPersistDrafts = new Map<string, MessageInputDraftState>()
 let idlePersistHandle: number | null = null
 let persistenceListenersBound = false
 
-function storageKeyForDraftKey(draftKey: string): string {
-  return `${STORAGE_PREFIX}:${draftKey}`
+function storageKeyForDraftKey(
+  draftKey: string,
+  storagePrefix: string = V2_STORAGE_PREFIX
+): string {
+  return `${storagePrefix}:${draftKey}`
+}
+
+function cloneDraftState(
+  state: MessageInputDraftState
+): MessageInputDraftState {
+  return {
+    text: state.text,
+    pastedTexts: state.pastedTexts.map((entry) => ({ ...entry })),
+  }
+}
+
+function areDraftStatesEqual(
+  a: MessageInputDraftState | undefined,
+  b: MessageInputDraftState
+): boolean {
+  if (!a) return false
+  if (a.text !== b.text) return false
+  if (a.pastedTexts.length !== b.pastedTexts.length) return false
+  return a.pastedTexts.every((entry, index) => {
+    const other = b.pastedTexts[index]
+    return entry.id === other.id && entry.content === other.content
+  })
 }
 
 function resolveDraftScope(draftKey: string): {
@@ -40,6 +72,35 @@ function resolveDraftScope(draftKey: string): {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function parsePastedTexts(value: unknown): MessageInputPastedTextEntry[] {
+  if (!Array.isArray(value)) return []
+  const entries: MessageInputPastedTextEntry[] = []
+  const seenIds = new Set<number>()
+  for (const item of value) {
+    if (!isRecord(item)) continue
+    const { id, content } = item
+    if (typeof id !== "number" || !Number.isInteger(id) || id <= 0) continue
+    if (typeof content !== "string") continue
+    if (seenIds.has(id)) continue
+    seenIds.add(id)
+    entries.push({ id, content })
+  }
+  return entries
+}
+
+function parseDraftState(value: unknown): MessageInputDraftState | null {
+  if (!isRecord(value)) return null
+  if (typeof value.text !== "string") return null
+  return {
+    text: value.text,
+    pastedTexts: parsePastedTexts(value.pastedTexts),
+  }
+}
+
 function flushPendingDraftPersistence(): void {
   if (typeof window === "undefined") return
   if (pendingPersistDrafts.size === 0) {
@@ -51,12 +112,12 @@ function flushPendingDraftPersistence(): void {
   pendingPersistDrafts.clear()
   idlePersistHandle = null
 
-  for (const [draftKey, text] of entries) {
+  for (const [draftKey, state] of entries) {
     const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
     writeScopedStorageItem(
       persistenceMode,
       storageKeyForDraftKey(scopedDraftKey),
-      JSON.stringify({ text })
+      JSON.stringify(state)
     )
   }
 }
@@ -118,9 +179,11 @@ export function buildNewConversationDraftStorageKey(
     : "new"
 }
 
-export function loadMessageInputDraft(draftKey: string): string | null {
-  const cached = draftTextCache.get(draftKey)
-  if (typeof cached === "string") return cached
+export function loadMessageInputDraft(
+  draftKey: string
+): MessageInputDraftState | null {
+  const cached = draftStateCache.get(draftKey)
+  if (cached) return cloneDraftState(cached)
   if (typeof window === "undefined") return null
 
   const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
@@ -130,32 +193,62 @@ export function loadMessageInputDraft(draftKey: string): string | null {
       persistenceMode,
       storageKeyForDraftKey(scopedDraftKey)
     )
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<PersistedDraftState>
-    if (typeof parsed.text !== "string") return null
-    draftTextCache.set(draftKey, parsed.text)
-    return parsed.text
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw)
+      const state = parseDraftState(parsed)
+      if (state) {
+        draftStateCache.set(draftKey, cloneDraftState(state))
+        return state
+      }
+    }
+
+    const legacyRaw = readScopedStorageItem(
+      persistenceMode,
+      storageKeyForDraftKey(scopedDraftKey, V1_STORAGE_PREFIX)
+    )
+    if (!legacyRaw) return null
+    const legacyParsed: unknown = JSON.parse(legacyRaw)
+    const legacyState = parseDraftState(legacyParsed)
+    if (!legacyState) return null
+    const state: MessageInputDraftState = {
+      text: legacyState.text,
+      pastedTexts: [],
+    }
+    draftStateCache.set(draftKey, cloneDraftState(state))
+    return state
   } catch {
     return null
   }
 }
 
-export function saveMessageInputDraft(draftKey: string, text: string): void {
-  if (text.length === 0) {
+export function saveMessageInputDraft(
+  draftKey: string,
+  state: MessageInputDraftState
+): void {
+  const normalized: MessageInputDraftState = {
+    text: state.text,
+    pastedTexts: parsePastedTexts(state.pastedTexts),
+  }
+
+  if (normalized.pastedTexts.length !== state.pastedTexts.length) {
+    normalized.pastedTexts = []
+  }
+
+  if (normalized.text.length === 0) {
     clearMessageInputDraft(draftKey)
     return
   }
 
-  if (draftTextCache.get(draftKey) === text) return
-  draftTextCache.set(draftKey, text)
+  if (areDraftStatesEqual(draftStateCache.get(draftKey), normalized)) return
+  draftStateCache.set(draftKey, cloneDraftState(normalized))
   if (typeof window === "undefined") return
 
-  pendingPersistDrafts.set(draftKey, text)
+  pendingPersistDrafts.set(draftKey, cloneDraftState(normalized))
   scheduleDraftPersistence()
 }
 
 export function clearMessageInputDraft(draftKey: string): void {
-  draftTextCache.delete(draftKey)
+  draftStateCache.delete(draftKey)
   pendingPersistDrafts.delete(draftKey)
   if (typeof window === "undefined") return
 
@@ -163,5 +256,9 @@ export function clearMessageInputDraft(draftKey: string): void {
   removeScopedStorageItem(
     persistenceMode,
     storageKeyForDraftKey(scopedDraftKey)
+  )
+  removeScopedStorageItem(
+    persistenceMode,
+    storageKeyForDraftKey(scopedDraftKey, V1_STORAGE_PREFIX)
   )
 }

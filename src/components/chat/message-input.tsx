@@ -90,6 +90,7 @@ import {
   clearMessageInputDraft,
   loadMessageInputDraft,
   saveMessageInputDraft,
+  type MessageInputPastedTextEntry,
 } from "@/lib/message-input-draft"
 
 interface MessageInputProps {
@@ -278,6 +279,63 @@ const TEXT_LIKE_MIME_PREFIXES = [
   "application/typescript",
 ]
 const DRAG_DROP_IMAGE_MAX_BYTES = 20_000_000
+const PASTED_TEXT_COLLAPSE_LENGTH_THRESHOLD = 800
+const PASTED_TEXT_COLLAPSE_NEWLINE_THRESHOLD = 2
+const PASTED_TEXT_PLACEHOLDER_PATTERN =
+  /\[Pasted text #(\d+)(?: \+\d+ lines)?\]/g
+
+function countNewlines(value: string): number {
+  return (value.match(/\n/g) ?? []).length
+}
+
+function shouldCollapsePastedText(value: string): boolean {
+  if (value.length > PASTED_TEXT_COLLAPSE_LENGTH_THRESHOLD) return true
+  return countNewlines(value) > PASTED_TEXT_COLLAPSE_NEWLINE_THRESHOLD
+}
+
+function formatPastedTextPlaceholder(id: number, newlineCount: number): string {
+  if (newlineCount > 0) return `[Pasted text #${id} +${newlineCount} lines]`
+  return `[Pasted text #${id}]`
+}
+
+function expandPastedTextPlaceholders(
+  value: string,
+  pastedTexts: MessageInputPastedTextEntry[]
+): string {
+  if (pastedTexts.length === 0) return value
+  const contentById = new Map(
+    pastedTexts.map((entry) => [entry.id.toString(), entry.content])
+  )
+  return value.replace(PASTED_TEXT_PLACEHOLDER_PATTERN, (match, id: string) => {
+    return contentById.get(id) ?? match
+  })
+}
+
+function collectPastedTextPlaceholderIds(value: string): Set<number> {
+  const ids = new Set<number>()
+  PASTED_TEXT_PLACEHOLDER_PATTERN.lastIndex = 0
+  let match = PASTED_TEXT_PLACEHOLDER_PATTERN.exec(value)
+  while (match) {
+    ids.add(Number(match[1]))
+    match = PASTED_TEXT_PLACEHOLDER_PATTERN.exec(value)
+  }
+  PASTED_TEXT_PLACEHOLDER_PATTERN.lastIndex = 0
+  return ids
+}
+
+function prunePastedTextsForText(
+  value: string,
+  pastedTexts: MessageInputPastedTextEntry[]
+): MessageInputPastedTextEntry[] {
+  if (pastedTexts.length === 0) return pastedTexts
+  const referencedIds = collectPastedTextPlaceholderIds(value)
+  if (referencedIds.size === 0) return []
+  return pastedTexts.filter((entry) => referencedIds.has(entry.id))
+}
+
+function nextPastedTextId(entries: MessageInputPastedTextEntry[]): number {
+  return entries.reduce((maxId, entry) => Math.max(maxId, entry.id), 0) + 1
+}
 
 function isTextLikeFile(file: File): boolean {
   const mime = file.type.toLowerCase()
@@ -432,10 +490,14 @@ export function MessageInput({
   const { shortcuts } = useShortcutSettings()
   const effectiveDraftStorageKey = draftStorageKey ?? null
   const resolvedPlaceholder = placeholder ?? t("askAnything")
-  const [text, setText] = useState(() => {
-    if (!effectiveDraftStorageKey) return ""
-    return loadMessageInputDraft(effectiveDraftStorageKey) ?? ""
-  })
+  const initialDraftState = useMemo(() => {
+    if (!effectiveDraftStorageKey) return null
+    return loadMessageInputDraft(effectiveDraftStorageKey)
+  }, [effectiveDraftStorageKey])
+  const [text, setText] = useState(() => initialDraftState?.text ?? "")
+  const [pastedTexts, setPastedTexts] = useState<MessageInputPastedTextEntry[]>(
+    () => initialDraftState?.pastedTexts ?? []
+  )
   const [attachments, setAttachments] = useState<InputAttachment[]>([])
   const [inputExpanded, setInputExpanded] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
@@ -450,6 +512,7 @@ export function MessageInput({
   const composingRef = useRef(false)
   const cursorPosRef = useRef<number | null>(null)
   const textRef = useRef(text)
+  const pastedTextsRef = useRef(pastedTexts)
   const disabledRef = useRef(disabled)
   const isPromptingRef = useRef(isPrompting)
 
@@ -466,6 +529,22 @@ export function MessageInput({
   useEffect(() => {
     textRef.current = text
   }, [text])
+
+  useEffect(() => {
+    pastedTextsRef.current = pastedTexts
+  }, [pastedTexts])
+
+  const clearPastedTexts = useCallback(() => {
+    pastedTextsRef.current = []
+    setPastedTexts([])
+  }, [])
+
+  const syncPastedTextsForText = useCallback((value: string) => {
+    const next = prunePastedTextsForText(value, pastedTextsRef.current)
+    if (next.length === pastedTextsRef.current.length) return
+    pastedTextsRef.current = next
+    setPastedTexts(next)
+  }, [])
 
   // `field-sizing-content` 触发的尺寸调整发生在浏览器布局阶段，原生 caret-
   // into-view 滚动赶不上，导致光标停在末尾时新行被裁在可视区外。用 rAF 等
@@ -502,6 +581,7 @@ export function MessageInput({
       editingDraftText !== prevEditingDraftRef.current
     ) {
       prevEditingDraftRef.current = editingDraftText
+      clearPastedTexts()
       setText(editingDraftText)
       requestAnimationFrame(() => {
         textareaRef.current?.focus()
@@ -509,7 +589,7 @@ export function MessageInput({
     } else if (!isEditingQueueItem) {
       prevEditingDraftRef.current = null
     }
-  }, [isEditingQueueItem, editingDraftText])
+  }, [isEditingQueueItem, editingDraftText, clearPastedTexts])
 
   const setDragActiveIfChanged = useCallback((next: boolean) => {
     if (dragActiveRef.current === next) return
@@ -519,8 +599,11 @@ export function MessageInput({
 
   useEffect(() => {
     if (!effectiveDraftStorageKey || isEditingQueueItem) return
-    saveMessageInputDraft(effectiveDraftStorageKey, text)
-  }, [effectiveDraftStorageKey, text, isEditingQueueItem])
+    saveMessageInputDraft(effectiveDraftStorageKey, {
+      text,
+      pastedTexts,
+    })
+  }, [effectiveDraftStorageKey, text, pastedTexts, isEditingQueueItem])
 
   const availableModes = useMemo(() => modes ?? [], [modes])
   const availableConfigOptions = useMemo(
@@ -1027,11 +1110,45 @@ export function MessageInput({
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (disabled) return
-      const files = Array.from(event.clipboardData?.files ?? [])
-      if (files.length === 0) return
+      const clipboardData = event.clipboardData
+      const files = Array.from(clipboardData?.files ?? [])
+      if (files.length > 0) {
+        event.preventDefault()
+        void appendFilesFromInput(files).catch((error) => {
+          console.error("[MessageInput] paste files failed:", error)
+        })
+        return
+      }
+
+      const pastedText = clipboardData?.getData("text/plain") ?? ""
+      if (!pastedText || !shouldCollapsePastedText(pastedText)) return
+
       event.preventDefault()
-      void appendFilesFromInput(files).catch((error) => {
-        console.error("[MessageInput] paste files failed:", error)
+      const textarea = event.currentTarget
+      const current = textRef.current
+      const rawStart = textarea.selectionStart ?? current.length
+      const rawEnd = textarea.selectionEnd ?? rawStart
+      const start = Math.max(0, Math.min(rawStart, current.length))
+      const end = Math.max(start, Math.min(rawEnd, current.length))
+      const newId = nextPastedTextId(pastedTextsRef.current)
+      const placeholder = formatPastedTextPlaceholder(
+        newId,
+        countNewlines(pastedText)
+      )
+      const newText = current.slice(0, start) + placeholder + current.slice(end)
+
+      pastedTextsRef.current = [
+        ...pastedTextsRef.current,
+        { id: newId, content: pastedText },
+      ]
+      setPastedTexts(pastedTextsRef.current)
+      setText(newText)
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current
+        if (!ta) return
+        const pos = start + placeholder.length
+        ta.focus()
+        ta.setSelectionRange(pos, pos)
       })
     },
     [appendFilesFromInput, disabled]
@@ -1279,6 +1396,7 @@ export function MessageInput({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const value = e.target.value
       setText(value)
+      syncPastedTextsForText(value)
 
       const cursorPos = e.target.selectionStart ?? value.length
       const beforeCursor = value.slice(0, cursorPos)
@@ -1330,6 +1448,7 @@ export function MessageInput({
       nonExpertSkills.length,
       defaultPath,
       agentType,
+      syncPastedTextsForText,
     ]
   )
 
@@ -1543,8 +1662,17 @@ export function MessageInput({
     setAttachments((prev) => prev.filter((item) => item.id !== id))
   }, [])
 
+  const handleCancelQueueEditClick = useCallback(() => {
+    clearPastedTexts()
+    onCancelQueueEdit?.()
+  }, [clearPastedTexts, onCancelQueueEdit])
+
   const buildDraft = useCallback((): PromptDraft | null => {
-    const trimmed = textRef.current.trim()
+    const expandedText = expandPastedTextPlaceholders(
+      textRef.current,
+      pastedTextsRef.current
+    )
+    const trimmed = expandedText.trim()
     if (!trimmed && attachments.length === 0) return null
 
     const blocks: PromptInputBlock[] = []
@@ -1594,6 +1722,7 @@ export function MessageInput({
     if (isEditingQueueItem && onSaveQueueEdit) {
       onSaveQueueEdit(draft)
       setText("")
+      clearPastedTexts()
       setAttachments([])
       setInputExpanded(false)
       return
@@ -1603,6 +1732,7 @@ export function MessageInput({
     if (isPrompting && onEnqueue) {
       onEnqueue(draft, showModeSelector ? effectiveModeId : null)
       setText("")
+      clearPastedTexts()
       setAttachments([])
       setInputExpanded(false)
       return
@@ -1613,6 +1743,7 @@ export function MessageInput({
       clearMessageInputDraft(effectiveDraftStorageKey)
     }
     setText("")
+    clearPastedTexts()
     setAttachments([])
     setInputExpanded(false)
   }, [
@@ -1625,6 +1756,7 @@ export function MessageInput({
     effectiveModeId,
     showModeSelector,
     effectiveDraftStorageKey,
+    clearPastedTexts,
   ])
 
   const handleForkSendClick = useCallback(() => {
@@ -1636,6 +1768,7 @@ export function MessageInput({
       clearMessageInputDraft(effectiveDraftStorageKey)
     }
     setText("")
+    clearPastedTexts()
     setAttachments([])
     setInputExpanded(false)
   }, [
@@ -1644,6 +1777,7 @@ export function MessageInput({
     effectiveModeId,
     showModeSelector,
     effectiveDraftStorageKey,
+    clearPastedTexts,
   ])
 
   const handleKeyDown = useCallback(
@@ -1723,7 +1857,7 @@ export function MessageInput({
 
       if (isEditingQueueItem && e.key === "Escape") {
         e.preventDefault()
-        onCancelQueueEdit?.()
+        handleCancelQueueEditClick()
         return
       }
 
@@ -1747,7 +1881,7 @@ export function MessageInput({
       disabled,
       isPrompting,
       isEditingQueueItem,
-      onCancelQueueEdit,
+      handleCancelQueueEditClick,
       handleSend,
       shortcuts,
       slashMenuOpen,
@@ -1864,7 +1998,7 @@ export function MessageInput({
   const actionButtons = isEditingQueueItem ? (
     <div className="flex items-center gap-1">
       <Button
-        onClick={onCancelQueueEdit}
+        onClick={handleCancelQueueEditClick}
         variant="ghost"
         size="icon"
         className="h-8 w-8"
