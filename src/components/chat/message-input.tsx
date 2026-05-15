@@ -144,6 +144,15 @@ interface ImageInputAttachment {
   mimeType: string
 }
 
+interface RecentTextPaste {
+  pastedText: string | null
+  beforeText: string
+  selectionStart: number
+  selectionEnd: number
+  timestamp: number
+  collapsedPlaceholder?: string
+}
+
 type InputAttachment = ResourceInputAttachment | ImageInputAttachment
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -281,6 +290,7 @@ const TEXT_LIKE_MIME_PREFIXES = [
 const DRAG_DROP_IMAGE_MAX_BYTES = 20_000_000
 const PASTED_TEXT_COLLAPSE_LENGTH_THRESHOLD = 800
 const PASTED_TEXT_COLLAPSE_NEWLINE_THRESHOLD = 2
+const PASTED_TEXT_FALLBACK_WINDOW_MS = 1500
 const PASTED_TEXT_PLACEHOLDER_PATTERN =
   /\[Pasted text #(\d+)(?: \+\d+ lines)?\]/g
 
@@ -335,6 +345,94 @@ function prunePastedTextsForText(
 
 function nextPastedTextId(entries: MessageInputPastedTextEntry[]): number {
   return entries.reduce((maxId, entry) => Math.max(maxId, entry.id), 0) + 1
+}
+
+function insertTextAtRange(
+  value: string,
+  insertion: string,
+  start: number,
+  end: number
+): string {
+  return value.slice(0, start) + insertion + value.slice(end)
+}
+
+function normalizeSelectionRange(
+  start: number,
+  end: number,
+  valueLength: number
+): { start: number; end: number } {
+  const normalizedStart = Math.max(0, Math.min(start, valueLength))
+  const normalizedEnd = Math.max(normalizedStart, Math.min(end, valueLength))
+  return { start: normalizedStart, end: normalizedEnd }
+}
+
+function isRecentPasteFallbackActive(paste: RecentTextPaste): boolean {
+  return Date.now() - paste.timestamp <= PASTED_TEXT_FALLBACK_WINDOW_MS
+}
+
+function isTextWithPasteInserted(
+  value: string,
+  paste: RecentTextPaste
+): boolean {
+  const { start, end } = normalizeSelectionRange(
+    paste.selectionStart,
+    paste.selectionEnd,
+    paste.beforeText.length
+  )
+  const expected = insertTextAtRange(
+    paste.beforeText,
+    paste.pastedText ?? "",
+    start,
+    end
+  )
+  return value === expected
+}
+
+function isTextWithUnknownPasteInserted(
+  value: string,
+  paste: RecentTextPaste
+): boolean {
+  const { start, end } = normalizeSelectionRange(
+    paste.selectionStart,
+    paste.selectionEnd,
+    paste.beforeText.length
+  )
+  return (
+    value.length > paste.beforeText.length - (end - start) &&
+    value.startsWith(paste.beforeText.slice(0, start)) &&
+    value.endsWith(paste.beforeText.slice(end))
+  )
+}
+
+function extractUnknownInsertedPaste(
+  value: string,
+  paste: RecentTextPaste
+): string {
+  const { start, end } = normalizeSelectionRange(
+    paste.selectionStart,
+    paste.selectionEnd,
+    paste.beforeText.length
+  )
+  const suffixLength = paste.beforeText.length - end
+  return value.slice(
+    start,
+    suffixLength === 0
+      ? value.length
+      : Math.max(start, value.length - suffixLength)
+  )
+}
+
+function isTextWithPlaceholderInserted(
+  value: string,
+  paste: RecentTextPaste,
+  placeholder: string
+): boolean {
+  const { start, end } = normalizeSelectionRange(
+    paste.selectionStart,
+    paste.selectionEnd,
+    paste.beforeText.length
+  )
+  return value === insertTextAtRange(paste.beforeText, placeholder, start, end)
 }
 
 function isTextLikeFile(file: File): boolean {
@@ -513,6 +611,7 @@ export function MessageInput({
   const cursorPosRef = useRef<number | null>(null)
   const textRef = useRef(text)
   const pastedTextsRef = useRef(pastedTexts)
+  const recentTextPasteRef = useRef<RecentTextPaste | null>(null)
   const disabledRef = useRef(disabled)
   const isPromptingRef = useRef(isPrompting)
 
@@ -545,6 +644,44 @@ export function MessageInput({
     pastedTextsRef.current = next
     setPastedTexts(next)
   }, [])
+
+  const insertCollapsedPastedText = useCallback(
+    (
+      pastedText: string,
+      selectionStart: number,
+      selectionEnd: number,
+      baseText: string = textRef.current
+    ): { nextText: string; placeholder: string } => {
+      const { start, end } = normalizeSelectionRange(
+        selectionStart,
+        selectionEnd,
+        baseText.length
+      )
+      const newId = nextPastedTextId(pastedTextsRef.current)
+      const placeholder = formatPastedTextPlaceholder(
+        newId,
+        countNewlines(pastedText)
+      )
+      const nextText = insertTextAtRange(baseText, placeholder, start, end)
+
+      pastedTextsRef.current = [
+        ...pastedTextsRef.current,
+        { id: newId, content: pastedText },
+      ]
+      setPastedTexts(pastedTextsRef.current)
+      setText(nextText)
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current
+        if (!ta) return
+        const pos = start + placeholder.length
+        ta.focus()
+        ta.setSelectionRange(pos, pos)
+      })
+
+      return { nextText, placeholder }
+    },
+    []
+  )
 
   // `field-sizing-content` 触发的尺寸调整发生在浏览器布局阶段，原生 caret-
   // into-view 滚动赶不上，导致光标停在末尾时新行被裁在可视区外。用 rAF 等
@@ -1113,6 +1250,7 @@ export function MessageInput({
       const clipboardData = event.clipboardData
       const files = Array.from(clipboardData?.files ?? [])
       if (files.length > 0) {
+        recentTextPasteRef.current = null
         event.preventDefault()
         void appendFilesFromInput(files).catch((error) => {
           console.error("[MessageInput] paste files failed:", error)
@@ -1120,38 +1258,59 @@ export function MessageInput({
         return
       }
 
-      const pastedText = clipboardData?.getData("text/plain") ?? ""
-      if (!pastedText || !shouldCollapsePastedText(pastedText)) return
-
-      event.preventDefault()
       const textarea = event.currentTarget
       const current = textRef.current
       const rawStart = textarea.selectionStart ?? current.length
       const rawEnd = textarea.selectionEnd ?? rawStart
-      const start = Math.max(0, Math.min(rawStart, current.length))
-      const end = Math.max(start, Math.min(rawEnd, current.length))
-      const newId = nextPastedTextId(pastedTextsRef.current)
-      const placeholder = formatPastedTextPlaceholder(
-        newId,
-        countNewlines(pastedText)
+      const { start, end } = normalizeSelectionRange(
+        rawStart,
+        rawEnd,
+        current.length
       )
-      const newText = current.slice(0, start) + placeholder + current.slice(end)
+      const pastedText = clipboardData?.getData("text/plain") ?? ""
+      recentTextPasteRef.current = {
+        pastedText: pastedText || null,
+        beforeText: current,
+        selectionStart: start,
+        selectionEnd: end,
+        timestamp: Date.now(),
+      }
 
-      pastedTextsRef.current = [
-        ...pastedTextsRef.current,
-        { id: newId, content: pastedText },
-      ]
-      setPastedTexts(pastedTextsRef.current)
-      setText(newText)
+      if (!pastedText || !shouldCollapsePastedText(pastedText)) return
+
+      event.preventDefault()
+      const { nextText, placeholder } = insertCollapsedPastedText(
+        pastedText,
+        start,
+        end,
+        current
+      )
+      recentTextPasteRef.current = {
+        pastedText,
+        beforeText: current,
+        selectionStart: start,
+        selectionEnd: end,
+        timestamp: Date.now(),
+        collapsedPlaceholder: placeholder,
+      }
+
       requestAnimationFrame(() => {
+        const pendingPaste = recentTextPasteRef.current
+        if (!pendingPaste) return
         const ta = textareaRef.current
         if (!ta) return
-        const pos = start + placeholder.length
-        ta.focus()
-        ta.setSelectionRange(pos, pos)
+        if (
+          isTextWithPlaceholderInserted(ta.value, pendingPaste, placeholder)
+        ) {
+          recentTextPasteRef.current = null
+          return
+        }
+        if (ta.value === nextText) {
+          recentTextPasteRef.current = null
+        }
       })
     },
-    [appendFilesFromInput, disabled]
+    [appendFilesFromInput, disabled, insertCollapsedPastedText]
   )
 
   useEffect(() => {
@@ -1395,6 +1554,45 @@ export function MessageInput({
   const handleTextChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const value = e.target.value
+      const recentPaste = recentTextPasteRef.current
+      if (recentPaste && isRecentPasteFallbackActive(recentPaste)) {
+        const knownPastedText = recentPaste.pastedText
+        const fallbackPastedText =
+          knownPastedText && isTextWithPasteInserted(value, recentPaste)
+            ? knownPastedText
+            : knownPastedText == null &&
+                isTextWithUnknownPasteInserted(value, recentPaste)
+              ? extractUnknownInsertedPaste(value, recentPaste)
+              : null
+        const rawPasteWasInserted =
+          knownPastedText != null && fallbackPastedText === knownPastedText
+
+        if (
+          fallbackPastedText &&
+          shouldCollapsePastedText(fallbackPastedText)
+        ) {
+          if (
+            rawPasteWasInserted ||
+            !recentPaste.collapsedPlaceholder ||
+            !isTextWithPlaceholderInserted(
+              value,
+              recentPaste,
+              recentPaste.collapsedPlaceholder
+            )
+          ) {
+            insertCollapsedPastedText(
+              fallbackPastedText,
+              recentPaste.selectionStart,
+              recentPaste.selectionEnd,
+              recentPaste.beforeText
+            )
+          }
+          recentTextPasteRef.current = null
+          return
+        }
+      }
+      recentTextPasteRef.current = null
+
       setText(value)
       syncPastedTextsForText(value)
 
@@ -1449,6 +1647,7 @@ export function MessageInput({
       defaultPath,
       agentType,
       syncPastedTextsForText,
+      insertCollapsedPastedText,
     ]
   )
 
