@@ -1,17 +1,25 @@
 "use client"
 
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
 } from "react"
-import { ChevronDown, History, ArrowUpIcon } from "lucide-react"
+import { ChevronDown, Copy, History, ArrowUpIcon } from "lucide-react"
 import type { OverlayScrollbarsComponentRef } from "overlayscrollbars-react"
 import { useLocale, useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useTabContext } from "@/contexts/tab-context"
@@ -23,11 +31,12 @@ import {
   buildConversationUserMessagePreview,
   countConversationUserMessageImages,
   emitConversationAnchorScrollRequest,
+  extractUserMessageText,
   getConversationActiveAnchor,
   subscribeConversationAnchorState,
 } from "@/lib/conversation-anchor-storage"
 import type { MessageTurn } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, copyTextToClipboard } from "@/lib/utils"
 
 const INITIAL_VISIBLE_USER_MESSAGES = 50
 const LOAD_MORE_USER_MESSAGES_STEP = 50
@@ -37,6 +46,7 @@ const USER_MESSAGES_SCROLL_TO_TOP_THRESHOLD_PX = 320
 
 interface UserMessageListItem {
   anchorId: string
+  text: string
   preview: string
   timestamp: string
   sequence: number
@@ -69,6 +79,56 @@ function getLocalDaySerial(date: Date): number {
 function getLocalDateGroupKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
 }
+
+interface UserMessageCopyMenuProps {
+  text: string
+  children: ReactNode
+}
+
+const UserMessageCopyMenu = memo(function UserMessageCopyMenu({
+  text,
+  children,
+}: UserMessageCopyMenuProps) {
+  const t = useTranslations("Folder.chat.messageList")
+  const [isCopied, setIsCopied] = useState(false)
+  const timeoutRef = useRef<number>(0)
+
+  const handleCopy = useCallback(async () => {
+    if (!text) {
+      return
+    }
+
+    const ok = await copyTextToClipboard(text)
+    if (!ok) {
+      return
+    }
+
+    setIsCopied(true)
+    window.clearTimeout(timeoutRef.current)
+    timeoutRef.current = window.setTimeout(() => {
+      setIsCopied(false)
+    }, 2000)
+  }, [text])
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(timeoutRef.current)
+    },
+    []
+  )
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem disabled={!text} onSelect={() => void handleCopy()}>
+          <Copy className="size-4" />
+          {isCopied ? t("copied") : t("copyMessage")}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+})
 
 function UserMessagesEmptyState({
   title,
@@ -153,6 +213,7 @@ function UserMessagesTabContent({
       turn: MessageTurn,
       sequence: number
     ): UserMessageListItem => {
+      const text = extractUserMessageText(turn.blocks)
       const previewText = buildConversationUserMessagePreview(turn.blocks)
       const imageCount = countConversationUserMessageImages(turn.blocks)
       const preview =
@@ -165,6 +226,7 @@ function UserMessagesTabContent({
       if (Number.isNaN(timestampDate.getTime())) {
         return {
           anchorId: turn.anchor_id as string,
+          text,
           preview,
           timestamp: turn.timestamp,
           sequence,
@@ -187,6 +249,7 @@ function UserMessagesTabContent({
 
       return {
         anchorId: turn.anchor_id as string,
+        text,
         preview,
         timestamp: turn.timestamp,
         sequence,
@@ -419,32 +482,34 @@ function UserMessagesTabContent({
         </div>
 
         {hiddenActiveMessage ? (
-          <button
-            type="button"
-            className="mt-3 flex w-full items-start gap-3 rounded-xl border border-primary/35 bg-primary/10 px-3 py-2.5 text-left shadow-sm ring-1 ring-primary/10 transition-colors hover:bg-primary/14"
-            onClick={() => handleSelectAnchor(hiddenActiveMessage.anchorId)}
-          >
-            <span
-              className="mt-0.5 block h-10 w-1.5 shrink-0 rounded-full bg-primary"
-              aria-hidden
-            />
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                  {t("activeBadge")}
-                </span>
-                <span className="text-xs font-medium text-primary">
-                  {hiddenActiveMessage.dateTimeLabel}
-                </span>
+          <UserMessageCopyMenu text={hiddenActiveMessage.text}>
+            <button
+              type="button"
+              className="mt-3 flex w-full items-start gap-3 rounded-xl border border-primary/35 bg-primary/10 px-3 py-2.5 text-left shadow-sm ring-1 ring-primary/10 transition-colors hover:bg-primary/14"
+              onClick={() => handleSelectAnchor(hiddenActiveMessage.anchorId)}
+            >
+              <span
+                className="mt-0.5 block h-10 w-1.5 shrink-0 rounded-full bg-primary"
+                aria-hidden
+              />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                    {t("activeBadge")}
+                  </span>
+                  <span className="text-xs font-medium text-primary">
+                    {hiddenActiveMessage.dateTimeLabel}
+                  </span>
+                </div>
+                <p className="line-clamp-2 text-sm font-medium leading-5 text-foreground">
+                  {hiddenActiveMessage.preview}
+                </p>
               </div>
-              <p className="line-clamp-2 text-sm font-medium leading-5 text-foreground">
-                {hiddenActiveMessage.preview}
-              </p>
-            </div>
-            <span className="shrink-0 rounded-md border border-primary/20 bg-background/80 px-1.5 py-0.5 text-[10px] tabular-nums text-primary">
-              #{hiddenActiveMessage.sequence}
-            </span>
-          </button>
+              <span className="shrink-0 rounded-md border border-primary/20 bg-background/80 px-1.5 py-0.5 text-[10px] tabular-nums text-primary">
+                #{hiddenActiveMessage.sequence}
+              </span>
+            </button>
+          </UserMessageCopyMenu>
         ) : null}
       </div>
 
@@ -476,71 +541,75 @@ function UserMessagesTabContent({
                       const isActive = message.anchorId === activeAnchorId
 
                       return (
-                        <Button
+                        <UserMessageCopyMenu
                           key={`${message.anchorId}-${message.sequence}`}
-                          ref={registerMessageNode(message.anchorId)}
-                          type="button"
-                          variant="ghost"
-                          aria-pressed={isActive}
-                          className={cn(
-                            "group h-auto w-full items-start justify-start rounded-xl border px-3 py-3 text-left shadow-none transition-all",
-                            isActive
-                              ? "border-primary/40 bg-primary/12 text-foreground shadow-sm ring-1 ring-primary/10 hover:bg-primary/14 dark:bg-primary/18"
-                              : "border-border bg-card hover:bg-accent/40"
-                          )}
-                          onClick={() => handleSelectAnchor(message.anchorId)}
+                          text={message.text}
                         >
-                          <div className="flex w-full items-start gap-3">
-                            <span
-                              className={cn(
-                                "mt-0.5 block h-10 w-1 shrink-0 rounded-full transition-colors",
-                                isActive
-                                  ? "bg-primary"
-                                  : "bg-border/80 group-hover:bg-border"
-                              )}
-                              aria-hidden
-                            />
-                            <div className="min-w-0 flex-1 space-y-2">
-                              <div className="flex items-start justify-between gap-2">
-                                <p
-                                  className={cn(
-                                    "min-w-0 truncate text-xs",
-                                    isActive
-                                      ? "font-medium text-primary"
-                                      : "text-muted-foreground"
-                                  )}
-                                >
-                                  {message.timeLabel}
-                                </p>
-                                <div className="flex shrink-0 items-center gap-1.5">
-                                  {isActive ? (
-                                    <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                                      {t("activeBadge")}
-                                    </span>
-                                  ) : null}
-                                  <span
+                          <Button
+                            ref={registerMessageNode(message.anchorId)}
+                            type="button"
+                            variant="ghost"
+                            aria-pressed={isActive}
+                            className={cn(
+                              "group h-auto w-full items-start justify-start rounded-xl border px-3 py-3 text-left shadow-none transition-all",
+                              isActive
+                                ? "border-primary/40 bg-primary/12 text-foreground shadow-sm ring-1 ring-primary/10 hover:bg-primary/14 dark:bg-primary/18"
+                                : "border-border bg-card hover:bg-accent/40"
+                            )}
+                            onClick={() => handleSelectAnchor(message.anchorId)}
+                          >
+                            <div className="flex w-full items-start gap-3">
+                              <span
+                                className={cn(
+                                  "mt-0.5 block h-10 w-1 shrink-0 rounded-full transition-colors",
+                                  isActive
+                                    ? "bg-primary"
+                                    : "bg-border/80 group-hover:bg-border"
+                                )}
+                                aria-hidden
+                              />
+                              <div className="min-w-0 flex-1 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <p
                                     className={cn(
-                                      "rounded-md border px-1.5 py-0.5 text-[10px] tabular-nums",
+                                      "min-w-0 truncate text-xs",
                                       isActive
-                                        ? "border-primary/20 bg-background/80 text-primary"
-                                        : "border-border bg-muted/40 text-muted-foreground"
+                                        ? "font-medium text-primary"
+                                        : "text-muted-foreground"
                                     )}
                                   >
-                                    #{message.sequence}
-                                  </span>
+                                    {message.timeLabel}
+                                  </p>
+                                  <div className="flex shrink-0 items-center gap-1.5">
+                                    {isActive ? (
+                                      <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                                        {t("activeBadge")}
+                                      </span>
+                                    ) : null}
+                                    <span
+                                      className={cn(
+                                        "rounded-md border px-1.5 py-0.5 text-[10px] tabular-nums",
+                                        isActive
+                                          ? "border-primary/20 bg-background/80 text-primary"
+                                          : "border-border bg-muted/40 text-muted-foreground"
+                                      )}
+                                    >
+                                      #{message.sequence}
+                                    </span>
+                                  </div>
                                 </div>
+                                <p
+                                  className={cn(
+                                    "line-clamp-2 text-sm leading-5 text-foreground",
+                                    isActive && "font-medium"
+                                  )}
+                                >
+                                  {message.preview}
+                                </p>
                               </div>
-                              <p
-                                className={cn(
-                                  "line-clamp-2 text-sm leading-5 text-foreground",
-                                  isActive && "font-medium"
-                                )}
-                              >
-                                {message.preview}
-                              </p>
                             </div>
-                          </div>
-                        </Button>
+                          </Button>
+                        </UserMessageCopyMenu>
                       )
                     }
 
@@ -633,74 +702,78 @@ function UserMessagesTabContent({
                                   : message.dateTimeLabel
 
                               return (
-                                <Button
+                                <UserMessageCopyMenu
                                   key={`${messageGroup.key}-${message.anchorId}-${message.sequence}`}
-                                  ref={registerMessageNode(message.anchorId)}
-                                  type="button"
-                                  variant="ghost"
-                                  aria-pressed={isActive}
-                                  className={cn(
-                                    "group h-auto w-full items-start justify-start rounded-lg border px-2.5 py-2 text-left shadow-none transition-colors",
-                                    isActive
-                                      ? "border-primary/30 bg-primary/10 text-foreground hover:bg-primary/12"
-                                      : "border-transparent hover:bg-accent/40"
-                                  )}
-                                  onClick={() =>
-                                    handleSelectAnchor(message.anchorId)
-                                  }
+                                  text={message.text}
                                 >
-                                  <div className="flex w-full items-start gap-3">
-                                    <span
-                                      className={cn(
-                                        "mt-1 block h-2.5 w-2.5 shrink-0 rounded-full border transition-colors",
-                                        isActive
-                                          ? "border-primary bg-primary"
-                                          : "border-border bg-background"
-                                      )}
-                                      aria-hidden
-                                    />
-                                    <div className="min-w-0 flex-1 space-y-1">
-                                      <div className="flex items-start justify-between gap-2">
-                                        <p
-                                          className={cn(
-                                            "min-w-0 truncate text-xs",
-                                            isActive
-                                              ? "font-medium text-primary"
-                                              : "text-muted-foreground"
-                                          )}
-                                        >
-                                          {messageTimeLabel}
-                                        </p>
-                                        <div className="flex shrink-0 items-center gap-1.5">
-                                          {isActive ? (
-                                            <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                                              {t("activeBadge")}
-                                            </span>
-                                          ) : null}
-                                          <span
+                                  <Button
+                                    ref={registerMessageNode(message.anchorId)}
+                                    type="button"
+                                    variant="ghost"
+                                    aria-pressed={isActive}
+                                    className={cn(
+                                      "group h-auto w-full items-start justify-start rounded-lg border px-2.5 py-2 text-left shadow-none transition-colors",
+                                      isActive
+                                        ? "border-primary/30 bg-primary/10 text-foreground hover:bg-primary/12"
+                                        : "border-transparent hover:bg-accent/40"
+                                    )}
+                                    onClick={() =>
+                                      handleSelectAnchor(message.anchorId)
+                                    }
+                                  >
+                                    <div className="flex w-full items-start gap-3">
+                                      <span
+                                        className={cn(
+                                          "mt-1 block h-2.5 w-2.5 shrink-0 rounded-full border transition-colors",
+                                          isActive
+                                            ? "border-primary bg-primary"
+                                            : "border-border bg-background"
+                                        )}
+                                        aria-hidden
+                                      />
+                                      <div className="min-w-0 flex-1 space-y-1">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <p
                                             className={cn(
-                                              "rounded-md border px-1.5 py-0.5 text-[10px] tabular-nums",
+                                              "min-w-0 truncate text-xs",
                                               isActive
-                                                ? "border-primary/20 bg-background/80 text-primary"
-                                                : "border-border bg-muted/40 text-muted-foreground"
+                                                ? "font-medium text-primary"
+                                                : "text-muted-foreground"
                                             )}
                                           >
-                                            #{message.sequence}
-                                          </span>
+                                            {messageTimeLabel}
+                                          </p>
+                                          <div className="flex shrink-0 items-center gap-1.5">
+                                            {isActive ? (
+                                              <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                                                {t("activeBadge")}
+                                              </span>
+                                            ) : null}
+                                            <span
+                                              className={cn(
+                                                "rounded-md border px-1.5 py-0.5 text-[10px] tabular-nums",
+                                                isActive
+                                                  ? "border-primary/20 bg-background/80 text-primary"
+                                                  : "border-border bg-muted/40 text-muted-foreground"
+                                              )}
+                                            >
+                                              #{message.sequence}
+                                            </span>
+                                          </div>
                                         </div>
+                                        <p
+                                          className={cn(
+                                            "line-clamp-1 text-xs leading-5 text-foreground/90",
+                                            isActive &&
+                                              "font-medium text-foreground"
+                                          )}
+                                        >
+                                          {message.preview}
+                                        </p>
                                       </div>
-                                      <p
-                                        className={cn(
-                                          "line-clamp-1 text-xs leading-5 text-foreground/90",
-                                          isActive &&
-                                            "font-medium text-foreground"
-                                        )}
-                                      >
-                                        {message.preview}
-                                      </p>
                                     </div>
-                                  </div>
-                                </Button>
+                                  </Button>
+                                </UserMessageCopyMenu>
                               )
                             })}
                           </div>
