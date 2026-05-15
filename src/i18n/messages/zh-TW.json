@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "搜尋命令...",
         "slashSearchEmpty": "沒有符合的指令",
         "booleanOn": "開",
-        "booleanOff": "關"
+        "booleanOff": "關",
+        "expandInput": "放大輸入框",
+        "restoreInput": "還原輸入框"
       },
       "messageQueue": {
         "addToQueue": "加入佇列",

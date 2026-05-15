@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "명령 검색...",
         "slashSearchEmpty": "일치하는 명령이 없습니다",
         "booleanOn": "켜짐",
-        "booleanOff": "꺼짐"
+        "booleanOff": "꺼짐",
+        "expandInput": "입력창 확대",
+        "restoreInput": "입력창 복원"
       },
       "messageQueue": {
         "addToQueue": "대기열에 추가",

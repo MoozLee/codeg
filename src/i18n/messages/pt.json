@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "Buscar comandos...",
         "slashSearchEmpty": "Nenhum comando correspondente",
         "booleanOn": "Ativado",
-        "booleanOff": "Desativado"
+        "booleanOff": "Desativado",
+        "expandInput": "Expandir entrada",
+        "restoreInput": "Restaurar entrada"
       },
       "messageQueue": {
         "addToQueue": "Adicionar à fila",

@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "Befehle suchen...",
         "slashSearchEmpty": "Keine passenden Befehle",
         "booleanOn": "Ein",
-        "booleanOff": "Aus"
+        "booleanOff": "Aus",
+        "expandInput": "Eingabe vergrößern",
+        "restoreInput": "Eingabe wiederherstellen"
       },
       "messageQueue": {
         "addToQueue": "Zur Warteschlange",

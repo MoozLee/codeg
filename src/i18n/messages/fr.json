@@ -1816,7 +1816,9 @@
         "slashSearchPlaceholder": "Rechercher des commandes...",
         "slashSearchEmpty": "Aucune commande correspondante",
         "booleanOn": "Activé",
-        "booleanOff": "Désactivé"
+        "booleanOff": "Désactivé",
+        "expandInput": "Agrandir la saisie",
+        "restoreInput": "Restaurer la saisie"
       },
       "messageQueue": {
         "addToQueue": "Mettre en file",
