@@ -538,8 +538,6 @@ jobs:
           retryAttempts: 2
 
   build-server:
-    # Disabled while release publishing is limited to the macOS arm64 desktop artifact.
-    if: ${{ false }}
     needs: create-draft-release
     name: Server ${{ matrix.name }}
     permissions:
@@ -552,22 +550,6 @@ jobs:
             runner: "ubuntu-22.04"
             target: "x86_64-unknown-linux-gnu"
             artifact: "codeg-server-linux-x64"
-          - name: "Linux arm64"
-            runner: "ubuntu-22.04"
-            target: "aarch64-unknown-linux-gnu"
-            artifact: "codeg-server-linux-arm64"
-          - name: "macOS x64"
-            runner: "macos-latest"
-            target: "x86_64-apple-darwin"
-            artifact: "codeg-server-darwin-x64"
-          - name: "macOS arm64"
-            runner: "macos-latest"
-            target: "aarch64-apple-darwin"
-            artifact: "codeg-server-darwin-arm64"
-          - name: "Windows x64"
-            runner: "windows-2022"
-            target: "x86_64-pc-windows-msvc"
-            artifact: "codeg-server-windows-x64"
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -747,9 +729,9 @@ jobs:
     needs:
       - create-draft-release
       - build-tauri
-      # - build-server
+      - build-server
       # - build-docker
-    if: ${{ needs.build-tauri.result == 'success' }}
+    if: ${{ needs.build-tauri.result == 'success' && needs.build-server.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
