@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::Extension,
+    extract::{DefaultBodyLimit, Extension},
     http::{StatusCode, Uri},
     middleware::{self, Next},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
+
+use crate::web::handlers::files::UPLOAD_MAX_BYTES;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -30,6 +32,13 @@ pub fn build_router(
 
     let api = Router::new()
         .route("/health", post(health_check))
+        // Debug endpoint: operator-facing snapshot of `EventBusMetrics`
+        // (emit volume, lag/eviction counts, attach decision counts).
+        // Sits behind the same auth middleware as every other route.
+        .route(
+            "/debug/event_metrics",
+            get(handlers::event_metrics::get_event_metrics),
+        )
         // ─── Conversations ───
         .route(
             "/list_conversations",
@@ -137,6 +146,10 @@ pub fn build_router(
         .route(
             "/list_directory_entries",
             post(handlers::folders::list_directory_entries),
+        )
+        .route(
+            "/list_directory_with_files",
+            post(handlers::folders::list_directory_with_files),
         )
         .route("/get_file_tree", post(handlers::folders::get_file_tree))
         .route(
@@ -286,6 +299,19 @@ pub fn build_router(
         .route(
             "/create_file_tree_entry",
             post(handlers::files::create_file_tree_entry),
+        )
+        .route(
+            "/upload_attachment",
+            // The 2MiB `UPLOAD_MAX_BYTES` is the *file payload* limit; the
+            // raw multipart body also carries boundary markers, the
+            // `Content-Disposition` headers, and the `session_id` field —
+            // ~256-512 bytes of overhead. Without this layer, axum's default
+            // 2MiB `DefaultBodyLimit` rejects a perfectly-sized 2MiB file
+            // before our handler ever sees a chunk. Pad by 64KiB so the
+            // handler's own chunk-summing check (in `files.rs`) stays the
+            // authoritative size boundary.
+            post(handlers::files::upload_attachment)
+                .layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES as usize + 64 * 1024)),
         )
         // ─── Folder commands ───
         .route(

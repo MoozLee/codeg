@@ -1,3 +1,5 @@
+import type { EventEnvelope, LiveSessionSnapshot } from "@/lib/types"
+
 export type UnsubscribeFn = () => void
 
 export interface RemoteTransportConfig {
@@ -7,6 +9,70 @@ export interface RemoteTransportConfig {
   token: string
   windowInstanceId: string
   onUnauthorized?: () => void
+}
+
+/**
+ * Reasons the server may end an attach subscription unilaterally.
+ * Mirrors `DetachReason` in `src-tauri/src/web/ws_attach.rs`.
+ */
+export type AttachDetachReason =
+  | "connection_gone"
+  | "lagged"
+  | "server_shutdown"
+
+/**
+ * Per-subscription callbacks delivered by `EventStream.attach`. Exactly one
+ * of `onSnapshot` / `onReplay` fires first (the response to the attach
+ * itself), followed by zero or more `onEvent` calls until either the
+ * caller invokes `detach()` or the server emits `onDetached`.
+ *
+ * `eventSeq` / `highWaterSeq` are the high-water mark after the initial
+ * frame; subsequent `onEvent` envelopes have `envelope.seq > highWaterSeq`.
+ */
+export interface AttachHandlers {
+  onSnapshot(snapshot: LiveSessionSnapshot, eventSeq: number): void
+  onReplay(events: EventEnvelope[], highWaterSeq: number): void
+  onEvent(envelope: EventEnvelope): void
+  onDetached(reason: AttachDetachReason): void
+}
+
+export interface AttachOptions {
+  /**
+   * Last seq the consumer has already applied. Omit for a cold start —
+   * server responds with a full snapshot. Provide on reconnect to request
+   * a batched replay; server still falls back to snapshot if the gap is
+   * too large or the cursor is older than the ring buffer.
+   */
+  sinceSeq?: number
+}
+
+export interface EventStreamSubscription {
+  /** Server-assigned subscription id (echoed by every related frame). */
+  readonly subscriptionId: string
+  /**
+   * Cancel this subscription. Idempotent — calling twice is a no-op. Sends
+   * a `detach` to the server (best-effort) and frees client-side handlers.
+   * After detach, neither `onEvent` nor `onDetached` fires for this sub.
+   */
+  detach(): void
+}
+
+/**
+ * Subscribe-with-Snapshot event stream — the channel that replaces the
+ * legacy global `acp://event` firehose for clients that opt in. See
+ * `.docs/dev-design/2026-05-15-event-stream-protocol.md` for the full
+ * design rationale.
+ *
+ * Implementations are responsible for re-attaching active subscriptions
+ * after a reconnect (using each sub's running `lastAppliedSeq` as
+ * `sinceSeq`), so consumers don't need to handle reconnect explicitly.
+ */
+export interface EventStream {
+  attach(
+    connectionId: string,
+    options: AttachOptions,
+    handlers: AttachHandlers
+  ): EventStreamSubscription
 }
 
 export interface Transport {
@@ -56,6 +122,15 @@ export interface Transport {
    * transports leave this undefined (no disconnect window to guard).
    */
   waitForReady?(): Promise<void>
+
+  /**
+   * Per-connection event stream (Subscribe-with-Snapshot). Returns
+   * `undefined` for transports that don't yet support the attach protocol —
+   * callers fall back to the legacy `subscribe()` channel. Implementations
+   * are stateful: the same EventStream instance handles re-attach on
+   * reconnect transparently to the caller.
+   */
+  eventStream?(): EventStream
 
   destroy?(): void
 }

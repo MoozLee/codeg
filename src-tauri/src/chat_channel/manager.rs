@@ -210,9 +210,18 @@ impl ChatChannelManager {
 
     /// Start background tasks (event subscriber + command dispatcher) and
     /// auto-connect all enabled channels from DB.
+    ///
+    /// `broadcaster` continues to back the `*Status* / *Inbound*` JSON
+    /// events the ChatChannel itself emits (still consumed by the WS
+    /// firehose). `bus` carries typed `Arc<EventEnvelope>` to the two
+    /// ACP-event-driven subscribers (`event_subscriber`,
+    /// `session_event_subscriber`). Phase 5 split: ACP-shaped data goes
+    /// through the typed bus; chat-channel-shaped data stays on the JSON
+    /// broadcaster.
     pub async fn start_background(
         &self,
         broadcaster: Arc<WebEventBroadcaster>,
+        bus: Arc<crate::acp::InternalEventBus>,
         db_conn: DatabaseConnection,
         conn_mgr: ConnectionManager,
         emitter: EventEmitter,
@@ -228,7 +237,7 @@ impl ChatChannelManager {
         // Spawn event subscriber
         let manager_for_events = self.clone_ref();
         super::event_subscriber::spawn_event_subscriber(
-            broadcaster.clone(),
+            bus.clone(),
             manager_for_events,
             db_conn.clone(),
         );
@@ -236,7 +245,7 @@ impl ChatChannelManager {
         // Spawn session event subscriber (ACP event routing to channels)
         let manager_for_session_events = self.clone_ref();
         super::session_event_subscriber::spawn_session_event_subscriber(
-            broadcaster,
+            bus,
             bridge.clone(),
             manager_for_session_events,
             conn_mgr.clone_ref(),

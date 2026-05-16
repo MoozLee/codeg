@@ -1570,15 +1570,11 @@ mod tests {
             .expect("assistant turn");
         let completed_at = assistant.completed_at.expect("completed_at populated");
         // The assistant event's own timestamp.
-        let expected = "2026-03-01T10:03:19.301Z"
-            .parse::<DateTime<Utc>>()
-            .unwrap();
+        let expected = "2026-03-01T10:03:19.301Z".parse::<DateTime<Utc>>().unwrap();
         assert_eq!(completed_at, expected);
         // Sanity: ensure we did NOT compute timestamp + duration_ms
         // (which would have landed at 10:06:38.334Z, ~3min 19s later).
-        let wrong = "2026-03-01T10:06:38.334Z"
-            .parse::<DateTime<Utc>>()
-            .unwrap();
+        let wrong = "2026-03-01T10:06:38.334Z".parse::<DateTime<Utc>>().unwrap();
         assert_ne!(completed_at, wrong);
     }
 

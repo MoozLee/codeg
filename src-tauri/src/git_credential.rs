@@ -764,7 +764,10 @@ mod tests {
         // Sanity: the script must be executable, otherwise git's exec fails
         // silently and we'd never reach the helper at all.
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&script_path).unwrap().permissions().mode();
+        let mode = std::fs::metadata(&script_path)
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o111, 0o111, "script should be executable");
 
         let _ = std::fs::remove_dir_all(&tmp);

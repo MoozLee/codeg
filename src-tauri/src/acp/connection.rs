@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use sacp::schema::{
     BlobResourceContents, CancelNotification, ClientCapabilities, ContentBlock, ContentChunk,
@@ -35,125 +34,15 @@ use crate::acp::session_state::SessionState;
 use crate::acp::terminal_runtime::{TerminalRuntime, TerminalRuntimeError};
 use crate::acp::types::{
     AcpEvent, AvailableCommandInfo, ConnectionInfo, ConnectionStatus, PermissionOptionInfo,
-    PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock, SessionConfigBooleanInfo,
-    SessionConfigKindInfo, SessionConfigOptionInfo, SessionConfigSelectGroupInfo,
-    SessionConfigSelectInfo, SessionConfigSelectOptionInfo, SessionModeInfo, SessionModeStateInfo,
-    ToolCallImageInfo,
+    PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock, SessionConfigKindInfo,
+    SessionConfigOptionInfo, SessionConfigSelectGroupInfo, SessionConfigSelectInfo,
+    SessionConfigSelectOptionInfo, SessionModeInfo, SessionModeStateInfo, ToolCallImageInfo,
 };
 use crate::models::agent::AgentType;
 use crate::network::proxy;
 use crate::web::event_bridge::{emit_with_state, EventEmitter};
 
 const DEFAULT_COMMAND_COLOR_ENV: [(&str, &str); 1] = [("CLICOLOR_FORCE", "1")];
-const CONTEXT_CONFIG_DEBUG_KEYS: [&str; 2] = [
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-];
-const MAX_USAGE_DEBUG_LOGS_PER_SESSION: u32 = 5;
-const CLAUDE_CONTEXT_1M_BETA: &str = "context-1m-2025-08-07";
-
-#[derive(Debug, Default)]
-struct UsageDebugState {
-    count: u32,
-    last_context_window: Option<u64>,
-}
-
-fn usage_debug_state() -> &'static Mutex<HashMap<String, UsageDebugState>> {
-    static STATE: OnceLock<Mutex<HashMap<String, UsageDebugState>>> = OnceLock::new();
-    STATE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn should_log_usage_debug(session_key: String, context_window: Option<u64>) -> bool {
-    usage_debug_state()
-        .lock()
-        .map(|mut states| {
-            let state = states.entry(session_key).or_default();
-            let context_window_changed =
-                context_window.is_some() && state.last_context_window != context_window;
-            let first_few = state.count < MAX_USAGE_DEBUG_LOGS_PER_SESSION;
-            state.count = state.count.saturating_add(1);
-            if context_window.is_some() {
-                state.last_context_window = context_window;
-            }
-            first_few || context_window_changed
-        })
-        .unwrap_or(true)
-}
-
-fn context_config_debug_enabled() -> bool {
-    matches!(std::env::var("CODEG_DEBUG_CONTEXT_CONFIG"), Ok(value) if value == "1")
-}
-
-fn is_context_config_key(key: &str) -> bool {
-    let normalized = key.to_ascii_lowercase();
-    ["model", "compact", "compaction", "context"]
-        .iter()
-        .any(|pattern| normalized.contains(pattern))
-}
-
-fn is_secret_config_key(key: &str) -> bool {
-    let normalized = key.to_ascii_lowercase();
-    ["key", "token", "secret", "password", "credential", "auth"]
-        .iter()
-        .any(|pattern| normalized.contains(pattern))
-}
-
-fn sanitized_context_env_fields(env: &[(String, String)]) -> BTreeMap<String, String> {
-    env.iter()
-        .filter(|(key, _)| is_context_config_key(key) && !is_secret_config_key(key))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect()
-}
-
-fn debug_context_spawn_env(agent_type: AgentType, env: &[(String, String)]) {
-    if !context_config_debug_enabled() {
-        return;
-    }
-
-    let env_map = env
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    let tracked = CONTEXT_CONFIG_DEBUG_KEYS
-        .iter()
-        .map(|key| {
-            (
-                *key,
-                serde_json::json!({
-                    "present": env_map.contains_key(key),
-                    "value": env_map.get(key).copied(),
-                }),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-
-    eprintln!(
-        "[context-config] spawn_env agent_type={agent_type:?} {}",
-        serde_json::json!({
-            "tracked_keys": tracked,
-            "safe_context_env_fields": sanitized_context_env_fields(env),
-        })
-    );
-}
-
-fn debug_context_usage_update(session_id: &SessionId, used: u64, size: u64) {
-    if !context_config_debug_enabled() {
-        return;
-    }
-
-    let session_id = session_id.0.to_string();
-    if should_log_usage_debug(format!("usage_update:{session_id}"), Some(size)) {
-        eprintln!(
-            "[context-config] usage_update {}",
-            serde_json::json!({
-                "session_id": session_id,
-                "used": used,
-                "size": size,
-                "context_window": size,
-            })
-        );
-    }
-}
 
 fn merge_agent_env(
     env: &[(&'static str, &'static str)],
@@ -290,7 +179,6 @@ async fn build_agent(
     match meta.distribution {
         AgentDistribution::Npx { cmd, args, env, .. } => {
             let merged_env = merge_agent_env(env, runtime_env);
-            debug_context_spawn_env(agent_type, &merged_env);
             let mut parts: Vec<String> = Vec::new();
             for (k, v) in &merged_env {
                 parts.push(format!("{k}={v}"));
@@ -402,7 +290,6 @@ async fn build_agent(
                 server = server.args(cmd_args);
             }
             let merged_env = merge_agent_env(env, runtime_env);
-            debug_context_spawn_env(agent_type, &merged_env);
             let env_key_list: Vec<&str> = merged_env.iter().map(|(k, _)| k.as_str()).collect();
             if !merged_env.is_empty() {
                 let env_vars: Vec<sacp::schema::EnvVariable> = merged_env
@@ -494,6 +381,8 @@ pub async fn spawn_agent_connection(
     owner_window_label: String,
     emitter: EventEmitter,
     connections: Arc<tokio::sync::Mutex<HashMap<String, AgentConnection>>>,
+    preferred_mode_id: Option<String>,
+    preferred_config_values: BTreeMap<String, String>,
 ) -> Result<tokio::sync::oneshot::Receiver<()>, AcpError> {
     // Create the authoritative session state up front. Subsequent emit_with_state
     // calls write through this state and increment its seq counter so the first
@@ -579,7 +468,8 @@ pub async fn spawn_agent_connection(
             emitter_clone.clone(),
             Arc::clone(&state_clone),
             terminal_base_env,
-            runtime_env,
+            preferred_mode_id,
+            preferred_config_values,
         )
         .await;
 
@@ -732,15 +622,6 @@ fn map_session_config_option(option: &SessionConfigOption) -> Option<SessionConf
                 }),
             })
         }
-        SessionConfigKind::Boolean(boolean) => Some(SessionConfigOptionInfo {
-            id: option.id.to_string(),
-            name: option.name.clone(),
-            description: option.description.clone(),
-            category: option.category.as_ref().map(map_session_config_category),
-            kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
-                current_value: boolean.current_value,
-            }),
-        }),
         _ => None,
     }
 }
@@ -820,20 +701,6 @@ async fn emit_session_config_options_values(
     .await;
 }
 
-async fn emit_session_config_options(
-    state: &Arc<RwLock<SessionState>>,
-    emitter: &EventEmitter,
-    agent_type: AgentType,
-    config_options: &Option<Vec<SessionConfigOption>>,
-) {
-    // Always emit one config-options snapshot after session attach.
-    // Some agents (e.g. Gemini CLI) may not expose session config options
-    // and return `None`; emitting an empty list lets the frontend settle
-    // loading state instead of waiting forever.
-    let options = config_options.clone().unwrap_or_default();
-    emit_session_config_options_values(state, emitter, agent_type, options).await;
-}
-
 async fn emit_selectors_ready(state: &Arc<RwLock<SessionState>>, emitter: &EventEmitter) {
     emit_with_state(state, emitter, AcpEvent::SelectorsReady).await;
 }
@@ -872,148 +739,8 @@ fn resolve_working_dir(working_dir: Option<&str>) -> PathBuf {
     }
 }
 
-#[derive(Debug, Clone)]
-struct ClaudeAutoCompactWindowConfig {
-    value: Option<i64>,
-    source: &'static str,
-    raw_present: bool,
-    process_env_present: bool,
-    skipped_reason: Option<&'static str>,
-}
-
-fn resolve_claude_auto_compact_window_config(
-    runtime_env: &BTreeMap<String, String>,
-) -> ClaudeAutoCompactWindowConfig {
-    let process_env_present = std::env::var("CLAUDE_CODE_AUTO_COMPACT_WINDOW").is_ok();
-    let Some(raw_value) = runtime_env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW") else {
-        return ClaudeAutoCompactWindowConfig {
-            value: None,
-            source: "unset",
-            raw_present: false,
-            process_env_present,
-            skipped_reason: Some("missing"),
-        };
-    };
-    let raw = raw_value.trim();
-    if raw.is_empty() {
-        return ClaudeAutoCompactWindowConfig {
-            value: None,
-            source: "runtime_env",
-            raw_present: true,
-            process_env_present,
-            skipped_reason: Some("empty"),
-        };
-    }
-
-    let Ok(value) = raw.parse::<i64>() else {
-        return ClaudeAutoCompactWindowConfig {
-            value: None,
-            source: "runtime_env",
-            raw_present: true,
-            process_env_present,
-            skipped_reason: Some("parse_failed"),
-        };
-    };
-    // Claude Code's settings schema accepts autoCompactWindow in this range.
-    // Do not forward invalid values through _meta, because the SDK treats
-    // _meta.claudeCode.options as high-priority flag settings and may reject
-    // the whole session on schema errors. The original env var is still passed
-    // to the ACP wrapper/Claude process for diagnostics and upstream support.
-    if (100_000..=1_000_000).contains(&value) {
-        ClaudeAutoCompactWindowConfig {
-            value: Some(value),
-            source: "runtime_env",
-            raw_present: true,
-            process_env_present,
-            skipped_reason: None,
-        }
-    } else {
-        ClaudeAutoCompactWindowConfig {
-            value: None,
-            source: "runtime_env",
-            raw_present: true,
-            process_env_present,
-            skipped_reason: Some("out_of_range"),
-        }
-    }
-}
-
-fn configured_claude_auto_compact_window(runtime_env: &BTreeMap<String, String>) -> Option<i64> {
-    resolve_claude_auto_compact_window_config(runtime_env).value
-}
-
-fn read_claude_code_user_options(
-    runtime_env: &BTreeMap<String, String>,
-) -> serde_json::Map<String, serde_json::Value> {
-    let Some(settings_path) = runtime_env
-        .get("CODEG_TEST_CLAUDE_SETTINGS_PATH")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".claude").join("settings.json")))
-    else {
-        return serde_json::Map::new();
-    };
-
-    let Some(options) = fs::read_to_string(settings_path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|value| {
-            value
-                .get("_meta")
-                .and_then(|meta| meta.get("claudeCode"))
-                .and_then(|claude_code| claude_code.get("options"))
-                .and_then(|options| options.as_object())
-                .cloned()
-        })
-    else {
-        return serde_json::Map::new();
-    };
-
-    options
-}
-
-fn merge_json_objects(
-    target: &mut serde_json::Map<String, serde_json::Value>,
-    patch: serde_json::Map<String, serde_json::Value>,
-) {
-    for (key, value) in patch {
-        match (target.get_mut(&key), value) {
-            (
-                Some(serde_json::Value::Object(target_object)),
-                serde_json::Value::Object(patch_object),
-            ) => {
-                merge_json_objects(target_object, patch_object);
-            }
-            (_, value) => {
-                target.insert(key, value);
-            }
-        }
-    }
-}
-
-fn merge_claude_context_beta(options: &mut serde_json::Map<String, serde_json::Value>) {
-    match options.get_mut("betas") {
-        Some(serde_json::Value::Array(betas)) => {
-            if !betas
-                .iter()
-                .any(|value| value.as_str() == Some(CLAUDE_CONTEXT_1M_BETA))
-            {
-                betas.push(serde_json::Value::String(
-                    CLAUDE_CONTEXT_1M_BETA.to_string(),
-                ));
-            }
-        }
-        _ => {
-            options.insert(
-                "betas".to_string(),
-                serde_json::json!([CLAUDE_CONTEXT_1M_BETA]),
-            );
-        }
-    }
-}
-
 fn claude_raw_sdk_session_meta(
     agent_type: AgentType,
-    runtime_env: &BTreeMap<String, String>,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     if agent_type != AgentType::ClaudeCode {
         return None;
@@ -1025,32 +752,6 @@ fn claude_raw_sdk_session_meta(
         serde_json::Value::Bool(true),
     );
 
-    if let Some(auto_compact_window) = configured_claude_auto_compact_window(runtime_env) {
-        // @agentclientprotocol/claude-agent-acp@0.33.1 forwards
-        // _meta.claudeCode.options directly into @anthropic-ai/claude-agent-sdk
-        // query({ options }).  autoCompactWindow is a Claude Code setting, while
-        // context above 200k requires the SDK beta option when the selected model
-        // supports it. The runtime may still report a smaller contextWindow for
-        // models/accounts that do not support the beta; the UI treats that report
-        // as authoritative.
-        let mut options = read_claude_code_user_options(runtime_env);
-        merge_json_objects(
-            &mut options,
-            serde_json::json!({
-                "settings": {
-                    "autoCompactWindow": auto_compact_window,
-                },
-            })
-            .as_object()
-            .cloned()
-            .unwrap_or_default(),
-        );
-        if auto_compact_window > 200_000 {
-            merge_claude_context_beta(&mut options);
-        }
-        claude_code.insert("options".to_string(), serde_json::Value::Object(options));
-    }
-
     let mut meta = serde_json::Map::new();
     meta.insert(
         "claudeCode".to_string(),
@@ -1059,42 +760,13 @@ fn claude_raw_sdk_session_meta(
     Some(meta)
 }
 
-fn debug_context_session_request(
-    operation: &str,
-    agent_type: AgentType,
-    runtime_env: &BTreeMap<String, String>,
-) {
-    if !context_config_debug_enabled() {
-        return;
-    }
-
-    let auto_compact = resolve_claude_auto_compact_window_config(runtime_env);
-    eprintln!(
-        "[context-config] session_request operation={operation} agent_type={agent_type:?} {}",
-        serde_json::json!({
-            "claude_code_meta": agent_type == AgentType::ClaudeCode,
-            "emit_raw_sdk_messages": agent_type == AgentType::ClaudeCode,
-            "auto_compact_window": {
-                "value": auto_compact.value,
-                "source": auto_compact.source,
-                "raw_present": auto_compact.raw_present,
-                "process_env_present": auto_compact.process_env_present,
-                "skipped_reason": auto_compact.skipped_reason,
-                "injected": auto_compact.value.is_some(),
-            },
-        })
-    );
-}
-
 fn build_new_session_request(
     agent_type: AgentType,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
-    runtime_env: &BTreeMap<String, String>,
 ) -> NewSessionRequest {
-    debug_context_session_request("session/new", agent_type, runtime_env);
     let mut req = NewSessionRequest::new(cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type, runtime_env) {
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -1108,11 +780,9 @@ fn build_load_session_request(
     session_id: SessionId,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
-    runtime_env: &BTreeMap<String, String>,
 ) -> LoadSessionRequest {
-    debug_context_session_request("session/load", agent_type, runtime_env);
     let mut req = LoadSessionRequest::new(session_id, cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type, runtime_env) {
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -1259,7 +929,8 @@ async fn run_connection(
     emitter: EventEmitter,
     state: Arc<RwLock<SessionState>>,
     terminal_base_env: BTreeMap<String, String>,
-    runtime_env: BTreeMap<String, String>,
+    preferred_mode_id: Option<String>,
+    preferred_config_values: BTreeMap<String, String>,
 ) -> Result<(), AcpError> {
     let pending_perms: PendingPermissions = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     // `terminal_base_env` already filtered to just the credential helper
@@ -1524,7 +1195,6 @@ async fn run_connection(
                     SessionId::new(sid.clone()),
                     &cwd,
                     mcp_servers.clone(),
-                    &runtime_env,
                 );
                 let load_result = cx.send_request_to(Agent, load_req).block_task().await;
 
@@ -1561,12 +1231,12 @@ async fn run_connection(
                                             // forwards AvailableCommandsUpdate,
                                             // which never carries tool output
                                             // — a throwaway cache is fine.
-                                            let mut replay_cache = ToolCallOutputCache::default();
+                                            let mut replay_cache =
+                                                ToolCallOutputCache::default();
                                             emit_conversation_update(
                                                 &st,
                                                 &h,
                                                 agent_type,
-                                                None,
                                                 notif.update,
                                                 None,
                                                 &mut replay_cache,
@@ -1577,8 +1247,7 @@ async fn run_connection(
                                     })
                                     .await
                                     .otherwise(async |dispatch| {
-                                        maybe_emit_claude_sdk_ext_notification(&st, &h, dispatch)
-                                            .await;
+                                        maybe_emit_claude_sdk_ext_notification(&st, &h, dispatch).await;
                                         Ok(())
                                     })
                                     .await;
@@ -1597,11 +1266,21 @@ async fn run_connection(
                         )
                         .await;
                         emit_session_modes(&state, &emitter_clone, session.modes()).await;
-                        emit_session_config_options(
+                        let updated_config_options = apply_preferred_session_options(
+                            &cx,
+                            &mut session,
+                            &state,
+                            &emitter_clone,
+                            preferred_mode_id.as_deref(),
+                            &preferred_config_values,
+                            initial_config_options.unwrap_or_default(),
+                        )
+                        .await;
+                        emit_session_config_options_values(
                             &state,
                             &emitter_clone,
                             agent_type,
-                            &initial_config_options,
+                            updated_config_options,
                         )
                         .await;
                         emit_selectors_ready(&state, &emitter_clone).await;
@@ -1708,7 +1387,6 @@ async fn run_connection(
                                     agent_type,
                                     &cwd,
                                     mcp_servers.clone(),
-                                    &runtime_env,
                                 ),
                             )
                             .block_task()
@@ -1725,11 +1403,21 @@ async fn run_connection(
                         )
                         .await;
                         emit_session_modes(&state, &emitter_clone, session.modes()).await;
-                        emit_session_config_options(
+                        let updated_config_options = apply_preferred_session_options(
+                            &cx,
+                            &mut session,
+                            &state,
+                            &emitter_clone,
+                            preferred_mode_id.as_deref(),
+                            &preferred_config_values,
+                            initial_config_options.unwrap_or_default(),
+                        )
+                        .await;
+                        emit_session_config_options_values(
                             &state,
                             &emitter_clone,
                             agent_type,
-                            &initial_config_options,
+                            updated_config_options,
                         )
                         .await;
                         emit_selectors_ready(&state, &emitter_clone).await;
@@ -1771,7 +1459,7 @@ async fn run_connection(
                 let new_resp = cx
                     .send_request_to(
                         Agent,
-                        build_new_session_request(agent_type, &cwd, mcp_servers.clone(), &runtime_env),
+                        build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
                     )
                     .block_task()
                     .await?;
@@ -1787,11 +1475,21 @@ async fn run_connection(
                 )
                 .await;
                 emit_session_modes(&state, &emitter_clone, session.modes()).await;
-                emit_session_config_options(
+                let updated_config_options = apply_preferred_session_options(
+                    &cx,
+                    &mut session,
+                    &state,
+                    &emitter_clone,
+                    preferred_mode_id.as_deref(),
+                    &preferred_config_values,
+                    initial_config_options.unwrap_or_default(),
+                )
+                .await;
+                emit_session_config_options_values(
                     &state,
                     &emitter_clone,
                     agent_type,
-                    &initial_config_options,
+                    updated_config_options,
                 )
                 .await;
                 emit_selectors_ready(&state, &emitter_clone).await;
@@ -1958,6 +1656,22 @@ async fn set_session_config_option(
     config_id: String,
     value: SessionConfigCommandValue,
 ) -> Result<(), sacp::Error> {
+    let updated = set_session_config_option_inner(cx, session_id, config_id, value).await?;
+    emit_session_config_options_values(state, emitter, agent_type, updated).await;
+    Ok(())
+}
+
+/// Wire-level half of `set_session_config_option`: send the JSON-RPC request and
+/// return the agent's new config-options list, without touching SessionState or
+/// emitting events. Used at session-init to apply saved preferences before the
+/// single emit_session_config_options call so the frontend never sees an
+/// "agent default → user preference" flicker.
+async fn set_session_config_option_inner(
+    cx: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    config_id: String,
+    value: SessionConfigCommandValue,
+) -> Result<Vec<SessionConfigOption>, sacp::Error> {
     let req = match value {
         SessionConfigCommandValue::ValueId(value) => {
             SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value.as_str())
@@ -1976,8 +1690,89 @@ async fn set_session_config_option(
             sacp::util::internal_error(format!("Failed to parse config option response: {e}"))
         })?;
 
-    emit_session_config_options_values(state, emitter, agent_type, response.config_options).await;
-    Ok(())
+    Ok(response.config_options)
+}
+
+/// Apply user-saved mode and config-option preferences to a freshly-attached
+/// session BEFORE the initial `session_modes` / `session_config_options`
+/// events are emitted to the frontend.
+///
+/// This is the single ownership point for "preference → agent state" — the
+/// frontend stores the user's last selections per agent_type and ships them
+/// to the backend on connect; we then call `session/set_mode` and
+/// `session/set_config_option` to align the agent process so the snapshot
+/// the frontend will see (whether via WS `snapshot` frame or fetched HTTP
+/// snapshot) already reflects the user's choices. No client-side
+/// "intercept event and rewrite then sync back" hack — single source of truth.
+///
+/// Returns the (possibly updated) list of config options that the caller
+/// should emit. Mode preferences trigger a `ModeChanged` event from
+/// `set_session_mode`, which the caller's `emit_session_modes` immediately
+/// precedes — so the frontend sees `SessionModes{default}` then
+/// `ModeChanged{preferred}` and converges to the preferred value before
+/// `SelectorsReady` fires. Failures on individual preferences are logged
+/// and skipped so a stale/invalid preference can't block session startup.
+#[allow(clippy::too_many_arguments)]
+async fn apply_preferred_session_options(
+    cx: &ConnectionTo<Agent>,
+    session: &mut sacp::ActiveSession<'_, Agent>,
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    preferred_mode_id: Option<&str>,
+    preferred_config_values: &BTreeMap<String, String>,
+    initial_config_options: Vec<SessionConfigOption>,
+) -> Vec<SessionConfigOption> {
+    if let Some(pref_mode) = preferred_mode_id {
+        let needs_apply = session
+            .modes()
+            .as_ref()
+            .map(|m| m.current_mode_id.to_string() != pref_mode)
+            .unwrap_or(false);
+        if needs_apply {
+            if let Err(e) = set_session_mode(session, state, emitter, pref_mode.to_string()).await {
+                eprintln!("[ACP] failed to apply preferred mode '{pref_mode}' on connect: {e}");
+            }
+        }
+    }
+
+    if preferred_config_values.is_empty() {
+        return initial_config_options;
+    }
+
+    let session_id = session.session_id().clone();
+    let mut options = initial_config_options;
+    for (config_id, value) in preferred_config_values {
+        // Skip the round-trip when the agent's current value already matches.
+        // Note: Codex omits "mode" from its advertised options but accepts
+        // `set_config_option` for it (see `ensure_codex_mode_option`), so we
+        // do NOT skip on "config_id not in options" — let the agent decide.
+        let already_matches = options.iter().any(|o| {
+            o.id.to_string() == *config_id
+                && matches!(
+                    &o.kind,
+                    SessionConfigKind::Select(s) if s.current_value.to_string() == *value
+                )
+        });
+        if already_matches {
+            continue;
+        }
+        match set_session_config_option_inner(
+            cx,
+            &session_id,
+            config_id.clone(),
+            SessionConfigCommandValue::ValueId(value.clone()),
+        )
+        .await
+        {
+            Ok(updated) => options = updated,
+            Err(e) => eprintln!(
+                "[ACP] failed to apply preferred config '{config_id}'='{value}' \
+                 on connect: {e}"
+            ),
+        }
+    }
+
+    options
 }
 
 const TERMINAL_POLL_INTERVAL_MS: u64 = 200;
@@ -2220,6 +2015,10 @@ struct TerminalPollResult {
     append: bool,
     any_found: bool,
     all_exited: bool,
+}
+
+fn is_final_tool_call_status(status: Option<&str>) -> bool {
+    matches!(status, Some("completed" | "failed"))
 }
 
 fn merge_terminal_ids(existing: &mut Vec<String>, incoming: Vec<String>) -> bool {
@@ -2486,7 +2285,7 @@ async fn poll_tracked_terminal_tool_calls(
                 .await;
         }
 
-        if (matches!(entry.status.as_deref(), Some("completed" | "failed"))
+        if (is_final_tool_call_status(entry.status.as_deref())
             && (!poll_result.any_found || poll_result.all_exited))
             || entry.missing_polls >= TERMINAL_POLL_MISSING_LIMIT
         {
@@ -2547,45 +2346,6 @@ fn map_prompt_blocks(blocks: Vec<PromptInputBlock>) -> Vec<ContentBlock> {
             }
         })
         .collect()
-}
-
-async fn emit_turn_complete_once(
-    state: &Arc<RwLock<SessionState>>,
-    emitter: &EventEmitter,
-    session_id: &SessionId,
-    agent_type: AgentType,
-    stop_reason: &str,
-    turn_completed: &mut bool,
-) {
-    if *turn_completed {
-        return;
-    }
-    *turn_completed = true;
-    emit_with_state(
-        state,
-        emitter,
-        AcpEvent::TurnComplete {
-            session_id: session_id.0.to_string(),
-            stop_reason: stop_reason.into(),
-            agent_type: agent_type.to_string(),
-        },
-    )
-    .await;
-}
-
-async fn clear_pending_permission_state_if_matches(
-    state: &Arc<RwLock<SessionState>>,
-    request_id: &str,
-) {
-    let mut session_state = state.write().await;
-    if session_state
-        .pending_permission
-        .as_ref()
-        .is_some_and(|pending| pending.request_id == request_id)
-    {
-        session_state.pending_permission = None;
-        session_state.last_activity_at = chrono::Utc::now();
-    }
 }
 
 /// Result when the conversation loop exits due to a fork request.
@@ -2657,7 +2417,13 @@ async fn handle_fork_or_exit(
     )
     .await;
     emit_session_modes(state, emitter, session.modes()).await;
-    emit_session_config_options(state, emitter, agent_type, &initial_config_options).await;
+    emit_session_config_options_values(
+        state,
+        emitter,
+        agent_type,
+        initial_config_options.unwrap_or_default(),
+    )
+    .await;
     emit_selectors_ready(state, emitter).await;
 
     let loop_result = run_conversation_loop(
@@ -2808,7 +2574,7 @@ async fn run_conversation_loop<'a>(
                             let _ = MatchDispatch::new(dispatch)
                                 .if_notification(
                                     async |notif: SessionNotification| {
-                                        emit_conversation_update(&st, &h, agent_type, Some(session.session_id()), notif.update, cwd_opt, &mut raw_output_cache).await;
+                                        emit_conversation_update(&st, &h, agent_type, notif.update, cwd_opt, &mut raw_output_cache).await;
                                         Ok(())
                                     },
                                 )
@@ -2873,11 +2639,6 @@ async fn run_conversation_loop<'a>(
                 );
                 terminal_poll_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                // Do not infer turn completion from idle silence here.
-                // Real sessions can legitimately go quiet between tool phases,
-                // permission handoffs, or external waits; rely on explicit
-                // StopReason / prompt-response / cancel paths instead.
-                let mut turn_completed = false;
                 let mut disconnect_requested = false;
                 // Tracks whether the agent produced any real output during
                 // this turn (text reply, thinking chunk, or tool call). When
@@ -2909,40 +2670,32 @@ async fn run_conversation_loop<'a>(
                                     let cwd_opt = Some(cwd);
                                     let dispatch = fix_usage_update_nulls(dispatch);
                                     if let Err(e) = MatchDispatch::new(dispatch)
-                                        .if_notification(async |notif: SessionNotification| {
-                                            let should_poll_now = track_terminal_tool_calls(
-                                                &notif.update,
-                                                &mut tracked_terminal_tool_calls,
-                                            );
-                                            if is_agent_output_update(&notif.update) {
-                                                turn_had_agent_output = true;
-                                            }
-                                            emit_conversation_update(
-                                                &st,
-                                                &h,
-                                                agent_type,
-                                                Some(&session_id),
-                                                notif.update,
-                                                cwd_opt,
-                                                &mut raw_output_cache,
-                                            )
-                                            .await;
-                                            if should_poll_now {
-                                                poll_tracked_terminal_tool_calls(
-                                                    runtime.as_ref(),
-                                                    &session_id,
-                                                    &st,
-                                                    &h,
+                                        .if_notification(
+                                            async |notif: SessionNotification| {
+                                                let should_poll_now = track_terminal_tool_calls(
+                                                    &notif.update,
                                                     &mut tracked_terminal_tool_calls,
-                                                )
-                                                .await;
-                                            }
-                                            Ok(())
-                                        })
+                                                );
+                                                if is_agent_output_update(&notif.update) {
+                                                    turn_had_agent_output = true;
+                                                }
+                                                emit_conversation_update(&st, &h, agent_type, notif.update, cwd_opt, &mut raw_output_cache).await;
+                                                if should_poll_now {
+                                                    poll_tracked_terminal_tool_calls(
+                                                        runtime.as_ref(),
+                                                        &session_id,
+                                                        &st,
+                                                        &h,
+                                                        &mut tracked_terminal_tool_calls,
+                                                    )
+                                                    .await;
+                                                }
+                                                Ok(())
+                                            },
+                                        )
                                         .await
-                                        .otherwise(async |other| {
-                                            maybe_emit_claude_sdk_ext_notification(&st, &h, other)
-                                                .await;
+                                        .otherwise(async |dispatch| {
+                                            maybe_emit_claude_sdk_ext_notification(&st, &h, dispatch).await;
                                             Ok(())
                                         })
                                         .await
@@ -2974,13 +2727,14 @@ async fn run_conversation_loop<'a>(
                                     {
                                         emit_with_state(state, emitter, err_event).await;
                                     }
-                                    emit_turn_complete_once(
+                                    emit_with_state(
                                         state,
                                         emitter,
-                                        &sid,
-                                        agent_type,
-                                        reason_str,
-                                        &mut turn_completed,
+                                        AcpEvent::TurnComplete {
+                                            session_id: sid.0.to_string(),
+                                            stop_reason: reason_str.into(),
+                                            agent_type: agent_type.to_string(),
+                                        },
                                     )
                                     .await;
                                     break;
@@ -3013,13 +2767,14 @@ async fn run_conversation_loop<'a>(
                             {
                                 emit_with_state(state, emitter, err_event).await;
                             }
-                            emit_turn_complete_once(
+                            emit_with_state(
                                 state,
                                 emitter,
-                                &sid,
-                                agent_type,
-                                reason_str,
-                                &mut turn_completed,
+                                AcpEvent::TurnComplete {
+                                    session_id: sid.0.to_string(),
+                                    stop_reason: reason_str.into(),
+                                    agent_type: agent_type.to_string(),
+                                },
                             )
                             .await;
                             break;
@@ -3045,8 +2800,6 @@ async fn run_conversation_loop<'a>(
                                             SelectedPermissionOutcome::new(option_id),
                                         );
                                         let _ = responder.respond(RequestPermissionResponse::new(outcome));
-                                        clear_pending_permission_state_if_matches(state, &request_id)
-                                            .await;
                                     }
                                 }
                                 Some(ConnectionCommand::SetMode { mode_id }) => {
@@ -3125,13 +2878,14 @@ async fn run_conversation_loop<'a>(
                                     // transitions out of "prompting" and the user can
                                     // send new messages.  Don't wait for the agent --
                                     // it may be slow to respond or not respond at all.
-                                    emit_turn_complete_once(
+                                    emit_with_state(
                                         state,
                                         emitter,
-                                        &sid,
-                                        agent_type,
-                                        "cancelled",
-                                        &mut turn_completed,
+                                        AcpEvent::TurnComplete {
+                                            session_id: sid.0.to_string(),
+                                            stop_reason: "cancelled".into(),
+                                            agent_type: agent_type.to_string(),
+                                        },
                                     )
                                     .await;
                                     // Drain the prompt response in the background so
@@ -3194,7 +2948,6 @@ async fn run_conversation_loop<'a>(
                         SelectedPermissionOutcome::new(option_id),
                     );
                     let _ = responder.respond(RequestPermissionResponse::new(outcome));
-                    clear_pending_permission_state_if_matches(state, &request_id).await;
                 }
             }
             Some(ConnectionCommand::SetMode { mode_id }) => {
@@ -3211,7 +2964,10 @@ async fn run_conversation_loop<'a>(
                     .await;
                 }
             }
-            Some(ConnectionCommand::SetConfigOption { config_id, value }) => {
+            Some(ConnectionCommand::SetConfigOption {
+                config_id,
+                value,
+            }) => {
                 let cx = session.connection();
                 let sid = session.session_id().clone();
                 if let Err(e) = set_session_config_option(
@@ -3460,70 +3216,6 @@ fn parse_claude_sdk_message_params(
     Some((session_id, message))
 }
 
-fn find_first_u64_field(value: &serde_json::Value, field_names: &[&str]) -> Option<u64> {
-    match value {
-        serde_json::Value::Object(object) => {
-            for field_name in field_names {
-                if let Some(value) = object.get(*field_name).and_then(|value| value.as_u64()) {
-                    return Some(value);
-                }
-            }
-            object.iter().find_map(|(key, value)| {
-                if is_secret_config_key(key)
-                    || matches!(key.as_str(), "content" | "text" | "message")
-                {
-                    None
-                } else {
-                    find_first_u64_field(value, field_names)
-                }
-            })
-        }
-        serde_json::Value::Array(values) => values
-            .iter()
-            .find_map(|value| find_first_u64_field(value, field_names)),
-        _ => None,
-    }
-}
-
-fn debug_context_claude_sdk_usage(notification: &UntypedMessage) {
-    if !context_config_debug_enabled() || notification.method() != "_claude/sdkMessage" {
-        return;
-    }
-
-    let Some((session_id, message)) = parse_claude_sdk_message_params(notification.params()) else {
-        return;
-    };
-    let used = find_first_u64_field(&message, &["used", "input_tokens", "inputTokens"]);
-    let context_window =
-        find_first_u64_field(&message, &["contextWindow", "context_window", "size"]);
-    let model = message
-        .get("model")
-        .or_else(|| message.pointer("/message/model"))
-        .and_then(|value| value.as_str());
-    let beta_names = message
-        .get("betas")
-        .or_else(|| message.get("beta_headers"))
-        .or_else(|| message.get("betaHeaders"));
-    if used.is_none() && context_window.is_none() && model.is_none() && beta_names.is_none() {
-        return;
-    }
-
-    if should_log_usage_debug(format!("claude_sdk_usage:{session_id}"), context_window) {
-        eprintln!(
-            "[context-config] claude_sdk_usage {}",
-            serde_json::json!({
-                "session_id": session_id,
-                "type": message.get("type").and_then(|value| value.as_str()),
-                "subtype": message.get("subtype").and_then(|value| value.as_str()),
-                "model": model,
-                "used": used,
-                "context_window": context_window,
-                "betas": beta_names,
-            })
-        );
-    }
-}
-
 fn is_claude_api_retry_message(message: &serde_json::Value) -> bool {
     let obj = match message.as_object() {
         Some(obj) => obj,
@@ -3557,8 +3249,6 @@ async fn maybe_emit_claude_sdk_ext_notification(
     let Dispatch::Notification(notification) = dispatch else {
         return;
     };
-
-    debug_context_claude_sdk_usage(&notification);
 
     if let Some(event) = map_claude_sdk_ext_notification(&notification) {
         emit_with_state(state, emitter, event).await;
@@ -3595,7 +3285,6 @@ async fn emit_conversation_update(
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
     agent_type: AgentType,
-    session_id: Option<&SessionId>,
     update: SessionUpdate,
     cwd: Option<&str>,
     raw_output_cache: &mut ToolCallOutputCache,
@@ -3766,9 +3455,6 @@ async fn emit_conversation_update(
             emit_with_state(state, emitter, AcpEvent::AvailableCommands { commands }).await;
         }
         SessionUpdate::UsageUpdate(update) => {
-            if let Some(session_id) = session_id {
-                debug_context_usage_update(session_id, update.used, update.size);
-            }
             emit_with_state(
                 state,
                 emitter,
@@ -3792,8 +3478,7 @@ mod tests {
 
     #[test]
     fn claude_raw_sdk_meta_enabled_only_for_claude() {
-        let runtime_env = BTreeMap::new();
-        let claude_meta = claude_raw_sdk_session_meta(AgentType::ClaudeCode, &runtime_env)
+        let claude_meta = claude_raw_sdk_session_meta(AgentType::ClaudeCode)
             .expect("Claude must have raw SDK meta");
         assert_eq!(
             claude_meta
@@ -3803,7 +3488,7 @@ mod tests {
             Some(true)
         );
 
-        assert!(claude_raw_sdk_session_meta(AgentType::Codex, &runtime_env).is_none());
+        assert!(claude_raw_sdk_session_meta(AgentType::Codex).is_none());
     }
 
     #[test]
@@ -3867,8 +3552,7 @@ mod tests {
     #[test]
     fn build_new_session_request_sets_claude_raw_meta() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let runtime_env = BTreeMap::new();
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new(), &runtime_env);
+        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new());
 
         assert_eq!(
             req.meta
@@ -3881,214 +3565,13 @@ mod tests {
     }
 
     #[test]
-    fn build_new_session_request_forwards_claude_auto_compact_window_as_sdk_setting() {
-        let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let runtime_env = BTreeMap::from([(
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-            "300000".to_string(),
-        )]);
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new(), &runtime_env);
-
-        assert_eq!(
-            req.meta
-                .as_ref()
-                .and_then(|m| m.get("claudeCode"))
-                .and_then(|v| v.get("options"))
-                .and_then(|v| v.get("settings"))
-                .and_then(|v| v.get("autoCompactWindow"))
-                .and_then(|v| v.as_i64()),
-            Some(300_000)
-        );
-        assert_eq!(
-            req.meta
-                .as_ref()
-                .and_then(|m| m.get("claudeCode"))
-                .and_then(|v| v.get("options"))
-                .and_then(|v| v.get("betas"))
-                .and_then(|v| v.as_array())
-                .and_then(|values| values.first())
-                .and_then(|v| v.as_str()),
-            Some(CLAUDE_CONTEXT_1M_BETA)
-        );
-    }
-
-    #[test]
-    fn build_new_session_request_preserves_user_claude_options_and_betas() {
-        let dir =
-            std::env::temp_dir().join(format!("codeg-claude-settings-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).expect("create settings dir");
-        let settings_path = dir.join("settings.json");
-        std::fs::write(
-            &settings_path,
-            r#"{
-              "_meta": {
-                "claudeCode": {
-                  "options": {
-                    "betas": ["existing-beta"],
-                    "settings": {
-                      "permissions": {"allow": ["Bash(git status:*)"]}
-                    },
-                    "extraOption": true
-                  }
-                }
-              }
-            }"#,
-        )
-        .expect("write settings");
-        let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let runtime_env = BTreeMap::from([
-            (
-                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-                "300000".to_string(),
-            ),
-            (
-                "CODEG_TEST_CLAUDE_SETTINGS_PATH".to_string(),
-                settings_path.to_string_lossy().to_string(),
-            ),
-        ]);
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new(), &runtime_env);
-        let options = req
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("claudeCode"))
-            .and_then(|v| v.get("options"))
-            .expect("claude options");
-
-        assert_eq!(
-            options
-                .get("settings")
-                .and_then(|v| v.get("autoCompactWindow"))
-                .and_then(|v| v.as_i64()),
-            Some(300_000)
-        );
-        assert!(options
-            .get("settings")
-            .and_then(|v| v.get("permissions"))
-            .is_some());
-        assert_eq!(
-            options.get("extraOption").and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        let betas = options
-            .get("betas")
-            .and_then(|v| v.as_array())
-            .expect("betas array");
-        assert_eq!(
-            betas
-                .iter()
-                .filter(|value| value.as_str() == Some(CLAUDE_CONTEXT_1M_BETA))
-                .count(),
-            1
-        );
-        assert!(betas
-            .iter()
-            .any(|value| value.as_str() == Some("existing-beta")));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn build_new_session_request_ignores_invalid_claude_auto_compact_window_meta() {
-        let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let runtime_env = BTreeMap::from([(
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-            "not-a-number".to_string(),
-        )]);
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new(), &runtime_env);
-
-        assert!(req
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("claudeCode"))
-            .and_then(|v| v.get("options"))
-            .is_none());
-    }
-
-    #[test]
-    fn build_load_session_request_forwards_claude_auto_compact_window_as_sdk_setting() {
-        let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let runtime_env = BTreeMap::from([(
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-            "300000".to_string(),
-        )]);
-        let req = build_load_session_request(
-            AgentType::ClaudeCode,
-            SessionId::new("abc".to_string()),
-            &cwd,
-            Vec::new(),
-            &runtime_env,
-        );
-
-        assert_eq!(
-            req.meta
-                .as_ref()
-                .and_then(|m| m.get("claudeCode"))
-                .and_then(|v| v.get("options"))
-                .and_then(|v| v.get("settings"))
-                .and_then(|v| v.get("autoCompactWindow"))
-                .and_then(|v| v.as_i64()),
-            Some(300_000)
-        );
-        assert_eq!(
-            req.meta
-                .as_ref()
-                .and_then(|m| m.get("claudeCode"))
-                .and_then(|v| v.get("options"))
-                .and_then(|v| v.get("betas"))
-                .and_then(|v| v.as_array())
-                .and_then(|values| values.first())
-                .and_then(|v| v.as_str()),
-            Some(CLAUDE_CONTEXT_1M_BETA)
-        );
-    }
-
-    #[test]
-    fn build_new_session_request_does_not_enable_context_beta_at_200k() {
-        let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let runtime_env = BTreeMap::from([(
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-            "200000".to_string(),
-        )]);
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new(), &runtime_env);
-
-        assert!(req
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("claudeCode"))
-            .and_then(|v| v.get("options"))
-            .and_then(|v| v.get("betas"))
-            .is_none());
-    }
-
-    #[test]
-    fn configured_claude_auto_compact_window_enforces_sdk_range() {
-        for (raw, expected) in [
-            ("99999", None),
-            ("100000", Some(100_000)),
-            ("1000000", Some(1_000_000)),
-            ("1000001", None),
-        ] {
-            let runtime_env = BTreeMap::from([(
-                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-                raw.to_string(),
-            )]);
-
-            assert_eq!(
-                configured_claude_auto_compact_window(&runtime_env),
-                expected
-            );
-        }
-    }
-
-    #[test]
     fn build_load_session_request_skips_meta_for_non_claude() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let runtime_env = BTreeMap::new();
         let req = build_load_session_request(
             AgentType::Codex,
             SessionId::new("abc".to_string()),
             &cwd,
             Vec::new(),
-            &runtime_env,
         );
 
         assert!(req.meta.is_none());
@@ -4386,96 +3869,5 @@ mod tests {
         // panicked at slicing time).
         assert!(out.chars().all(|c| c == '中'));
         assert!(out.len() <= 6); // at most 2 chars (6 bytes)
-    }
-
-    fn prompting_state() -> SessionState {
-        let mut state = SessionState::new(
-            "conn-test".to_string(),
-            AgentType::ClaudeCode,
-            None,
-            "win-test".to_string(),
-            None,
-        );
-        state.apply_event(&AcpEvent::StatusChanged {
-            status: ConnectionStatus::Prompting,
-        });
-        state
-    }
-
-    #[test]
-    fn stop_reason_to_str_maps_extended_reasons() {
-        assert_eq!(stop_reason_to_str(StopReason::EndTurn), "end_turn");
-        assert_eq!(stop_reason_to_str(StopReason::Cancelled), "cancelled");
-        assert_eq!(stop_reason_to_str(StopReason::MaxTokens), "max_tokens");
-        assert_eq!(
-            stop_reason_to_str(StopReason::MaxTurnRequests),
-            "max_turn_requests"
-        );
-        assert_eq!(stop_reason_to_str(StopReason::Refusal), "refusal");
-    }
-
-    #[tokio::test]
-    async fn permission_response_clear_refreshes_last_activity() {
-        let state = Arc::new(RwLock::new(prompting_state()));
-        let before_clear = {
-            let mut guard = state.write().await;
-            guard.apply_event(&AcpEvent::PermissionRequest {
-                request_id: "req-1".to_string(),
-                tool_call: serde_json::json!({"toolCallId": "tc-1"}),
-                options: vec![],
-            });
-            let before_clear = chrono::Utc::now() - chrono::Duration::seconds(5);
-            guard.last_activity_at = before_clear;
-            before_clear
-        };
-
-        clear_pending_permission_state_if_matches(&state, "req-1").await;
-
-        let guard = state.read().await;
-        assert!(guard.pending_permission.is_none());
-        assert!(guard.last_activity_at > before_clear);
-    }
-
-    #[tokio::test]
-    async fn clear_pending_permission_state_if_matches_drops_matching_snapshot_permission() {
-        let state = Arc::new(RwLock::new(prompting_state()));
-        {
-            let mut guard = state.write().await;
-            guard.apply_event(&AcpEvent::PermissionRequest {
-                request_id: "req-1".to_string(),
-                tool_call: serde_json::json!({"toolCallId": "tc-1"}),
-                options: vec![],
-            });
-            assert!(guard.pending_permission.is_some());
-        }
-
-        clear_pending_permission_state_if_matches(&state, "req-1").await;
-
-        let guard = state.read().await;
-        assert!(guard.pending_permission.is_none());
-    }
-
-    #[tokio::test]
-    async fn clear_pending_permission_state_if_matches_preserves_newer_permission() {
-        let state = Arc::new(RwLock::new(prompting_state()));
-        {
-            let mut guard = state.write().await;
-            guard.apply_event(&AcpEvent::PermissionRequest {
-                request_id: "req-2".to_string(),
-                tool_call: serde_json::json!({"toolCallId": "tc-2"}),
-                options: vec![],
-            });
-        }
-
-        clear_pending_permission_state_if_matches(&state, "req-1").await;
-
-        let guard = state.read().await;
-        assert_eq!(
-            guard
-                .pending_permission
-                .as_ref()
-                .map(|pending| pending.request_id.as_str()),
-            Some("req-2")
-        );
     }
 }

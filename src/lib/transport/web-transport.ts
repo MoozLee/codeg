@@ -1,6 +1,9 @@
 import { WS_READY_CHANNEL } from "./constants"
-import type { Transport, UnsubscribeFn } from "./types"
+import type { AttachTransportHost } from "./web-event-stream"
+import { WebEventStream } from "./web-event-stream"
+import type { EventStream, Transport, UnsubscribeFn } from "./types"
 import { buildCodegWebSocketProtocols } from "./ws-auth"
+import { getCodegToken, redirectToCodegLogin } from "./web-auth"
 
 const WEB_CALL_TIMEOUT_MS = 30_000
 // Upper bound on how long `subscribe()` will wait for the server `__ready__`
@@ -25,9 +28,7 @@ interface WebEvent {
   payload: unknown
 }
 
-function getToken(): string {
-  return localStorage.getItem("codeg_token") ?? ""
-}
+const getToken = getCodegToken
 
 export class WebTransport implements Transport {
   private ws: WebSocket | null = null
@@ -50,6 +51,12 @@ export class WebTransport implements Transport {
   // teardowns and call `redirectToLogin()` from a transport the caller
   // already let go of. Guard `onclose` to short-circuit when destroyed.
   private destroyed = false
+  // Attach-protocol plumbing. The EventStream is created lazily on first
+  // call to `eventStream()`; it lives for the entire transport lifetime and
+  // re-attaches its subscriptions on every WS-ready transition.
+  private wsOpen = false
+  private wsReadyCallbacks = new Set<() => void>()
+  private eventStreamInstance: WebEventStream | null = null
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl
@@ -117,7 +124,7 @@ export class WebTransport implements Transport {
       window.clearTimeout(timeout)
     }
     if (res.status === 401) {
-      WebTransport.redirectToLogin()
+      redirectToCodegLogin()
       throw new Error("Unauthorized")
     }
     if (!res.ok) {
@@ -172,10 +179,38 @@ export class WebTransport implements Transport {
     }
   }
 
-  private static redirectToLogin() {
-    if (window.location.pathname.startsWith("/login")) return
-    localStorage.removeItem("codeg_token")
-    window.location.href = "/login"
+  eventStream(): EventStream {
+    if (!this.eventStreamInstance) {
+      const host: AttachTransportHost = {
+        isWsOpen: () => this.wsOpen,
+        sendFrame: (frame) => this.sendWsFrame(frame),
+        onWsReady: (callback) => {
+          this.wsReadyCallbacks.add(callback)
+          return () => {
+            this.wsReadyCallbacks.delete(callback)
+          }
+        },
+      }
+      this.eventStreamInstance = new WebEventStream(host)
+      // If a token is present but the WS hasn't been opened yet (no legacy
+      // subscribe has run), trigger the connect now so attach frames sent
+      // by the consumer have a place to land.
+      if (!this.ws && getToken()) {
+        this.connectWs()
+      }
+    }
+    return this.eventStreamInstance
+  }
+
+  private sendWsFrame(frame: object): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
+    try {
+      this.ws.send(JSON.stringify(frame))
+      return true
+    } catch (err) {
+      console.warn("[WebTransport] sendWsFrame failed:", err)
+      return false
+    }
   }
 
   private connectWs() {
@@ -187,11 +222,36 @@ export class WebTransport implements Transport {
 
     this.ws.onopen = () => {
       this.wsFailCount = 0
+      this.wsOpen = true
+      // Notify the EventStream so it can re-issue attach frames for any
+      // active subscriptions. Fires on initial connect AND every reconnect;
+      // the EventStream uses each sub's running `lastAppliedSeq` so the
+      // server can pick replay vs. snapshot. Errors in callbacks must not
+      // break sibling callbacks.
+      for (const cb of this.wsReadyCallbacks) {
+        try {
+          cb()
+        } catch (err) {
+          console.error("[WebTransport] wsReady callback threw:", err)
+        }
+      }
     }
 
     this.ws.onmessage = (msg) => {
       try {
-        const event = JSON.parse(msg.data) as WebEvent
+        const parsed = JSON.parse(msg.data) as unknown
+        // Attach-protocol frames carry a `type` discriminator; legacy
+        // global-broadcast frames carry a `channel` discriminator. Routing
+        // by which field is present lets the two coexist on the same WS.
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          "type" in (parsed as object)
+        ) {
+          this.eventStreamInstance?.handleServerFrame(parsed)
+          return
+        }
+        const event = parsed as WebEvent
         if (event.channel === WS_READY_CHANNEL) {
           this.readyResolve()
           if (this.hasReadiedOnce) {
@@ -224,13 +284,14 @@ export class WebTransport implements Transport {
 
     this.ws.onclose = () => {
       this.ws = null
+      this.wsOpen = false
       // New subscribers (and any concurrent subscribe() calls in flight)
       // must wait for the next connection's `__ready__` before resolving.
       this.resetReady()
       if (this.destroyed) return
       this.wsFailCount++
       if (this.wsFailCount >= WS_RECONNECT_FAIL_THRESHOLD) {
-        WebTransport.redirectToLogin()
+        redirectToCodegLogin()
         return
       }
       // Exponential backoff: 1s, 2s, 4s, … capped at WS_BACKOFF_MAX_MS.
@@ -267,8 +328,12 @@ export class WebTransport implements Transport {
       this.ws.close()
       this.ws = null
     }
+    this.wsOpen = false
     this.handlers.clear()
     this.reconnectCallbacks.clear()
+    this.wsReadyCallbacks.clear()
+    this.eventStreamInstance?.destroy()
+    this.eventStreamInstance = null
     // Settle any in-flight `subscribe()` awaiters so their promises don't
     // leak alongside the destroyed transport. Safe to call multiple times —
     // resolving an already-settled Promise is a no-op.

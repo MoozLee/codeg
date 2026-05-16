@@ -23,9 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::app_error::AppCommandError;
-use crate::models::pet::{
-    PetManifest, PetSummary, PET_MANIFEST_FILENAME, SPRITESHEET_FILENAME,
-};
+use crate::models::pet::{PetManifest, PetSummary, PET_MANIFEST_FILENAME, SPRITESHEET_FILENAME};
 use crate::pets::{
     ensure_pets_root_or_create, list_existing_ids, validate_pet_id, validate_spritesheet,
 };
@@ -253,12 +251,10 @@ pub async fn list(
         }
     }
 
-    let response = client()?
-        .get(&url)
-        .query(&qs)
-        .send()
-        .await
-        .map_err(|e| AppCommandError::network(format!("Failed to reach pet marketplace: {e}")))?;
+    let response =
+        client()?.get(&url).query(&qs).send().await.map_err(|e| {
+            AppCommandError::network(format!("Failed to reach pet marketplace: {e}"))
+        })?;
     let status = response.status();
     if !status.is_success() {
         return Err(AppCommandError::network(format!(
@@ -335,9 +331,10 @@ pub async fn install(
 
     let id = request.id.clone();
     let overwrite = request.overwrite;
-    let summary = tokio::task::spawn_blocking(move || install_from_zip_bytes(&id, &bytes, overwrite))
-        .await
-        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))??;
+    let summary =
+        tokio::task::spawn_blocking(move || install_from_zip_bytes(&id, &bytes, overwrite))
+            .await
+            .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))??;
 
     Ok(MarketplaceInstallResponse { pet: summary })
 }
@@ -506,8 +503,9 @@ fn install_from_zip_bytes(
 
 fn extract_zip_payload(bytes: &[u8]) -> Result<(Vec<u8>, Vec<u8>), AppCommandError> {
     let cursor = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(cursor)
-        .map_err(|e| AppCommandError::invalid_input(format!("Pet package is not a valid zip: {e}")))?;
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+        AppCommandError::invalid_input(format!("Pet package is not a valid zip: {e}"))
+    })?;
 
     let mut manifest_bytes: Option<Vec<u8>> = None;
     let mut sprite_bytes: Option<Vec<u8>> = None;
@@ -553,9 +551,8 @@ fn extract_zip_payload(bytes: &[u8]) -> Result<(Vec<u8>, Vec<u8>), AppCommandErr
         }
     }
 
-    let manifest = manifest_bytes.ok_or_else(|| {
-        AppCommandError::invalid_input("Pet package is missing pet.json.")
-    })?;
+    let manifest = manifest_bytes
+        .ok_or_else(|| AppCommandError::invalid_input("Pet package is missing pet.json."))?;
     let sprite = sprite_bytes.ok_or_else(|| {
         AppCommandError::invalid_input("Pet package is missing spritesheet.webp.")
     })?;
@@ -595,13 +592,15 @@ fn write_staging(
     let json = serde_json::to_string_pretty(manifest)
         .map_err(|e| AppCommandError::io_error(format!("Failed to serialize manifest: {e}")))?;
     {
-        let mut f = fs::File::create(dir.join(PET_MANIFEST_FILENAME)).map_err(AppCommandError::io)?;
+        let mut f =
+            fs::File::create(dir.join(PET_MANIFEST_FILENAME)).map_err(AppCommandError::io)?;
         f.write_all(json.as_bytes()).map_err(AppCommandError::io)?;
         f.write_all(b"\n").map_err(AppCommandError::io)?;
         f.sync_all().map_err(AppCommandError::io)?;
     }
     {
-        let mut f = fs::File::create(dir.join(SPRITESHEET_FILENAME)).map_err(AppCommandError::io)?;
+        let mut f =
+            fs::File::create(dir.join(SPRITESHEET_FILENAME)).map_err(AppCommandError::io)?;
         f.write_all(sprite_bytes).map_err(AppCommandError::io)?;
         f.sync_all().map_err(AppCommandError::io)?;
     }
@@ -648,9 +647,7 @@ mod tests {
     #[test]
     fn absolute_download_url_rejects_subdomain_bypass() {
         // Without the trailing-slash prefix this would have passed.
-        assert!(
-            absolute_download_url("https://codex-pets.net.evil.example/x.zip").is_err()
-        );
+        assert!(absolute_download_url("https://codex-pets.net.evil.example/x.zip").is_err());
         assert!(absolute_download_url("https://codex-pets.network/x.zip").is_err());
     }
 

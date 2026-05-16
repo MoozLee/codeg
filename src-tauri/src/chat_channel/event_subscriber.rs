@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -9,10 +10,11 @@ use super::i18n::Lang;
 use super::manager::ChatChannelManager;
 use super::message_formatter;
 use super::types::RichMessage;
+use crate::acp::internal_bus::InternalEventBus;
+use crate::acp::types::AcpEvent;
 use crate::db::service::{
     app_metadata_service, chat_channel_message_log_service, chat_channel_service,
 };
-use crate::web::event_bridge::WebEventBroadcaster;
 
 /// Minimum interval between pushes for the same event type per channel (debounce).
 const DEBOUNCE_SECS: u64 = 5;
@@ -80,24 +82,30 @@ impl EventConfigCache {
 }
 
 pub fn spawn_event_subscriber(
-    broadcaster: Arc<WebEventBroadcaster>,
+    bus: Arc<InternalEventBus>,
     manager: ChatChannelManager,
     db_conn: DatabaseConnection,
 ) -> JoinHandle<()> {
+    // Subscribe synchronously before the spawn so the broadcast buffer
+    // catches any events emitted in the gap between `start_background`
+    // returning and the spawned task's first `rx.recv().await` poll.
+    let mut rx = bus.subscribe();
+    let metrics = Arc::clone(bus.metrics());
+
     tokio::spawn(async move {
-        let mut rx = broadcaster.subscribe();
         let mut last_push: HashMap<(i32, String), Instant> = HashMap::new();
         let mut config = EventConfigCache::new();
 
         loop {
-            let event = match rx.recv().await {
+            let envelope_arc = match rx.recv().await {
                 Ok(e) => e,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     eprintln!("[ChatChannel] event subscriber lagged by {n} messages");
+                    metrics.lagged_count.fetch_add(n, Ordering::Relaxed);
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    eprintln!("[ChatChannel] event broadcaster closed, stopping subscriber");
+                    eprintln!("[ChatChannel] internal bus closed, stopping subscriber");
                     break;
                 }
             };
@@ -107,9 +115,7 @@ pub fn spawn_event_subscriber(
             // Prune stale debounce entries
             last_push.retain(|_, t| t.elapsed() < Duration::from_secs(DEBOUNCE_SECS * 2));
 
-            if let Some((event_type, msg)) =
-                parse_event(&event.channel, event.payload.as_ref(), config.lang)
-            {
+            if let Some((event_type, msg)) = parse_acp_event(&envelope_arc.payload, config.lang) {
                 // Global event filter check
                 if let Some(filter) = &config.global_filter {
                     if !filter.contains(&event_type) {
@@ -163,53 +169,34 @@ pub fn spawn_event_subscriber(
     })
 }
 
-fn parse_event(
-    channel: &str,
-    payload: &serde_json::Value,
-    lang: Lang,
-) -> Option<(String, RichMessage)> {
-    match channel {
-        "acp://event" => parse_acp_event(payload, lang),
-        _ => None,
-    }
-}
-
-fn parse_acp_event(payload: &serde_json::Value, lang: Lang) -> Option<(String, RichMessage)> {
-    let event_type = payload.get("type")?.as_str()?;
-
-    match event_type {
-        "turn_complete" => {
-            let stop_reason = payload
-                .get("stop_reason")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            // Only push for end_turn, not for intermediate completions
+/// Map an ACP event into the chat-channel push tuple. Pattern-match on the
+/// typed `AcpEvent` variant — Phase 5 source-of-truth replaces the prior
+/// JSON `type`-string dispatch (which paid `serde_json::from_value` per
+/// event for the global broadcaster path).
+fn parse_acp_event(payload: &AcpEvent, lang: Lang) -> Option<(String, RichMessage)> {
+    match payload {
+        AcpEvent::TurnComplete {
+            stop_reason,
+            agent_type,
+            ..
+        } => {
+            // Only push for end_turn, not for intermediate completions.
             if stop_reason != "end_turn" {
                 return None;
             }
-            let agent_type = payload
-                .get("agent_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown Agent");
             Some((
                 "turn_complete".to_string(),
                 message_formatter::format_turn_complete(agent_type, stop_reason, lang),
             ))
         }
-        "error" => {
-            let agent_type = payload
-                .get("agent_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown Agent");
-            let message = payload
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown error");
-            Some((
-                "error".to_string(),
-                message_formatter::format_agent_error(agent_type, message, lang),
-            ))
-        }
+        AcpEvent::Error {
+            message,
+            agent_type,
+            ..
+        } => Some((
+            "error".to_string(),
+            message_formatter::format_agent_error(agent_type, message, lang),
+        )),
         _ => None,
     }
 }

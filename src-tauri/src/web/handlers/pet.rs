@@ -129,7 +129,9 @@ pub async fn pet_celebrate(
 pub async fn pet_marketplace_list(
     Json(params): Json<MarketplaceListParams>,
 ) -> Result<Json<MarketplaceListResponse>, AppCommandError> {
-    pet_commands::pet_marketplace_list_core(params).await.map(Json)
+    pet_commands::pet_marketplace_list_core(params)
+        .await
+        .map(Json)
 }
 
 pub async fn pet_marketplace_install(

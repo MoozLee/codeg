@@ -9,18 +9,21 @@
 //!   Always emitted; the renderer plays a few loops and falls back to the
 //!   current ambient state.
 //!
-//! Subscribes to the same broadcaster the lifecycle subscriber uses and
-//! consumes multiple channels via a single `tokio::select!` loop.
+//! Phase 5: ACP events are now consumed from `InternalEventBus`
+//! (`Arc<EventEnvelope>`, no JSON parse), while folder/app non-ACP channels
+//! continue to flow through `WebEventBroadcaster`. The subscriber selects
+//! over both receivers in the same `tokio::select!` loop.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
+use crate::acp::internal_bus::InternalEventBus;
 use crate::acp::types::{AcpEvent, ConnectionStatus, EventEnvelope};
 use crate::db::entities::conversation::ConversationStatus;
 use crate::models::pet::PetState;
@@ -159,17 +162,17 @@ pub fn compute_pet_state(snapshot: &PetGlobalState) -> PetState {
     PetState::Idle
 }
 
-fn is_acp_event_relevant(payload: &serde_json::Value) -> bool {
-    let Some(kind) = payload.get("type").and_then(|v| v.as_str()) else {
-        return false;
-    };
+/// Pet only reacts to a small subset of ACP event types. Filtering at the
+/// dispatcher level avoids cloning / matching downstream when the bus
+/// fires for high-volume content / tool / thinking deltas.
+fn is_acp_event_relevant(payload: &AcpEvent) -> bool {
     matches!(
-        kind,
-        "status_changed"
-            | "error"
-            | "permission_request"
-            | "turn_complete"
-            | "conversation_status_changed"
+        payload,
+        AcpEvent::StatusChanged { .. }
+            | AcpEvent::Error { .. }
+            | AcpEvent::PermissionRequest { .. }
+            | AcpEvent::TurnComplete { .. }
+            | AcpEvent::ConversationStatusChanged { .. }
     )
 }
 
@@ -206,10 +209,7 @@ fn emit_oneshot(emitter: &EventEmitter, kind: PetState) {
 /// `erroring` set after `PET_FAILED_RECOVERY_MS`. Aborts any in-flight
 /// timer first so successive errors keep the failed animation visible
 /// for the full window after the *latest* error.
-fn schedule_failed_recovery(
-    clear_task: &mut Option<JoinHandle<()>>,
-    clear_tx: &mpsc::Sender<()>,
-) {
+fn schedule_failed_recovery(clear_task: &mut Option<JoinHandle<()>>, clear_tx: &mpsc::Sender<()>) {
     cancel_failed_recovery(clear_task);
     let tx = clear_tx.clone();
     *clear_task = Some(tokio::spawn(async move {
@@ -231,14 +231,25 @@ fn cancel_failed_recovery(clear_task: &mut Option<JoinHandle<()>>) {
 }
 
 /// Spawn-friendly subscriber loop. Mirrors `lifecycle_subscriber_task`'s
-/// "subscribe synchronously, return future" shape so the broadcast buffer
-/// covers the gap between `subscribe()` and the first `recv()`.
+/// "subscribe synchronously, return future" shape so each broadcast/bus
+/// buffer covers the gap between `subscribe()` and the first `recv()`.
+///
+/// Dual-source design: ACP envelopes (typed) flow in through `bus`, while
+/// folder/app side-channel notifications stay on `broadcaster`. The two
+/// receivers are select!'d over a shared `select!` arm; every other arm
+/// (recovery timer, channel close) is unchanged from the single-source
+/// version. Splitting buses lets ACP consumers skip the JSON reparse and
+/// — crucially — lets us drop the `acp://event` channel from the global
+/// firehose entirely (eliminating the WS receiver-side dedup hack).
 pub fn pet_state_subscriber_task(
+    bus: Arc<InternalEventBus>,
     broadcaster: Arc<WebEventBroadcaster>,
     emitter: EventEmitter,
     handle: PetStateHandle,
 ) -> impl Future<Output = ()> + Send + 'static {
-    let mut rx = broadcaster.subscribe();
+    let mut acp_rx = bus.subscribe();
+    let mut web_rx = broadcaster.subscribe();
+    let metrics = Arc::clone(bus.metrics());
     let (clear_tx, mut clear_rx) = mpsc::channel::<()>(8);
     async move {
         let mut snapshot = PetGlobalState::default();
@@ -250,78 +261,104 @@ pub fn pet_state_subscriber_task(
 
         loop {
             tokio::select! {
-                event = rx.recv() => {
-                    match event {
-                        Ok(WebEvent { channel, payload }) => {
-                            let payload_value = payload.as_ref();
-                            let mut recompute_ambient = false;
+                acp_event = acp_rx.recv() => {
+                    match acp_event {
+                        Ok(envelope_arc) => {
+                            let envelope = envelope_arc.as_ref();
+                            if !is_acp_event_relevant(&envelope.payload) {
+                                continue;
+                            }
 
-                            match channel.as_str() {
-                                "acp://event" => {
-                                    if !is_acp_event_relevant(payload_value) {
-                                        continue;
-                                    }
-                                    let envelope: EventEnvelope =
-                                        match EventEnvelope::deserialize(payload_value) {
-                                            Ok(env) => env,
-                                            Err(err) => {
-                                                eprintln!(
-                                                    "[Pet] dropping malformed acp://event envelope: {err}"
-                                                );
-                                                continue;
-                                            }
-                                        };
-
-                                    // Fire the turn_complete oneshot *before*
-                                    // applying — the apply step removes the
-                                    // connection from `prompting`, but the
-                                    // celebration should reference the turn
-                                    // that just ended either way.
-                                    if let AcpEvent::TurnComplete { stop_reason, .. } =
-                                        &envelope.payload
-                                    {
-                                        if let Some(kind) = classify_turn_complete(stop_reason) {
-                                            emit_oneshot(&emitter, kind);
-                                        }
-                                    }
-
-                                    // PendingReview fires a one-shot
-                                    // cue rather than ambient state, so
-                                    // a single un-acked review can't
-                                    // pin the pet on `review` for the
-                                    // rest of the session.
-                                    if let AcpEvent::ConversationStatusChanged {
-                                        status: ConversationStatus::PendingReview,
-                                        ..
-                                    } = &envelope.payload
-                                    {
-                                        emit_oneshot(&emitter, PetState::Review);
-                                    }
-
-                                    let was_erroring = !snapshot.erroring.is_empty();
-                                    snapshot.apply(&envelope);
-                                    let now_erroring = !snapshot.erroring.is_empty();
-
-                                    let triggered_error = matches!(
-                                        envelope.payload,
-                                        AcpEvent::Error { .. }
-                                            | AcpEvent::StatusChanged {
-                                                status: ConnectionStatus::Error,
-                                            }
-                                    );
-                                    if triggered_error && now_erroring {
-                                        schedule_failed_recovery(&mut clear_task, &clear_tx);
-                                    } else if was_erroring && !now_erroring {
-                                        // erroring went empty without us
-                                        // firing the recovery timer — e.g.
-                                        // Connected/Disconnected events that
-                                        // pruned the last erroring conn —
-                                        // so cancel the pending sleep to
-                                        // avoid a phantom recompute later.
-                                        cancel_failed_recovery(&mut clear_task);
-                                    }
-                                    recompute_ambient = true;
+                            // Fire the turn_complete oneshot *before*
+                            // applying — the apply step removes the
+                            // connection from `prompting`, but the
+                            // celebration should reference the turn
+                            // that just ended either way.
+                            if let AcpEvent::TurnComplete { stop_reason, .. } =
+                                &envelope.payload
+                            {
+                                if let Some(kind) = classify_turn_complete(stop_reason) {
+                                    emit_oneshot(&emitter, kind);
                                 }
+                            }
+
+                            // PendingReview fires a one-shot cue rather than
+                            // ambient state, so a single un-acked review can't
+                            // pin the pet on `review` for the rest of the
+                            // session.
+                            if let AcpEvent::ConversationStatusChanged {
+                                status: ConversationStatus::PendingReview,
+                                ..
+                            } = &envelope.payload
+                            {
+                                emit_oneshot(&emitter, PetState::Review);
+                            }
+
+                            let was_erroring = !snapshot.erroring.is_empty();
+                            snapshot.apply(envelope);
+                            let now_erroring = !snapshot.erroring.is_empty();
+
+                            let triggered_error = matches!(
+                                envelope.payload,
+                                AcpEvent::Error { .. }
+                                    | AcpEvent::StatusChanged {
+                                        status: ConnectionStatus::Error,
+                                    }
+                            );
+                            if triggered_error && now_erroring {
+                                schedule_failed_recovery(&mut clear_task, &clear_tx);
+                            } else if was_erroring && !now_erroring {
+                                // erroring went empty without us firing the
+                                // recovery timer — e.g. Connected/Disconnected
+                                // events that pruned the last erroring conn —
+                                // so cancel the pending sleep to avoid a
+                                // phantom recompute later.
+                                cancel_failed_recovery(&mut clear_task);
+                            }
+                            // ACP is the only path that mutates `snapshot`,
+                            // so ambient recompute is gated to this arm.
+                            let next = compute_pet_state(&snapshot);
+                            if next != last_state {
+                                last_state = next;
+                                write_pet_state(&handle, next);
+                                emit_event(&emitter, "pet://state", next);
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            // Bus overrun — we can't reliably reconstruct
+                            // state from the missed events, so reset to Idle
+                            // and rely on the next batch of
+                            // StatusChanged/Connected events to reseed the
+                            // snapshot. A persistent lag without follow-up
+                            // events would leave the pet stuck on idle even
+                            // if connections are still active; surface it on
+                            // the metric so operators can spot it.
+                            eprintln!(
+                                "[Pet] internal bus lagged, dropped {skipped} events; resetting to idle"
+                            );
+                            metrics.lagged_count.fetch_add(skipped, Ordering::Relaxed);
+                            snapshot = PetGlobalState::default();
+                            cancel_failed_recovery(&mut clear_task);
+                            if last_state != PetState::Idle {
+                                last_state = PetState::Idle;
+                                write_pet_state(&handle, last_state);
+                                emit_event(&emitter, "pet://state", last_state);
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            cancel_failed_recovery(&mut clear_task);
+                            break;
+                        }
+                    }
+                }
+                web_event = web_rx.recv() => {
+                    match web_event {
+                        Ok(WebEvent { channel, payload }) => {
+                            // Folder/app side-channels stay on the JSON
+                            // broadcaster: they aren't ACP envelopes, and the
+                            // emitters (folder commands, agent installer)
+                            // don't go through `emit_with_state`.
+                            match channel.as_str() {
                                 "folder://git-commit-succeeded"
                                 | "folder://git-push-succeeded" => {
                                     emit_oneshot(&emitter, PetState::Jumping);
@@ -330,41 +367,21 @@ pub fn pet_state_subscriber_task(
                                     emit_oneshot(&emitter, PetState::Failed);
                                 }
                                 "app://agent-install" => {
-                                    if let Some(kind) = classify_agent_install(payload_value) {
+                                    if let Some(kind) = classify_agent_install(payload.as_ref()) {
                                         emit_oneshot(&emitter, kind);
                                     }
                                 }
                                 _ => continue,
                             }
-
-                            if recompute_ambient {
-                                let next = compute_pet_state(&snapshot);
-                                if next != last_state {
-                                    last_state = next;
-                                    write_pet_state(&handle, next);
-                                    emit_event(&emitter, "pet://state", next);
-                                }
-                            }
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            // Broadcast buffer overrun — we can't reliably
-                            // reconstruct state from the missed events, so
-                            // reset to Idle and rely on the next batch of
-                            // StatusChanged/Connected events to reseed the
-                            // snapshot. A persistent lag without follow-up
-                            // events would leave the pet stuck on idle even
-                            // if connections are still active; surface it
-                            // so it shows up in operator logs.
+                            // Web broadcaster lag is a different signal:
+                            // these are fire-and-forget side-channel events
+                            // (a lost git-commit ping is benign), so just
+                            // log and keep going. No snapshot reset.
                             eprintln!(
-                                "[Pet] event subscriber lagged, dropped {skipped} events; resetting to idle"
+                                "[Pet] web broadcaster lagged, dropped {skipped} non-ACP events"
                             );
-                            snapshot = PetGlobalState::default();
-                            cancel_failed_recovery(&mut clear_task);
-                            if last_state != PetState::Idle {
-                                last_state = PetState::Idle;
-                                write_pet_state(&handle, last_state);
-                                emit_event(&emitter, "pet://state", last_state);
-                            }
                         }
                         Err(broadcast::error::RecvError::Closed) => {
                             cancel_failed_recovery(&mut clear_task);
@@ -680,33 +697,77 @@ mod tests {
 
     #[test]
     fn event_filter_accepts_only_pet_relevant_events() {
-        for kind in [
-            "status_changed",
-            "error",
-            "permission_request",
-            "turn_complete",
-            "conversation_status_changed",
-        ] {
+        // Pet-relevant variants — must pass the filter.
+        let accepted: Vec<AcpEvent> = vec![
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Connected,
+            },
+            AcpEvent::Error {
+                message: "x".into(),
+                agent_type: "claude_code".into(),
+                code: None,
+            },
+            AcpEvent::PermissionRequest {
+                request_id: "r1".into(),
+                tool_call: serde_json::json!({}),
+                options: vec![],
+            },
+            AcpEvent::TurnComplete {
+                session_id: "s".into(),
+                stop_reason: "end_turn".into(),
+                agent_type: "claude_code".into(),
+            },
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 1,
+                status: ConversationStatus::PendingReview,
+            },
+        ];
+        for ev in &accepted {
             assert!(
-                is_acp_event_relevant(&serde_json::json!({ "type": kind })),
-                "expected {kind} to be pet-relevant"
+                is_acp_event_relevant(ev),
+                "expected {ev:?} to be pet-relevant"
             );
         }
 
-        for kind in [
-            "content_delta",
-            "thinking",
-            "tool_call",
-            "tool_call_update",
-            "usage_update",
-            "session_started",
-        ] {
-            assert!(
-                !is_acp_event_relevant(&serde_json::json!({ "type": kind })),
-                "expected {kind} to be ignored"
-            );
+        // High-volume / streaming variants — must NOT trigger the filter.
+        let ignored: Vec<AcpEvent> = vec![
+            AcpEvent::ContentDelta { text: "x".into() },
+            AcpEvent::Thinking { text: "x".into() },
+            AcpEvent::UsageUpdate { used: 1, size: 1 },
+            AcpEvent::SessionStarted {
+                session_id: "ext".into(),
+            },
+        ];
+        for ev in &ignored {
+            assert!(!is_acp_event_relevant(ev), "expected {ev:?} to be ignored");
         }
-        assert!(!is_acp_event_relevant(&serde_json::json!({})));
+    }
+
+    /// Build a fresh `(bus, broadcaster, rx, emitter)` quad and spawn the
+    /// subscriber against it. Most tests need exactly this setup; the
+    /// helper keeps the noise out of the assertion bodies.
+    fn spawn_test_subscriber(
+        handle: PetStateHandle,
+    ) -> (
+        Arc<InternalEventBus>,
+        Arc<WebEventBroadcaster>,
+        broadcast::Receiver<WebEvent>,
+    ) {
+        let metrics = Arc::new(crate::acp::EventBusMetrics::default());
+        let bus = Arc::new(InternalEventBus::new(metrics));
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        // The emitter's `bus` is unused in these tests (we don't call
+        // `emit_with_state`); only its broadcaster is — `pet://state` /
+        // `pet://oneshot` go through `emit_event` → broadcaster.
+        let emitter = EventEmitter::test_web_only(broadcaster.clone());
+        let rx = broadcaster.subscribe();
+        tokio::spawn(pet_state_subscriber_task(
+            bus.clone(),
+            broadcaster.clone(),
+            emitter,
+            handle,
+        ));
+        (bus, broadcaster, rx)
     }
 
     #[test]
@@ -745,18 +806,20 @@ mod tests {
         assert_eq!(classify_agent_install(&serde_json::json!({})), None);
     }
 
+    /// Helper for tests that drive ACP events: build the typed envelope
+    /// then push through `bus.send`. Mirrors what `emit_with_state` does
+    /// in production (without the SessionState / `event_seq` plumbing).
+    fn send_acp(bus: &Arc<InternalEventBus>, seq: u64, conn: &str, payload: AcpEvent) {
+        bus.send(Arc::new(EventEnvelope {
+            seq,
+            connection_id: conn.into(),
+            payload,
+        }));
+    }
+
     #[tokio::test]
     async fn subscriber_emits_oneshot_for_git_commit_succeeded() {
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
-
-        // Subscribe BEFORE spawning so we don't miss the initial idle emit.
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            new_pet_state_handle(),
-        ));
+        let (_bus, broadcaster, mut rx) = spawn_test_subscriber(new_pet_state_handle());
 
         // Drain the initial `pet://state = idle` emit.
         let _ = rx.recv().await;
@@ -766,33 +829,15 @@ mod tests {
             &serde_json::json!({ "folder_id": 1, "committed_files": 3 }),
         );
 
-        let evt = tokio::time::timeout(Duration::from_secs(1), rx.recv())
-            .await
-            .expect("oneshot should fire within 1s")
-            .expect("recv");
-        // Skip our own re-broadcast of the input event by reading until we see oneshot.
-        let evt = if evt.channel == "folder://git-commit-succeeded" {
-            tokio::time::timeout(Duration::from_secs(1), rx.recv())
-                .await
-                .expect("oneshot should fire within 1s")
-                .expect("recv")
-        } else {
-            evt
-        };
+        // Skip our own re-broadcast of the input event by reading until oneshot.
+        let evt = read_until_oneshot(&mut rx).await;
         assert_eq!(evt.channel, "pet://oneshot");
         assert_eq!(evt.payload.as_ref(), &serde_json::json!("jumping"));
     }
 
     #[tokio::test]
     async fn subscriber_emits_oneshot_for_merge_aborted() {
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            new_pet_state_handle(),
-        ));
+        let (_bus, broadcaster, mut rx) = spawn_test_subscriber(new_pet_state_handle());
         let _ = rx.recv().await; // initial idle
 
         broadcaster.send(
@@ -807,14 +852,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscriber_emits_oneshot_for_agent_install_completed() {
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            new_pet_state_handle(),
-        ));
+        let (_bus, broadcaster, mut rx) = spawn_test_subscriber(new_pet_state_handle());
         let _ = rx.recv().await;
 
         broadcaster.send(
@@ -832,25 +870,16 @@ mod tests {
 
     #[tokio::test]
     async fn subscriber_emits_oneshot_for_pending_review() {
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            new_pet_state_handle(),
-        ));
+        let (bus, _broadcaster, mut rx) = spawn_test_subscriber(new_pet_state_handle());
         let _ = rx.recv().await; // initial idle
 
-        broadcaster.send(
-            "acp://event",
-            &EventEnvelope {
-                seq: 1,
-                connection_id: "c1".into(),
-                payload: AcpEvent::ConversationStatusChanged {
-                    conversation_id: 7,
-                    status: ConversationStatus::PendingReview,
-                },
+        send_acp(
+            &bus,
+            1,
+            "c1",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 7,
+                status: ConversationStatus::PendingReview,
             },
         );
 
@@ -864,26 +893,17 @@ mod tests {
         // bump ambient state above whatever the snapshot would compute.
         // Without an active connection in the snapshot, ambient stays
         // Idle even after a PendingReview lands.
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
         let handle = new_pet_state_handle();
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            handle.clone(),
-        ));
+        let (bus, _broadcaster, mut rx) = spawn_test_subscriber(handle.clone());
         let _ = rx.recv().await; // initial idle
 
-        broadcaster.send(
-            "acp://event",
-            &EventEnvelope {
-                seq: 1,
-                connection_id: "c1".into(),
-                payload: AcpEvent::ConversationStatusChanged {
-                    conversation_id: 7,
-                    status: ConversationStatus::PendingReview,
-                },
+        send_acp(
+            &bus,
+            1,
+            "c1",
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: 7,
+                status: ConversationStatus::PendingReview,
             },
         );
 
@@ -897,26 +917,17 @@ mod tests {
 
     #[tokio::test]
     async fn subscriber_does_not_emit_oneshot_for_turn_complete_end_turn() {
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            new_pet_state_handle(),
-        ));
+        let (bus, _broadcaster, mut rx) = spawn_test_subscriber(new_pet_state_handle());
         let _ = rx.recv().await;
 
-        broadcaster.send(
-            "acp://event",
-            &EventEnvelope {
-                seq: 1,
-                connection_id: "c1".into(),
-                payload: AcpEvent::TurnComplete {
-                    session_id: "s".into(),
-                    stop_reason: "end_turn".into(),
-                    agent_type: "claude_code".into(),
-                },
+        send_acp(
+            &bus,
+            1,
+            "c1",
+            AcpEvent::TurnComplete {
+                session_id: "s".into(),
+                stop_reason: "end_turn".into(),
+                agent_type: "claude_code".into(),
             },
         );
 
@@ -930,30 +941,21 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn failed_state_recovers_after_timeout() {
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            new_pet_state_handle(),
-        ));
+        let (bus, _broadcaster, mut rx) = spawn_test_subscriber(new_pet_state_handle());
         // initial idle
         let initial = rx.recv().await.unwrap();
         assert_eq!(initial.channel, "pet://state");
         assert_eq!(initial.payload.as_ref(), &serde_json::json!("idle"));
 
         // Drive the snapshot into Failed.
-        broadcaster.send(
-            "acp://event",
-            &EventEnvelope {
-                seq: 1,
-                connection_id: "c1".into(),
-                payload: AcpEvent::Error {
-                    message: "boom".into(),
-                    agent_type: "claude_code".into(),
-                    code: None,
-                },
+        send_acp(
+            &bus,
+            1,
+            "c1",
+            AcpEvent::Error {
+                message: "boom".into(),
+                agent_type: "claude_code".into(),
+                code: None,
             },
         );
         let failed = read_state_event(&mut rx).await;
@@ -995,27 +997,18 @@ mod tests {
         // Two errors arriving 3 s apart — the second should reset the
         // recovery clock so `failed` stays visible for ~4 s after the
         // *latest* error, not 4 s from the first.
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            new_pet_state_handle(),
-        ));
+        let (bus, _broadcaster, mut rx) = spawn_test_subscriber(new_pet_state_handle());
         let _ = rx.recv().await; // initial idle
 
         let send_error = |conn: &str| {
-            broadcaster.send(
-                "acp://event",
-                &EventEnvelope {
-                    seq: 1,
-                    connection_id: conn.into(),
-                    payload: AcpEvent::Error {
-                        message: "boom".into(),
-                        agent_type: "claude_code".into(),
-                        code: None,
-                    },
+            send_acp(
+                &bus,
+                1,
+                conn,
+                AcpEvent::Error {
+                    message: "boom".into(),
+                    agent_type: "claude_code".into(),
+                    code: None,
                 },
             );
         };
@@ -1063,7 +1056,7 @@ mod tests {
         use crate::models::pet::PetCelebrationKind;
 
         let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
+        let emitter = EventEmitter::test_web_only(broadcaster.clone());
         let mut rx = broadcaster.subscribe();
 
         pet_celebrate_core(&emitter, PetCelebrationKind::Jumping);
@@ -1089,27 +1082,18 @@ mod tests {
         // handle. Without it, after a brief Failed flash recovers to Idle,
         // a freshly-opened pet window would see a stale `failed` snapshot
         // for the rest of the session.
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
         let handle = new_pet_state_handle();
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            handle.clone(),
-        ));
+        let (bus, _broadcaster, mut rx) = spawn_test_subscriber(handle.clone());
         let _ = rx.recv().await; // initial idle
 
-        broadcaster.send(
-            "acp://event",
-            &EventEnvelope {
-                seq: 1,
-                connection_id: "c1".into(),
-                payload: AcpEvent::Error {
-                    message: "boom".into(),
-                    agent_type: "claude_code".into(),
-                    code: None,
-                },
+        send_acp(
+            &bus,
+            1,
+            "c1",
+            AcpEvent::Error {
+                message: "boom".into(),
+                agent_type: "claude_code".into(),
+                code: None,
             },
         );
         let failed = read_state_event(&mut rx).await;
@@ -1134,43 +1118,32 @@ mod tests {
         // event. The handle is the snapshot the freshly-mounted frontend
         // reads to fill in the gap, so it must always reflect the most
         // recent emitted ambient state.
-        let broadcaster = Arc::new(WebEventBroadcaster::new());
-        let emitter = EventEmitter::WebOnly(broadcaster.clone());
         let handle = new_pet_state_handle();
-        let mut rx = broadcaster.subscribe();
-        tokio::spawn(pet_state_subscriber_task(
-            broadcaster.clone(),
-            emitter,
-            handle.clone(),
-        ));
+        let (bus, _broadcaster, mut rx) = spawn_test_subscriber(handle.clone());
 
         // Drain initial idle emit; handle is set in lockstep.
         let initial = read_state_event(&mut rx).await;
         assert_eq!(initial.payload.as_ref(), &serde_json::json!("idle"));
         assert_eq!(read_pet_state(&handle), PetState::Idle);
 
-        broadcaster.send(
-            "acp://event",
-            &EventEnvelope {
-                seq: 1,
-                connection_id: "c1".into(),
-                payload: AcpEvent::StatusChanged {
-                    status: ConnectionStatus::Prompting,
-                },
+        send_acp(
+            &bus,
+            1,
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
             },
         );
         let running = read_state_event(&mut rx).await;
         assert_eq!(running.payload.as_ref(), &serde_json::json!("running"));
         assert_eq!(read_pet_state(&handle), PetState::Running);
 
-        broadcaster.send(
-            "acp://event",
-            &EventEnvelope {
-                seq: 2,
-                connection_id: "c1".into(),
-                payload: AcpEvent::StatusChanged {
-                    status: ConnectionStatus::Connected,
-                },
+        send_acp(
+            &bus,
+            2,
+            "c1",
+            AcpEvent::StatusChanged {
+                status: ConnectionStatus::Connected,
             },
         );
         let idle = read_state_event(&mut rx).await;

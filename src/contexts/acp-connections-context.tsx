@@ -10,11 +10,11 @@ import {
   type ReactNode,
 } from "react"
 import { useTranslations } from "next-intl"
-import {
-  subscribe,
-  onTransportReconnect,
-  waitForTransportReady,
-} from "@/lib/platform"
+import { subscribe, getEventStream } from "@/lib/platform"
+import type {
+  AttachHandlers,
+  EventStreamSubscription,
+} from "@/lib/transport/types"
 import { randomUUID } from "@/lib/utils"
 import { inferLiveToolName } from "@/lib/tool-call-normalization"
 import {
@@ -54,11 +54,9 @@ import {
 } from "@/lib/constants"
 import { sendSystemNotification } from "@/lib/notification"
 import {
-  applySavedModePreference,
-  applySavedConfigPreferences,
+  getSavedPrefsForConnect,
   saveModePreference,
   saveConfigPreference,
-  clearStalePrefs,
 } from "@/lib/selector-prefs-storage"
 import { useAlertContext, type AlertAction } from "@/contexts/alert-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
@@ -248,7 +246,6 @@ type Action =
       connectionId: string
       agentType: AgentType
       workingDir: string | null
-      contextManagement: ContextManagementState
     }
   | {
       type: "HYDRATE_FROM_SNAPSHOT"
@@ -370,12 +367,6 @@ type Action =
       value: string | boolean
     }
   | {
-      type: "COMPACTION_STATUS_CHANGED"
-      contextKey: string
-      status: CompactionTriggerStatus
-      error?: string | null
-    }
-  | {
       type: "PLAN_UPDATE"
       contextKey: string
       entries: PlanEntryInfo[]
@@ -412,21 +403,6 @@ type ConnectionsMap = Map<string, ConnectionState>
 const MAX_LIVE_TOOL_RAW_OUTPUT_CHARS = 200_000
 const MAX_BUFFERED_UNMAPPED_EVENTS_PER_CONNECTION = 64
 const MAX_BUFFERED_UNMAPPED_CONNECTIONS = 128
-const DEFAULT_AUTO_COMPACTION_THRESHOLD = 80
-const COMPACTION_COMPLETE_RESET_DELAY_MS = 5000
-const CLAUDE_NATIVE_AUTO_COMPACTION_ENV_KEYS = [
-  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-]
-
-const CLAUDE_NATIVE_AUTO_COMPACTION_CONFIG_KEYS = [
-  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-  "claudeCodeAutoCompactWindow",
-  "claude_code_auto_compact_window",
-  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-  "claudeAutocompactPctOverride",
-  "claude_autocompact_pct_override",
-]
 
 const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementState = {
   configuredModel: null,
@@ -475,361 +451,6 @@ function asFiniteNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
-}
-
-function parseJsonObject(
-  raw: string | null | undefined
-): Record<string, unknown> | null {
-  if (!raw) return null
-  try {
-    return asRecord(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-function stringFromRecord(
-  record: Record<string, unknown> | null | undefined,
-  key: string
-): string | null {
-  const value = record?.[key]
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null
-}
-
-function envValue(
-  env: Record<string, string> | null | undefined,
-  key: string
-): string | null {
-  const value = env?.[key]
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null
-}
-
-function parsePercentValue(
-  value: string | number | null | undefined
-): number | null {
-  if (value == null) return null
-  const normalized = String(value).trim().replace(/%$/, "")
-  if (!normalized) return null
-  const parsed = Number(normalized)
-  if (!Number.isFinite(parsed)) return null
-  const percent = parsed > 0 && parsed <= 1 ? parsed * 100 : parsed
-  if (percent < 1 || percent > 100) return null
-  return percent
-}
-
-function parsePositiveIntegerValue(
-  value: string | number | null | undefined
-): number | null {
-  if (value == null) return null
-  const parsed = Number(String(value).trim())
-  if (!Number.isFinite(parsed) || parsed <= 0) return null
-  return Math.floor(parsed)
-}
-
-const CONTEXT_CONFIG_FIELD_PATTERNS = [
-  "model",
-  "compact",
-  "compaction",
-  "context",
-]
-
-const SECRET_FIELD_PATTERNS = [
-  "key",
-  "token",
-  "secret",
-  "password",
-  "credential",
-  "auth",
-]
-
-function isContextConfigKey(key: string): boolean {
-  const normalized = key.toLowerCase()
-  return CONTEXT_CONFIG_FIELD_PATTERNS.some((pattern) =>
-    normalized.includes(pattern)
-  )
-}
-
-function isSecretKey(key: string): boolean {
-  const normalized = key.toLowerCase()
-  return SECRET_FIELD_PATTERNS.some((pattern) => normalized.includes(pattern))
-}
-
-function safeContextConfigFields(
-  record: Record<string, unknown> | null | undefined
-): RuntimeConfigField[] {
-  if (!record) return []
-  return Object.entries(record)
-    .filter(([key, value]) => {
-      if (!isContextConfigKey(key) || isSecretKey(key)) return false
-      return ["string", "number", "boolean"].includes(typeof value)
-    })
-    .map(([key, value]) => ({ key, value: String(value) }))
-    .sort((a, b) => a.key.localeCompare(b.key))
-}
-
-function modelEnvKeysForAgent(agentType: AgentType): string[] {
-  if (agentType === "claude_code") {
-    return ["ANTHROPIC_MODEL"]
-  }
-  if (agentType === "gemini") {
-    return ["GEMINI_MODEL", "GOOGLE_GEMINI_MODEL", "MODEL"]
-  }
-  return ["OPENAI_MODEL", "MODEL", "ANTHROPIC_MODEL", "GEMINI_MODEL"]
-}
-
-function firstEnvValue(
-  record: Record<string, string> | null | undefined,
-  keys: string[]
-): string | null {
-  for (const key of keys) {
-    const value = envValue(record, key)
-    if (value) return value
-  }
-  return null
-}
-
-function firstRecordString(
-  record: Record<string, unknown> | null | undefined,
-  keys: string[]
-): string | null {
-  for (const key of keys) {
-    const value = stringFromRecord(record, key)
-    if (value) return value
-  }
-  return null
-}
-
-function contextWindowMaxEnvKeysForAgent(agentType: AgentType): string[] {
-  if (agentType === "claude_code") {
-    return ["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]
-  }
-  return []
-}
-
-function contextWindowMaxRootKeysForAgent(agentType: AgentType): string[] {
-  if (agentType === "claude_code") {
-    return [
-      "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-      "claudeCodeAutoCompactWindow",
-      "claude_code_auto_compact_window",
-    ]
-  }
-  return []
-}
-
-function firstPositiveIntegerEnvValue(
-  record: Record<string, string> | null | undefined,
-  keys: string[]
-): number | null {
-  for (const key of keys) {
-    const value = parsePositiveIntegerValue(envValue(record, key))
-    if (value != null) return value
-  }
-  return null
-}
-
-function firstPositiveIntegerRecordValue(
-  record: Record<string, unknown> | null | undefined,
-  keys: string[]
-): number | null {
-  for (const key of keys) {
-    const raw = record?.[key]
-    if (typeof raw !== "string" && typeof raw !== "number") continue
-    const value = parsePositiveIntegerValue(raw)
-    if (value != null) return value
-  }
-  return null
-}
-
-function firstPercentRecordValue(
-  record: Record<string, unknown> | null | undefined,
-  keys: string[]
-): number | null {
-  for (const key of keys) {
-    const raw = record?.[key]
-    if (typeof raw !== "string" && typeof raw !== "number") continue
-    const value = parsePercentValue(raw)
-    if (value != null) return value
-  }
-  return null
-}
-
-function hasScalarRecordValue(
-  record: Record<string, unknown> | null | undefined,
-  key: string
-): boolean {
-  const value = record?.[key]
-  if (typeof value === "string") return value.trim().length > 0
-  return typeof value === "number" || typeof value === "boolean"
-}
-
-function hasNativeClaudeAutoCompactionConfig(
-  env: Record<string, string> | null | undefined,
-  configEnv: Record<string, unknown> | null | undefined,
-  config: Record<string, unknown> | null | undefined
-): boolean {
-  return (
-    CLAUDE_NATIVE_AUTO_COMPACTION_ENV_KEYS.some(
-      (key) =>
-        envValue(env, key) != null || hasScalarRecordValue(configEnv, key)
-    ) ||
-    CLAUDE_NATIVE_AUTO_COMPACTION_CONFIG_KEYS.some((key) =>
-      hasScalarRecordValue(config, key)
-    )
-  )
-}
-
-function debugContextManagement(
-  label: string,
-  details: Record<string, unknown>
-) {
-  if (typeof window === "undefined") return
-  try {
-    if (
-      window.localStorage.getItem("codeg.debug.contextManagement") !== "true"
-    ) {
-      return
-    }
-  } catch {
-    return
-  }
-  console.debug(`[context-management] ${label}`, details)
-}
-
-function contextManagementFromAgentStatus(
-  agent: AcpAgentStatus | null,
-  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT
-): ContextManagementState {
-  if (!agent) return previous
-
-  const config = parseJsonObject(agent.config_json)
-  const configEnv = asRecord(config?.env)
-  const rootModel = stringFromRecord(config, "model")
-  const modelEnvKeys = modelEnvKeysForAgent(agent.agent_type)
-  const contextWindowMaxKeys = contextWindowMaxEnvKeysForAgent(agent.agent_type)
-  const envConfiguredModel = firstEnvValue(agent.env, modelEnvKeys)
-  const configEnvConfiguredModel = firstRecordString(configEnv, modelEnvKeys)
-  const agentConfiguredModel =
-    envConfiguredModel ?? configEnvConfiguredModel ?? rootModel
-  const configuredModelSource: ConfiguredModelSource | null = envConfiguredModel
-    ? "agent_env"
-    : configEnvConfiguredModel
-      ? "agent_config_env"
-      : rootModel
-        ? "agent_root_config"
-        : null
-  const configuredModel = agentConfiguredModel ?? previous.configuredModel
-
-  const claudeAutoCompactPercent =
-    parsePercentValue(
-      envValue(agent.env, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
-        stringFromRecord(configEnv, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
-    ) ??
-    firstPercentRecordValue(config, [
-      "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-      "claudeAutocompactPctOverride",
-      "claude_autocompact_pct_override",
-    ])
-  const envConfiguredContextWindowMax = firstPositiveIntegerEnvValue(
-    agent.env,
-    contextWindowMaxKeys
-  )
-  const configEnvConfiguredContextWindowMax = firstPositiveIntegerRecordValue(
-    configEnv,
-    contextWindowMaxKeys
-  )
-  const contextWindowMaxRootKeys = contextWindowMaxRootKeysForAgent(
-    agent.agent_type
-  )
-  const rootConfiguredContextWindowMax = firstPositiveIntegerRecordValue(
-    config,
-    contextWindowMaxRootKeys
-  )
-  const claudeAutoCompactWindow =
-    envConfiguredContextWindowMax ??
-    configEnvConfiguredContextWindowMax ??
-    rootConfiguredContextWindowMax
-  const configuredContextWindowMaxTokens =
-    claudeAutoCompactWindow ?? previous.configuredContextWindowMaxTokens
-  const contextWindowMaxSource: ContextWindowMaxSource | null =
-    envConfiguredContextWindowMax != null
-      ? "agent_env"
-      : configEnvConfiguredContextWindowMax != null
-        ? "agent_config_env"
-        : rootConfiguredContextWindowMax != null
-          ? "agent_root_config"
-          : previous.contextWindowMaxSource
-  const hasClaudeAutoCompactionConfig =
-    claudeAutoCompactPercent != null || claudeAutoCompactWindow != null
-  const hasNativeAutoCompactionConfig =
-    agent.agent_type === "claude_code" &&
-    hasNativeClaudeAutoCompactionConfig(agent.env, configEnv, config)
-  const runtimeConfig: RuntimeConfigSnapshot = {
-    agentType: agent.agent_type,
-    configFilePath: agent.config_file_path ?? null,
-    safeEnvFields: safeContextConfigFields(agent.env),
-    safeRootConfigFields: safeContextConfigFields(config),
-    safeConfigEnvFields: safeContextConfigFields(configEnv),
-    selectorModel: previous.runtimeConfig?.selectorModel ?? null,
-  }
-  const next: ContextManagementState = {
-    ...previous,
-    configuredModel,
-    configuredModelSource:
-      configuredModelSource ?? previous.configuredModelSource,
-    configuredContextWindowMaxTokens,
-    contextWindowMaxSource,
-    autoCompactionEnabled: hasClaudeAutoCompactionConfig
-      ? true
-      : previous.autoCompactionEnabled,
-    autoCompactionThreshold:
-      claudeAutoCompactPercent ?? previous.autoCompactionThreshold,
-    compactionSupport: hasNativeAutoCompactionConfig
-      ? "native_managed"
-      : previous.compactionSupport,
-    runtimeConfig,
-  }
-
-  debugContextManagement("fromAgentStatus", {
-    agentType: agent.agent_type,
-    modelEnvKeys,
-    envCandidates: Object.fromEntries(
-      modelEnvKeys.map((key) => [key, envValue(agent.env, key)])
-    ),
-    contextWindowMaxKeys,
-    contextWindowMaxRootKeys,
-    envContextWindowMax: envConfiguredContextWindowMax,
-    configEnvContextWindowMax: configEnvConfiguredContextWindowMax,
-    rootContextWindowMax: rootConfiguredContextWindowMax,
-    rootConfigCandidates: {
-      model: rootModel,
-      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: stringFromRecord(
-        config,
-        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
-      ),
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW: stringFromRecord(
-        config,
-        "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
-      ),
-    },
-    configEnvCandidates: safeContextConfigFields(configEnv),
-    agentConfiguredModel,
-    previousModel: previous.configuredModel,
-    previousSource: previous.configuredModelSource,
-    finalModel: next.configuredModel,
-    finalSource: next.configuredModelSource,
-    compactionPercent: claudeAutoCompactPercent,
-    compactionWindow: claudeAutoCompactWindow,
-    nativeAutoCompactionConfig: hasNativeAutoCompactionConfig,
-    configuredContextWindowMaxTokens: next.configuredContextWindowMaxTokens,
-    contextWindowMaxSource: next.contextWindowMaxSource,
-  })
-
-  return next
 }
 
 function parseClaudeApiRetryEvent(
@@ -1054,142 +675,9 @@ function sameConfigOptions(
           }
         }
       }
-    } else if (leftKind.current_value !== rightKind.current_value) {
-      return false
     }
   }
   return true
-}
-
-function configOptionCurrentValue(
-  option: SessionConfigOptionInfo
-): string | boolean {
-  return option.kind.current_value
-}
-
-function parseBooleanConfigValue(
-  option: SessionConfigOptionInfo | undefined
-): boolean | null {
-  if (!option) return null
-  if (option.kind.type === "boolean") return option.kind.current_value
-
-  const normalized = option.kind.current_value.trim().toLowerCase()
-  if (["true", "on", "yes", "enabled", "enable", "auto"].includes(normalized)) {
-    return true
-  }
-  if (
-    ["false", "off", "no", "disabled", "disable", "manual", "never"].includes(
-      normalized
-    )
-  ) {
-    return false
-  }
-  return null
-}
-
-function parsePercentConfigValue(
-  option: SessionConfigOptionInfo | undefined
-): number | null {
-  if (!option || option.kind.type !== "select") return null
-
-  return parsePercentValue(option.kind.current_value)
-}
-
-function contextManagementFromSelectors(
-  options: SessionConfigOptionInfo[] | null,
-  commands: AvailableCommandInfo[] | null,
-  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT
-): ContextManagementState {
-  const modelOption = options?.find((option) => option.category === "model")
-  const selectorModel = modelOption
-    ? String(configOptionCurrentValue(modelOption))
-    : null
-  const previousSource = previous.configuredModelSource
-  const shouldUseSelectorModel = selectorModel != null && previousSource == null
-  const configuredModel = shouldUseSelectorModel
-    ? selectorModel
-    : previous.configuredModel
-  const configuredModelSource = shouldUseSelectorModel
-    ? "selector"
-    : previous.configuredModelSource
-  const autoCompactOption = options?.find((option) => {
-    const id = option.id.toLowerCase()
-    const name = option.name.toLowerCase()
-    return (
-      id.includes("auto_compact") ||
-      id.includes("auto-compact") ||
-      id.includes("autocompact") ||
-      id.includes("auto_compaction") ||
-      name.includes("auto compact") ||
-      name.includes("auto-compaction")
-    )
-  })
-  const thresholdOption = options?.find((option) => {
-    const id = option.id.toLowerCase()
-    const name = option.name.toLowerCase()
-    return (
-      id.includes("compact_threshold") ||
-      id.includes("compaction_threshold") ||
-      id.includes("context_threshold") ||
-      name.includes("compact threshold") ||
-      name.includes("compaction threshold") ||
-      name.includes("context threshold")
-    )
-  })
-  const parsedAutoCompactionEnabled = parseBooleanConfigValue(autoCompactOption)
-  const autoCompactionEnabled =
-    parsedAutoCompactionEnabled ?? previous.autoCompactionEnabled
-  const autoCompactionThreshold =
-    parsePercentConfigValue(thresholdOption) ?? previous.autoCompactionThreshold
-  const compactionCommand = findCompactionCommand(commands)
-  const compactionSupport: CompactionSupport =
-    previous.compactionSupport === "native_managed"
-      ? "native_managed"
-      : compactionCommand
-        ? "agent_managed"
-        : commands
-          ? "unsupported"
-          : previous.compactionSupport
-  const runtimeConfig = previous.runtimeConfig
-    ? {
-        ...previous.runtimeConfig,
-        selectorModel,
-      }
-    : previous.runtimeConfig
-  const next: ContextManagementState = {
-    ...previous,
-    configuredModel,
-    configuredModelSource,
-    runtimeModel: previous.runtimeModel,
-    autoCompactionEnabled,
-    autoCompactionThreshold,
-    compactionSupport,
-    runtimeConfig,
-  }
-
-  debugContextManagement("fromSelectors", {
-    selectorModel,
-    previousSource,
-    shouldUseSelectorModel,
-    finalModel: next.configuredModel,
-    finalSource: next.configuredModelSource,
-    autoCompactionEnabled,
-    autoCompactionThreshold,
-  })
-
-  return next
-}
-
-function findCompactionCommand(
-  commands: AvailableCommandInfo[] | null
-): AvailableCommandInfo | null {
-  if (!commands) return null
-  return (
-    commands.find((command) => {
-      const name = command.name.replace(/^\//, "").toLowerCase()
-      return name === "compact" || name === "summarize"
-    }) ?? null
-  )
 }
 
 function sameCommands(
@@ -1326,7 +814,7 @@ function connectionsReducer(
         configOptions: null,
         availableCommands: null,
         usage: null,
-        contextManagement: action.contextManagement,
+        contextManagement: DEFAULT_CONTEXT_MANAGEMENT,
         liveMessage: null,
         pendingPermission: null,
         pendingQuestion: null,
@@ -1347,10 +835,60 @@ function connectionsReducer(
       // from connection A (high seq) would otherwise overwrite a fresh
       // connection B (lastAppliedSeq=0) at the same contextKey.
       if (current.connectionId !== action.patch.connectionId) return state
+
+      // Latched-once / fill-null fields are always safe to merge, even when
+      // the snapshot is stale by event_seq. Their producing events
+      // (`selectors_ready`, `fork_supported`, `session_modes`,
+      // `session_config_options`, `available_commands`, `prompt_capabilities`)
+      // typically fire only once during the initial handshake, so the
+      // snapshot is the only recovery path after a refresh that missed the
+      // original live event. Without this, a mid-stream browser refresh
+      // races the snapshot fetch against new content_delta events: the
+      // deltas advance lastAppliedSeq past the snapshot's event_seq, the
+      // outer guard rejects the patch, and `selectorsReady` never recovers
+      // — leaving the bottom status bar stuck on "正在初始化 xxx 会话".
+      const mergedSelectorsReady =
+        action.patch.selectorsReady || current.selectorsReady
+      const mergedSupportsFork =
+        action.patch.supportsFork || current.supportsFork
+      const mergedModes = current.modes ?? action.patch.modes
+      const mergedConfigOptions =
+        current.configOptions ?? action.patch.configOptions
+      const mergedAvailableCommands =
+        current.availableCommands ?? action.patch.availableCommands
+      const mergedPromptCapabilities =
+        action.patch.promptCapabilities ?? current.promptCapabilities
+
       // Race guard: the snapshot may have been generated BEFORE events
       // that have since arrived and been applied to in-memory state.
-      // Hydrating from a stale snapshot would overwrite fresh state.
-      if (action.patch.eventSeq <= current.lastAppliedSeq) return state
+      // Mutable fields (status, sessionId, liveMessage, pendingPermission,
+      // usage) are fresher in memory than in the snapshot and must NOT be
+      // overwritten — but the latched/fill-null fields above are still
+      // applied so the once-per-lifetime bits can recover.
+      if (action.patch.eventSeq <= current.lastAppliedSeq) {
+        if (
+          mergedSelectorsReady === current.selectorsReady &&
+          mergedSupportsFork === current.supportsFork &&
+          mergedModes === current.modes &&
+          mergedConfigOptions === current.configOptions &&
+          mergedAvailableCommands === current.availableCommands &&
+          mergedPromptCapabilities === current.promptCapabilities
+        ) {
+          return state
+        }
+        const next = new Map(state)
+        next.set(action.contextKey, {
+          ...current,
+          modes: mergedModes,
+          configOptions: mergedConfigOptions,
+          availableCommands: mergedAvailableCommands,
+          promptCapabilities: mergedPromptCapabilities,
+          selectorsReady: mergedSelectorsReady,
+          supportsFork: mergedSupportsFork,
+        })
+        return next
+      }
+
       const next = new Map(state)
       next.set(action.contextKey, {
         ...current,
@@ -1360,25 +898,11 @@ function connectionsReducer(
         configOptions: action.patch.configOptions,
         availableCommands: action.patch.availableCommands,
         usage: action.patch.usage,
-        contextManagement: contextManagementFromSelectors(
-          action.patch.configOptions,
-          action.patch.availableCommands,
-          current.contextManagement
-        ),
         liveMessage: action.patch.liveMessage,
         pendingPermission: action.patch.pendingPermission,
-        promptCapabilities:
-          action.patch.promptCapabilities ?? current.promptCapabilities,
-        // Latches once on true. The `selectors_ready` event fires only once
-        // per connection lifetime; a fresh frontend (post-refresh) needs the
-        // snapshot to recover the bit, otherwise the init-session task is
-        // stuck forever.
-        selectorsReady: action.patch.selectorsReady || current.selectorsReady,
-        // Same monotonic-merge as `selectorsReady`. The agent emits
-        // `fork_supported` once during the initial handshake; a post-refresh
-        // frontend that missed the live event needs the snapshot to recover
-        // the capability — without this the Fork button stays hidden forever.
-        supportsFork: action.patch.supportsFork || current.supportsFork,
+        promptCapabilities: mergedPromptCapabilities,
+        selectorsReady: mergedSelectorsReady,
+        supportsFork: mergedSupportsFork,
         lastAppliedSeq: action.patch.eventSeq,
       })
       return next
@@ -1823,11 +1347,6 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         configOptions: action.configOptions,
-        contextManagement: contextManagementFromSelectors(
-          action.configOptions,
-          conn.availableCommands,
-          conn.contextManagement
-        ),
       })
       return next
     }
@@ -1924,15 +1443,7 @@ function connectionsReducer(
         }
       }
       const next = new Map(state)
-      next.set(action.contextKey, {
-        ...conn,
-        configOptions: updated,
-        contextManagement: contextManagementFromSelectors(
-          updated,
-          conn.availableCommands,
-          conn.contextManagement
-        ),
-      })
+      next.set(action.contextKey, { ...conn, configOptions: updated })
       return next
     }
 
@@ -2036,32 +1547,6 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         availableCommands: commands,
-        contextManagement: contextManagementFromSelectors(
-          conn.configOptions,
-          commands,
-          conn.contextManagement
-        ),
-      })
-      return next
-    }
-
-    case "COMPACTION_STATUS_CHANGED": {
-      const conn = state.get(action.contextKey)
-      if (!conn) return state
-      if (
-        conn.contextManagement.compactionStatus === action.status &&
-        conn.contextManagement.lastCompactionError === (action.error ?? null)
-      ) {
-        return state
-      }
-      const next = new Map(state)
-      next.set(action.contextKey, {
-        ...conn,
-        contextManagement: {
-          ...conn.contextManagement,
-          compactionStatus: action.status,
-          lastCompactionError: action.error ?? null,
-        },
       })
       return next
     }
@@ -2081,29 +1566,10 @@ function connectionsReducer(
       ) {
         return state
       }
-      const configuredMax =
-        conn.contextManagement.configuredContextWindowMaxTokens
-      const runtimeMax = action.usage.size > 0 ? action.usage.size : null
-      const runtimeContextWindowClamped =
-        configuredMax != null &&
-        runtimeMax != null &&
-        runtimeMax < configuredMax
-      const contextManagement = {
-        ...conn.contextManagement,
-        runtimeContextWindowMaxTokens: runtimeMax,
-        runtimeContextWindowClamped,
-        ...(conn.contextManagement.compactionStatus === "failed"
-          ? {
-              compactionStatus: "idle" as const,
-              lastCompactionError: null,
-            }
-          : null),
-      }
       const next = new Map(state)
       next.set(action.contextKey, {
         ...conn,
         usage: action.usage,
-        contextManagement,
       })
       return next
     }
@@ -2299,8 +1765,20 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     activeKeyListeners: new Set(),
   })
 
-  // connectionId → contextKey reverse mapping
+  // connectionId → contextKey reverse mapping. Used by the legacy global
+  // `acp://event` listener path. Attach-protocol connections (web mode)
+  // bypass this entirely — their events are routed by the per-subscription
+  // handlers registered in `attachSubscriptionsRef`.
   const reverseMapRef = useRef(new Map<string, string>())
+
+  // contextKey → active EventStream subscription handle. Populated only for
+  // connections established via the Subscribe-with-Snapshot attach
+  // protocol (web + remote-desktop). Used to (a) detach on disconnect /
+  // tab close, and (b) re-attach with the current cursor when a connection
+  // is rekeyed (orphan rescue) so handlers reference the new contextKey.
+  const attachSubscriptionsRef = useRef(
+    new Map<string, EventStreamSubscription>()
+  )
 
   // Open tab keys — updated by child TabProvider via registerOpenTabKeys
   const openTabKeysRef = useRef(new Set<string>())
@@ -2382,7 +1860,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   // Populated by the `useAcpEvent` hook; read by the primary `acp://event`
   // listener and the buffered-events replay loop.
   const eventSubscribersRef = useRef<Set<EventSubscriberRef>>(new Set())
-  const compactionTriggerZonesRef = useRef(new Set<string>())
 
   // ── Notify helpers ──
 
@@ -2520,81 +1997,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     const compacted = Array.from(grouped.values()).flat()
     dispatch({ type: "STREAM_BATCH", actions: compacted })
   }, [dispatch])
-
-  const maybeTriggerAgentCompaction = useCallback(
-    (contextKey: string) => {
-      const conn = storeRef.current.connections.get(contextKey)
-      if (!conn?.usage || conn.usage.used <= 0) return
-      const management = conn.contextManagement
-      // Claude's native auto-compaction env vars are handled inside the agent
-      // process. CodeG must not also send `/compact`, otherwise the frontend
-      // can compact from stale ACP usage/window values before the configured
-      // native threshold is reached.
-      if (management.compactionSupport !== "agent_managed") return
-      if (management.autoCompactionEnabled !== true) return
-      if (
-        management.compactionStatus === "triggered" ||
-        management.compactionStatus === "running"
-      ) {
-        return
-      }
-      if (conn.status !== "connected") return
-      const command = findCompactionCommand(conn.availableCommands)
-      if (!command) return
-      const effectiveContextMax =
-        conn.contextManagement.configuredContextWindowMaxTokens ??
-        conn.usage.size
-      if (effectiveContextMax <= 0) return
-      const percent = (conn.usage.used / effectiveContextMax) * 100
-      const threshold =
-        management.autoCompactionThreshold ?? DEFAULT_AUTO_COMPACTION_THRESHOLD
-      if (percent < threshold) return
-      const zone = Math.floor(percent / 5) * 5
-      const sessionKey = conn.sessionId ?? conn.connectionId
-      const triggerKey = `${conn.connectionId}:${sessionKey}:${threshold}:${effectiveContextMax}:${zone}`
-      if (compactionTriggerZonesRef.current.has(triggerKey)) return
-      compactionTriggerZonesRef.current.add(triggerKey)
-      debugContextManagement("autoCompactionTrigger", {
-        contextKey,
-        support: management.compactionSupport,
-        used: conn.usage.used,
-        liveSize: conn.usage.size,
-        effectiveContextMax,
-        maxSource:
-          conn.contextManagement.configuredContextWindowMaxTokens != null
-            ? conn.contextManagement.contextWindowMaxSource
-            : "live_usage",
-        percent,
-        threshold,
-        zone,
-        command: command.name,
-      })
-      dispatch({
-        type: "COMPACTION_STATUS_CHANGED",
-        contextKey,
-        status: "triggered",
-      })
-      const commandText = command.name.startsWith("/")
-        ? command.name
-        : `/${command.name}`
-      dispatch({
-        type: "COMPACTION_STATUS_CHANGED",
-        contextKey,
-        status: "running",
-      })
-      acpPrompt(conn.connectionId, [{ type: "text", text: commandText }]).catch(
-        (error: unknown) => {
-          dispatch({
-            type: "COMPACTION_STATUS_CHANGED",
-            contextKey,
-            status: "failed",
-            error: normalizeErrorMessage(error),
-          })
-        }
-      )
-    },
-    [dispatch]
-  )
 
   const enqueueStreamingAction = useCallback(
     (action: StreamingAction) => {
@@ -2800,91 +2202,56 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           break
         case "conversation_linked":
           // Backend just bound (or reaffirmed) the connection's DB conversation
-          // row. The frontend currently does not need to mutate state here.
+          // row. Phase 3a frontend pre-creates rows for new-tab sends so this
+          // event is mostly a confirmation; we log it for visibility. Phase 3b
+          // will use this to drive UI mapping when the frontend stops creating
+          // rows itself.
+          console.log("[acp-context] conversation_linked", {
+            contextKey,
+            connectionId: e.connection_id,
+            conversationId: e.conversation_id,
+            folderId: e.folder_id,
+          })
           break
         case "session_modes": {
           flushStreamingQueue()
-          const modeConn = storeRef.current.connections.get(contextKey)
-          const resolvedModes = modeConn
-            ? applySavedModePreference(modeConn.agentType, e.modes)
-            : e.modes
+          // Preferences are applied on the backend during connect (see
+          // `getSavedPrefsForConnect` + `acp_connect`), so `e.modes` already
+          // carries the user's preferred `current_mode_id` — no client-side
+          // override or sync-back needed.
           dispatch({
             type: "SESSION_MODES",
             contextKey,
-            modes: resolvedModes,
+            modes: e.modes,
           })
+          const modeConn = storeRef.current.connections.get(contextKey)
           if (modeConn) {
             const entry = selectorsCache.get(modeConn.agentType) ?? {
               modes: null,
               configOptions: null,
             }
-            entry.modes = resolvedModes
+            entry.modes = e.modes
             selectorsCache.set(modeConn.agentType, entry)
-            // Sync cached mode to backend if it differs from server default
-            if (
-              resolvedModes.current_mode_id &&
-              resolvedModes.current_mode_id !== e.modes.current_mode_id
-            ) {
-              acpSetMode(
-                modeConn.connectionId,
-                resolvedModes.current_mode_id
-              ).catch((err: unknown) =>
-                console.error(
-                  "[ACP] Failed to sync saved mode to backend:",
-                  err
-                )
-              )
-            }
           }
           break
         }
         case "session_config_options": {
           flushStreamingQueue()
-          const cfgConn = storeRef.current.connections.get(contextKey)
-          const resolvedConfigOptions = cfgConn
-            ? applySavedConfigPreferences(cfgConn.agentType, e.config_options)
-            : e.config_options
+          // Same as `session_modes`: backend already merged saved prefs
+          // into `current_value` before emitting.
           dispatch({
             type: "SESSION_CONFIG_OPTIONS",
             contextKey,
-            configOptions: resolvedConfigOptions,
+            configOptions: e.config_options,
           })
+          const cfgConn = storeRef.current.connections.get(contextKey)
           if (cfgConn) {
             const entry = selectorsCache.get(cfgConn.agentType) ?? {
               modes: null,
               configOptions: null,
             }
-            entry.configOptions = resolvedConfigOptions
+            entry.configOptions = e.config_options
             selectorsCache.set(cfgConn.agentType, entry)
-            // Sync cached config options to backend if they differ.
-            // Compare by id instead of array index so agent-side reordering
-            // cannot misapply a saved model/context option.
-            const originalsById = new Map(
-              e.config_options.map((option) => [option.id, option])
-            )
-            for (const resolved of resolvedConfigOptions) {
-              const original = originalsById.get(resolved.id)
-              if (!original || resolved.kind.type !== original.kind.type) {
-                continue
-              }
-              if (resolved.kind.current_value === original.kind.current_value) {
-                continue
-              }
-              acpSetConfigOption(
-                cfgConn.connectionId,
-                resolved.id,
-                resolved.kind.current_value
-              ).catch((err: unknown) => {
-                const message = err instanceof Error ? err.message : String(err)
-                if (message.includes("connection not found")) {
-                  return
-                }
-                console.error(
-                  "[ACP] Failed to sync saved config option to backend:",
-                  err
-                )
-              })
-            }
           }
           break
         }
@@ -2902,13 +2269,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               modes: rdyConn.modes,
               configOptions: rdyConn.configOptions,
             })
-          }
-          // Clean up stale localStorage prefs for agents that genuinely
-          // no longer provide modes or config options.
-          if (rdyConn) {
-            const hasModes = (rdyConn.modes?.available_modes.length ?? 0) > 0
-            const hasConfig = (rdyConn.configOptions?.length ?? 0) > 0
-            clearStalePrefs(rdyConn.agentType, hasModes, hasConfig)
           }
           break
         }
@@ -2952,24 +2312,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             contextKey,
             status: "connected",
           })
-          const completedConn = storeRef.current.connections.get(contextKey)
-          if (
-            completedConn?.contextManagement.compactionStatus === "running" ||
-            completedConn?.contextManagement.compactionStatus === "triggered"
-          ) {
-            dispatch({
-              type: "COMPACTION_STATUS_CHANGED",
-              contextKey,
-              status: "completed",
-            })
-            window.setTimeout(() => {
-              dispatch({
-                type: "COMPACTION_STATUS_CHANGED",
-                contextKey,
-                status: "idle",
-              })
-            }, COMPACTION_COMPLETE_RESET_DELAY_MS)
-          }
           // Detect pending question from tool calls in the completed turn
           const turnConn = storeRef.current.connections.get(contextKey)
           if (turnConn?.liveMessage) {
@@ -3129,7 +2471,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               size: e.size,
             },
           })
-          maybeTriggerAgentCompaction(contextKey)
           break
       }
     },
@@ -3138,21 +2479,144 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       enqueueStreamingAction,
       flushPendingToolCallUpdates,
       flushStreamingQueue,
-      maybeTriggerAgentCompaction,
       scheduleToolCallUpdateFlush,
       t,
       tChat,
     ]
   )
 
+  // Apply a single envelope to the store. Shared by the legacy global
+  // listener and the attach-protocol per-subscription handlers so dedup +
+  // dispatch ordering + JS subscriber fan-out stays identical between
+  // the two paths.
+  const applyMappedEnvelope = useCallback(
+    (contextKey: string, envelope: EventEnvelope) => {
+      const conn = storeRef.current.connections.get(contextKey)
+      if (conn && envelope.seq <= conn.lastAppliedSeq) return
+      lastActivityRef.current.set(contextKey, Date.now())
+      handleMappedEvent(contextKey, envelope)
+      dispatch({ type: "EVENT_APPLIED", contextKey, seq: envelope.seq })
+      for (const ref of eventSubscribersRef.current) {
+        try {
+          ref.current(envelope)
+        } catch (err) {
+          console.error("[acp-context] subscriber threw:", err)
+        }
+      }
+    },
+    [dispatch, handleMappedEvent]
+  )
+
+  // Open a Subscribe-with-Snapshot stream for `connectionId` and route its
+  // frames into the store under `contextKey`. Returns the subscription
+  // handle for cleanup, or `null` when the active transport doesn't
+  // implement the attach protocol (caller falls back to the legacy
+  // snapshot-fetch + global-listener flow).
+  //
+  // The subscription survives WS reconnects automatically — see
+  // `WebEventStream.reattachAll`. Detach reasons are handled here:
+  //   - lagged / server_shutdown: re-attach with current cursor so the
+  //     consumer doesn't have to think about transient disconnects
+  //   - connection_gone: terminal; clean up store entry and let the next
+  //     user interaction surface the failure
+  const setupAttachSubscription = useCallback(
+    (
+      contextKey: string,
+      connectionId: string,
+      sinceSeq: number | undefined
+    ): EventStreamSubscription | null => {
+      const stream = getEventStream()
+      if (!stream) return null
+
+      let activeSub: EventStreamSubscription | null = null
+      const handlers: AttachHandlers = {
+        onSnapshot: (snapshot) => {
+          const patch = denormalizeSnapshot(snapshot)
+          dispatch({ type: "HYDRATE_FROM_SNAPSHOT", contextKey, patch })
+          lastActivityRef.current.set(contextKey, Date.now())
+        },
+        onReplay: (events) => {
+          for (const envelope of events) {
+            applyMappedEnvelope(contextKey, envelope)
+          }
+        },
+        onEvent: (envelope) => {
+          applyMappedEnvelope(contextKey, envelope)
+        },
+        onDetached: (reason) => {
+          if (reason === "lagged" || reason === "server_shutdown") {
+            // Transient: re-attach with the latest cursor so we either
+            // replay the gap (small) or hydrate fresh (large). For
+            // server_shutdown the WS is closed, so the new attach frame
+            // queues until reconnect; for lagged the WS is still open.
+            const conn = storeRef.current.connections.get(contextKey)
+            const newSinceSeq = conn?.lastAppliedSeq
+            const newSub = stream.attach(
+              connectionId,
+              { sinceSeq: newSinceSeq },
+              handlers
+            )
+            activeSub = newSub
+            attachSubscriptionsRef.current.set(contextKey, newSub)
+            return
+          }
+          // connection_gone: backend GC'd the connection. Mirror to UI
+          // so the user sees the conversation tab go away rather than
+          // staring at stale state forever.
+          attachSubscriptionsRef.current.delete(contextKey)
+          dispatch({ type: "CONNECTION_REMOVED", contextKey })
+        },
+      }
+
+      activeSub = stream.attach(connectionId, { sinceSeq }, handlers)
+      attachSubscriptionsRef.current.set(contextKey, activeSub)
+      return activeSub
+    },
+    [applyMappedEnvelope, dispatch]
+  )
+
+  // Tear down an attach subscription: detach the WS subscription so the
+  // server-side forwarder task exits, and clear the local handle.
+  // Idempotent — safe to call from disconnect, idle sweep, REKEY, and
+  // REMOVE_ALL paths without checking whether a sub exists. No-op for
+  // legacy (Tauri) connections that never went through
+  // `setupAttachSubscription`.
+  const teardownAttachSubscription = useCallback((contextKey: string) => {
+    const sub = attachSubscriptionsRef.current.get(contextKey)
+    if (!sub) return
+    attachSubscriptionsRef.current.delete(contextKey)
+    try {
+      sub.detach()
+    } catch (err) {
+      console.warn("[acp-context] attach detach threw:", err)
+    }
+  }, [])
+
   // Single global event listener
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | null = null
 
+    // Web / remote-desktop transports: the backend no longer fans ACP
+    // events through the WS firehose (Phase 5 dropped the `acp://event`
+    // channel; per-connection attach streams are the sole delivery path).
+    // Skip the legacy listener entirely — keeping it would register a
+    // dead WebSocket subscription and waste a slot on every reconnect.
+    // `waitForListenerReady` becomes an immediate no-op since the path
+    // it was guarding (Tauri's app.emit handshake) doesn't exist here.
+    if (getEventStream() !== null) {
+      listenerReadyRef.current = true
+      resolveListenerReadyWaiters()
+      return
+    }
+
     listenerReadyRef.current = false
 
     subscribe<EventEnvelope>("acp://event", (envelope) => {
+      // Tauri webview path: the desktop frontend receives ACP events here
+      // via `app.emit("acp://event", ...)`. Web / remote-desktop transports
+      // skipped this useEffect above and route ACP events solely via the
+      // per-connection attach streams.
       const contextKey = reverseMapRef.current.get(envelope.connection_id)
       if (!contextKey) {
         bufferUnmappedEvent(envelope)
@@ -3222,47 +2686,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     handleMappedEvent,
     resolveListenerReadyWaiters,
   ])
-
-  // Recover from missed events after a WS reconnect. The web-mode
-  // broadcaster drops events when `receiver_count == 0`, so anything fired
-  // between `onclose` and the next `__ready__` is lost. After the reconnect
-  // settles, refetch backend snapshots for every non-terminal connection so
-  // the store catches up to whatever happened during the disconnect window.
-  // `HYDRATE_FROM_SNAPSHOT`'s `eventSeq <= lastAppliedSeq` guard already
-  // handles races against live events arriving via the resubscribed WS.
-  // No-op on IPC-only transports (Tauri desktop) — `onTransportReconnect`
-  // returns a no-op unsubscribe there.
-  useEffect(() => {
-    return onTransportReconnect(() => {
-      for (const [contextKey, conn] of storeRef.current.connections) {
-        if (conn.status === "disconnected" || conn.status === "error") {
-          continue
-        }
-        const connectionId = conn.connectionId
-        void acpGetSessionSnapshot(connectionId)
-          .then((snapshot) => {
-            if (!snapshot) return
-            const patch = denormalizeSnapshot(snapshot)
-            dispatch({
-              type: "HYDRATE_FROM_SNAPSHOT",
-              contextKey,
-              patch,
-            })
-          })
-          .catch((e: unknown) => {
-            // Snapshot may 404 if the backend GC'd the connection during
-            // the disconnect window (idle sweep). Logged but not surfaced —
-            // the existing per-connection state remains until the next
-            // explicit interaction reveals it's gone.
-            console.warn(
-              "[acp-context] reconnect snapshot fetch failed for",
-              connectionId,
-              e
-            )
-          })
-      }
-    })
-  }, [dispatch])
 
   // ── Backend keepalive timer ──
   // Frontend is the only side that knows which conversation tabs the
@@ -3334,6 +2757,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       for (const { contextKey, connectionId } of toDisconnect) {
         acpDisconnect(connectionId).catch(() => {})
         reverseMapRef.current.delete(connectionId)
+        teardownAttachSubscription(contextKey)
         lastActivityRef.current.delete(contextKey)
         pendingUnmappedEventsRef.current.delete(connectionId)
         dispatch({ type: "CONNECTION_REMOVED", contextKey })
@@ -3341,14 +2765,22 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     }, IDLE_SWEEP_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [dispatch])
+  }, [dispatch, teardownAttachSubscription])
 
   // Disconnect all on unmount
   useEffect(() => {
     const reverseMap = reverseMapRef.current
+    const attachSubs = attachSubscriptionsRef.current
     return () => {
       for (const [connectionId] of reverseMap) {
         acpDisconnect(connectionId).catch(() => {})
+      }
+      for (const [, sub] of attachSubs) {
+        try {
+          sub.detach()
+        } catch {
+          // best-effort during teardown
+        }
       }
     }
   }, [])
@@ -3429,6 +2861,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           ) {
             await acpDisconnect(existing.connectionId).catch(() => {})
             reverseMapRef.current.delete(existing.connectionId)
+            teardownAttachSubscription(contextKey)
             lastActivityRef.current.delete(contextKey)
             pendingUnmappedEventsRef.current.delete(existing.connectionId)
           }
@@ -3468,28 +2901,55 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             if (storeRef.current.activeKey === orphanKey) {
               setActiveKey(contextKey)
             }
+            // Migrate any active attach subscription from the orphan key to
+            // the new key. The handlers' contextKey was captured by closure
+            // at attach time, so a simple Map rename would leave events
+            // dispatching to the (now-removed) orphan key. Detach + re-attach
+            // with the current cursor is correct: the attach response is
+            // either a (possibly empty) replay or a fresh snapshot, both
+            // converge on the same state.
+            const orphanCursor = orphanConn.lastAppliedSeq
+            teardownAttachSubscription(orphanKey)
             dispatch({
               type: "REKEY_CONNECTION",
               fromKey: orphanKey,
               toKey: contextKey,
             })
+            setupAttachSubscription(
+              contextKey,
+              orphanConn.connectionId,
+              orphanCursor
+            )
             return
           }
         }
 
+        // Wait for the legacy global listener to register so Tauri's drain
+        // path picks up any events emitted between acpConnect returning
+        // and reverseMap.set below. Web/remote use attach which doesn't
+        // need this gate, but the wait is a fast no-op once the initial
+        // subscribe resolves.
         await waitForListenerReady()
-        // `waitForListenerReady` only confirms the global subscribe is set
-        // up — `listenerReadyRef` latches to true after the initial connect
-        // and never resets. During a mid-session WS reconnect, the server
-        // broadcaster's `receiver_count` is briefly 0; firing `acp_connect`
-        // in that window means the backend's `Connecting`/`Connected` events
-        // get silently dropped. Snapshot recovery via `onTransportReconnect`
-        // eventually catches up the state, but the user still sees a few
-        // seconds of "正在连接" while it does. Awaiting the current
-        // `readyPromise` here holds the HTTP call until the WS is back so
-        // no event is dropped in the first place.
-        await waitForTransportReady()
-        const connectionId = await acpConnect(agentType, workingDir, sessionId)
+        // Ship the user's saved selector preferences (mode + per-config
+        // values, persisted per agentType in localStorage) up to the backend
+        // at connect time. The backend applies them on the freshly-attached
+        // session before emitting `session_modes` / `session_config_options`,
+        // so by the time the frontend sees those events (or a snapshot frame
+        // on the Subscribe-with-Snapshot attach), `current_mode_id` and
+        // `current_value` already reflect the user's preferences. This
+        // eliminates the prior "intercept event → overwrite locally → sync
+        // back to agent" path, which fixed new-conversation flow but quietly
+        // regressed when the snapshot path replaced the event path on tab
+        // re-open (the snapshot frame doesn't carry a `session_modes` event,
+        // so the apply-on-event hook never fired).
+        const savedPrefs = getSavedPrefsForConnect(agentType)
+        const connectionId = await acpConnect(
+          agentType,
+          workingDir,
+          sessionId,
+          savedPrefs.modeId,
+          savedPrefs.configValues
+        )
 
         // If disconnect was requested while connect was in flight,
         // tear down immediately instead of registering the connection.
@@ -3503,67 +2963,64 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        reverseMapRef.current.set(connectionId, contextKey)
         lastActivityRef.current.set(contextKey, Date.now())
-        const initialContextManagement =
-          contextManagementFromAgentStatus(configuredAgent)
         dispatch({
           type: "CONNECTION_CREATED",
           contextKey,
           connectionId,
           agentType,
           workingDir: nextWorkingDir,
-          contextManagement: initialContextManagement,
         })
 
-        // Hydrate from backend snapshot. Non-blocking: if the snapshot
-        // response loses the race against the live event stream, the
-        // HYDRATE_FROM_SNAPSHOT reducer arm is a no-op (eventSeq guard).
-        // If the connection is brand-new and SessionState is empty, the
-        // snapshot is structurally empty and HYDRATE is also a no-op.
-        void acpGetSessionSnapshot(connectionId)
-          .then((snapshot) => {
-            if (!snapshot) return
-            const patch = denormalizeSnapshot(snapshot)
-            dispatch({
-              type: "HYDRATE_FROM_SNAPSHOT",
-              contextKey,
-              patch,
-            })
-          })
-          .catch((e: unknown) => {
+        // Subscribe-with-Snapshot path. When the active transport supports
+        // the attach protocol (currently web mode), the per-connection WS
+        // stream delivers snapshot + replay + live events atomically — no
+        // separate snapshot HTTP fetch, no reverse-map, no unmapped buffer.
+        // Returns null on transports without attach support; we fall
+        // through to the legacy snapshot+global-listener path below.
+        const attachSub = setupAttachSubscription(
+          contextKey,
+          connectionId,
+          undefined
+        )
+        if (attachSub) {
+          // Done — the EventStream handles snapshot, replay, live events,
+          // and reconnect entirely in-band over the same WS.
+        } else {
+          // Legacy path (Tauri desktop, RemoteDesktop): same flow as
+          // before Phase 3. Awaits snapshot HTTP first, then registers
+          // reverseMap, then drains any envelopes that arrived on the
+          // global listener while the snapshot was in flight.
+          let snapshotPatch:
+            | import("@/lib/snapshot-denormalize").SnapshotPatch
+            | null = null
+          try {
+            const snapshot = await acpGetSessionSnapshot(connectionId)
+            if (snapshot) {
+              snapshotPatch = denormalizeSnapshot(snapshot)
+            }
+          } catch (e: unknown) {
             console.warn(
               "[acp-context] snapshot fetch failed for",
               connectionId,
               e
             )
-          })
+          }
 
-        const buffered = consumeBufferedEvents(connectionId)
-        if (buffered.length > 0) {
-          for (const event of buffered) {
-            // Mirror the live listener's seq dedup for symmetry. The
-            // synchronous snapshot fetch above is fire-and-forget, so
-            // HYDRATE has not landed yet at this loop entry — the guard
-            // is currently a no-op against a 0 lastAppliedSeq, but it
-            // guards future changes that may await snapshot before drain.
-            const conn = storeRef.current.connections.get(contextKey)
-            if (conn && event.seq <= conn.lastAppliedSeq) continue
-            lastActivityRef.current.set(contextKey, Date.now())
-            handleMappedEvent(contextKey, event)
+          if (snapshotPatch) {
             dispatch({
-              type: "EVENT_APPLIED",
+              type: "HYDRATE_FROM_SNAPSHOT",
               contextKey,
-              seq: event.seq,
+              patch: snapshotPatch,
             })
-            // Mirror the live listener: fan out to JS-level subscribers
-            // after EVENT_APPLIED so subscribers inherit the same dedup.
-            for (const ref of eventSubscribersRef.current) {
-              try {
-                ref.current(event)
-              } catch (err) {
-                console.error("[acp-context] subscriber threw:", err)
-              }
+          }
+
+          reverseMapRef.current.set(connectionId, contextKey)
+
+          const buffered = consumeBufferedEvents(connectionId)
+          if (buffered.length > 0) {
+            for (const event of buffered) {
+              applyMappedEnvelope(contextKey, event)
             }
           }
         }
@@ -3630,13 +3087,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       }
     },
     [
+      applyMappedEnvelope,
       buildOpenAgentsSettingsAction,
       consumeBufferedEvents,
       dispatch,
-      handleMappedEvent,
       resolveConnectBlockState,
       setActiveKey,
+      setupAttachSubscription,
       t,
+      teardownAttachSubscription,
       waitForListenerReady,
     ]
   )
@@ -3656,11 +3115,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       }
       await acpDisconnect(conn.connectionId)
       reverseMapRef.current.delete(conn.connectionId)
+      teardownAttachSubscription(contextKey)
       lastActivityRef.current.delete(contextKey)
       pendingUnmappedEventsRef.current.delete(conn.connectionId)
       dispatch({ type: "CONNECTION_REMOVED", contextKey })
     },
-    [dispatch]
+    [dispatch, teardownAttachSubscription]
   )
 
   const reconnect = useCallback(
@@ -3688,15 +3148,16 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const disconnectAll = useCallback(async () => {
     const promises: Promise<void>[] = []
     pendingConnectRequestsRef.current.clear()
-    for (const [, conn] of storeRef.current.connections) {
+    for (const [contextKey, conn] of storeRef.current.connections) {
       promises.push(acpDisconnect(conn.connectionId).catch(() => {}))
       reverseMapRef.current.delete(conn.connectionId)
+      teardownAttachSubscription(contextKey)
       pendingUnmappedEventsRef.current.delete(conn.connectionId)
     }
     lastActivityRef.current.clear()
     await Promise.all(promises)
     dispatch({ type: "REMOVE_ALL" })
-  }, [dispatch])
+  }, [dispatch, teardownAttachSubscription])
 
   const sendPrompt = useCallback(
     async (
@@ -3707,9 +3168,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
       lastActivityRef.current.set(contextKey, Date.now())
-      // Gate on WS readiness so backend-emitted content/thinking/tool_call
-      // events for this prompt are not lost in a reconnect window.
-      await waitForTransportReady()
       await acpPrompt(
         conn.connectionId,
         blocks,
@@ -3733,7 +3191,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       })
     }
     lastActivityRef.current.set(contextKey, Date.now())
-    await waitForTransportReady()
     await acpSetMode(conn.connectionId, modeId)
   }, [])
 
@@ -3741,31 +3198,18 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     async (contextKey: string, configId: string, value: string | boolean) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
-      const currentOptions =
-        conn.configOptions ?? selectorsCache.get(conn.agentType)?.configOptions
-      const option = currentOptions?.find((item) => item.id === configId)
-      if (option?.kind.type === "boolean" && typeof value !== "boolean") {
-        return
-      }
-      if (option?.kind.type === "select" && typeof value !== "string") {
-        return
-      }
       dispatch({
         type: "CONFIG_OPTION_CHANGED",
         contextKey,
         configId,
         value,
       })
-      // Persist user selection to localStorage
-      const updatedConn = storeRef.current.connections.get(contextKey)
-      const allOptions =
-        updatedConn?.configOptions ??
-        selectorsCache.get(conn.agentType)?.configOptions
-      if (allOptions) {
-        saveConfigPreference(conn.agentType, configId, value, allOptions)
+      // Persist user selection to localStorage so the next `acp_connect`
+      // can ship it back to the backend as a preferred config value.
+      if (typeof value === "string") {
+        saveConfigPreference(conn.agentType, configId, value)
       }
       lastActivityRef.current.set(contextKey, Date.now())
-      await waitForTransportReady()
       await acpSetConfigOption(conn.connectionId, configId, value)
     },
     [dispatch]
@@ -3774,7 +3218,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const cancel = useCallback(async (contextKey: string) => {
     const conn = storeRef.current.connections.get(contextKey)
     if (!conn) return
-    await waitForTransportReady()
     await acpCancel(conn.connectionId)
   }, [])
 
@@ -3790,7 +3233,6 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       }
       try {
         lastActivityRef.current.set(contextKey, Date.now())
-        await waitForTransportReady()
         await acpRespondPermission(conn.connectionId, requestId, optionId)
         dispatch({ type: "PERMISSION_CLEARED", contextKey })
       } catch (e) {

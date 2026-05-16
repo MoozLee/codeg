@@ -3,7 +3,7 @@ import {
   getTransport,
   isDesktop as isTransportDesktop,
 } from "./transport"
-import type { UnsubscribeFn } from "./transport"
+import type { EventStream, UnsubscribeFn } from "./transport/types"
 
 /**
  * Platform-aware API wrappers for features that differ between
@@ -26,36 +26,21 @@ export async function subscribe<T>(
 }
 
 /**
- * Register a callback to run after a WebSocket reconnect (post `__ready__`).
- * No-op for IPC-only transports (Tauri desktop without remote workspace),
- * where the underlying channel cannot disconnect mid-session.
+ * Per-connection Subscribe-with-Snapshot stream. Returns `null` only on
+ * the desktop Tauri transport (which uses local IPC and is race-free, so
+ * the legacy `subscribe()` flow stays as the fallback). Web and remote-
+ * desktop transports always return an EventStream.
+ *
+ * The returned EventStream instance is owned by the transport: it survives
+ * across calls and re-attaches its subscriptions on reconnect. Don't
+ * cache it across remote-workspace swaps — call this each time you need
+ * to attach so you bind to the currently-active transport.
  */
-export function onTransportReconnect(callback: () => void): UnsubscribeFn {
-  // Capture the transport instance once: between two `getTransport()` calls
-  // the remote transport could be swapped via `configureRemoteDesktopTransport`
-  // / `clearRemoteDesktopTransport`, leaving the bound method on a different
-  // object than the one we destructured from.
+export function getEventStream(): EventStream | null {
   const transport = getTransport()
-  const reconnect = transport.onReconnect
-  if (!reconnect) {
-    return () => {}
-  }
-  return reconnect.call(transport, callback)
-}
-
-/**
- * Resolve when the transport's WebSocket is ready to relay events emitted
- * by upcoming HTTP commands. Call this immediately before any HTTP command
- * whose effects observe a WS event stream (e.g. `acp_connect`); without
- * the await, the command may race a mid-session WS reconnect and have its
- * events silently dropped. No-op for IPC-only transports.
- */
-export async function waitForTransportReady(): Promise<void> {
-  // See onTransportReconnect for why we capture the instance once.
-  const transport = getTransport()
-  const waitForReady = transport.waitForReady
-  if (!waitForReady) return
-  await waitForReady.call(transport)
+  const factory = transport.eventStream
+  if (!factory) return null
+  return factory.call(transport)
 }
 
 /**

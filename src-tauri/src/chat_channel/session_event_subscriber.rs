@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,10 +9,11 @@ use tokio::task::JoinHandle;
 use super::i18n::Lang;
 use super::session_bridge::{PendingPermission, SessionBridge};
 use super::types::{MessageLevel, RichMessage};
+use crate::acp::internal_bus::InternalEventBus;
 use crate::acp::manager::ConnectionManager;
-use crate::acp::types::PromptInputBlock;
+use crate::acp::types::{AcpEvent, ConnectionStatus, EventEnvelope, PromptInputBlock};
+
 use crate::db::service::{app_metadata_service, conversation_service, sender_context_service};
-use crate::web::event_bridge::WebEventBroadcaster;
 
 use super::manager::ChatChannelManager;
 
@@ -23,13 +25,14 @@ const COMMAND_PREFIX_KEY: &str = "chat_command_prefix";
 const DEFAULT_COMMAND_PREFIX: &str = "/";
 
 pub fn spawn_session_event_subscriber(
-    broadcaster: Arc<WebEventBroadcaster>,
+    bus: Arc<InternalEventBus>,
     bridge: Arc<Mutex<SessionBridge>>,
     manager: ChatChannelManager,
     conn_mgr: ConnectionManager,
     db_conn: DatabaseConnection,
 ) -> JoinHandle<()> {
-    let mut rx = broadcaster.subscribe();
+    let mut rx = bus.subscribe();
+    let metrics = Arc::clone(bus.metrics());
 
     tokio::spawn(async move {
         let mut last_heartbeat = Instant::now();
@@ -37,25 +40,24 @@ pub fn spawn_session_event_subscriber(
         loop {
             tokio::select! {
                 result = rx.recv() => {
-                    let event = match result {
+                    let envelope_arc = match result {
                         Ok(e) => e,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             eprintln!("[SessionEventSub] lagged {n} events");
+                            metrics.lagged_count.fetch_add(n, Ordering::Relaxed);
                             continue;
                         }
                         Err(_) => break,
                     };
 
-                    if event.channel == "acp://event" {
-                        handle_acp_event_payload(
-                            event.payload.as_ref(),
-                            &bridge,
-                            &manager,
-                            &conn_mgr,
-                            &db_conn,
-                        )
-                        .await;
-                    }
+                    handle_acp_envelope(
+                        envelope_arc.as_ref(),
+                        &bridge,
+                        &manager,
+                        &conn_mgr,
+                        &db_conn,
+                    )
+                    .await;
                 }
                 _ = tokio::time::sleep(Duration::from_secs(FLUSH_INTERVAL_SECS)) => {
                     if last_heartbeat.elapsed() >= Duration::from_secs(FLUSH_INTERVAL_SECS) {
@@ -85,35 +87,27 @@ async fn get_prefix(db: &DatabaseConnection) -> String {
         .unwrap_or_else(|| DEFAULT_COMMAND_PREFIX.to_string())
 }
 
-async fn handle_acp_event_payload(
-    payload: &serde_json::Value,
+/// Phase 5: typed-envelope dispatcher. Replaces the prior JSON
+/// `payload.get("type").as_str()` switch — every accessor we used to need
+/// (type / connection_id / event-specific fields) is now a structural
+/// match on `AcpEvent`, with no `unwrap_or("")` defensive fallbacks.
+async fn handle_acp_envelope(
+    envelope: &EventEnvelope,
     bridge: &Arc<Mutex<SessionBridge>>,
     manager: &ChatChannelManager,
     conn_mgr: &ConnectionManager,
     db: &DatabaseConnection,
 ) {
-    let event_type = match payload.get("type").and_then(|v| v.as_str()) {
-        Some(t) => t,
-        None => return,
-    };
-    let connection_id = match payload.get("connection_id").and_then(|v| v.as_str()) {
-        Some(id) => id,
-        None => return,
-    };
+    let connection_id = envelope.connection_id.as_str();
 
-    match event_type {
-        "session_started" => {
-            let session_id = payload
-                .get("session_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
+    match &envelope.payload {
+        AcpEvent::SessionStarted { session_id } => {
             let mut guard = bridge.lock().await;
             if let Some(session) = guard.get_mut(connection_id) {
                 let _ = conversation_service::update_external_id(
                     db,
                     session.conversation_id,
-                    session_id.to_string(),
+                    session_id.clone(),
                 )
                 .await;
 
@@ -129,9 +123,7 @@ async fn handle_acp_event_payload(
             }
         }
 
-        "content_delta" => {
-            let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-
+        AcpEvent::ContentDelta { text } => {
             // Collect flush info under the lock, then release before any IO.
             let flush_info: Option<(i32, String, Option<String>)> = {
                 let mut guard = bridge.lock().await;
@@ -166,51 +158,44 @@ async fn handle_acp_event_payload(
             }
         }
 
-        "tool_call" => {
-            let title = payload
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("tool");
-            let tool_call_id = payload
-                .get("tool_call_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let raw_input = payload.get("raw_input").and_then(|v| v.as_str());
-
+        AcpEvent::ToolCall {
+            tool_call_id,
+            title,
+            raw_input,
+            ..
+        } => {
             let mut guard = bridge.lock().await;
             if let Some(session) = guard.get_mut(connection_id) {
                 // Store title for progress indicator; store raw_input for later
-                session.tool_calls.push(title.to_string());
-                if let Some(input) = raw_input {
+                session.tool_calls.push(title.clone());
+                if let Some(input) = raw_input.as_deref() {
                     session
                         .tool_call_inputs
-                        .insert(tool_call_id.to_string(), input.to_string());
+                        .insert(tool_call_id.clone(), input.to_string());
                 }
             }
         }
 
-        "tool_call_update" => {
-            let title = payload.get("title").and_then(|v| v.as_str());
-            let status = payload.get("status").and_then(|v| v.as_str());
-            let tool_call_id = payload
-                .get("tool_call_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let raw_input = payload.get("raw_input").and_then(|v| v.as_str());
-
+        AcpEvent::ToolCallUpdate {
+            tool_call_id,
+            title,
+            status,
+            raw_input,
+            ..
+        } => {
             let mut guard = bridge.lock().await;
             if let Some(session) = guard.get_mut(connection_id) {
                 // Accumulate raw_input if newly available
-                if let Some(input) = raw_input {
+                if let Some(input) = raw_input.as_deref() {
                     session
                         .tool_call_inputs
-                        .insert(tool_call_id.to_string(), input.to_string());
+                        .insert(tool_call_id.clone(), input.to_string());
                 }
 
-                if status == Some("completed") {
+                if status.as_deref() == Some("completed") {
                     let stored_input = session.tool_call_inputs.remove(tool_call_id);
-                    let effective_title = title.unwrap_or("tool");
-                    let input_ref = stored_input.as_deref().or(raw_input);
+                    let effective_title = title.as_deref().unwrap_or("tool");
+                    let input_ref = stored_input.as_deref().or(raw_input.as_deref());
                     let detail = format_tool_call_detail(effective_title, input_ref);
                     let channel_id = session.channel_id;
                     drop(guard);
@@ -221,20 +206,11 @@ async fn handle_acp_event_payload(
             }
         }
 
-        "permission_request" => {
-            let request_id = payload
-                .get("request_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let tool_call = payload
-                .get("tool_call")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-            let options: Vec<crate::acp::types::PermissionOptionInfo> = payload
-                .get("options")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
+        AcpEvent::PermissionRequest {
+            request_id,
+            tool_call,
+            options,
+        } => {
             let mut guard = bridge.lock().await;
             if let Some(session) = guard.get_mut(connection_id) {
                 let channel_id = session.channel_id;
@@ -281,9 +257,9 @@ async fn handle_acp_event_payload(
                 let tool_desc = format_tool_call_detail(tool_title, raw_input_str.as_deref());
 
                 session.permission_pending = Some(PendingPermission {
-                    request_id: request_id.to_string(),
+                    request_id: request_id.clone(),
                     tool_description: tool_desc.clone(),
-                    options,
+                    options: options.clone(),
                     sent_message_id: None,
                 });
 
@@ -313,16 +289,11 @@ async fn handle_acp_event_payload(
             }
         }
 
-        "turn_complete" => {
-            let stop_reason = payload
-                .get("stop_reason")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            let agent_type = payload
-                .get("agent_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown");
-
+        AcpEvent::TurnComplete {
+            stop_reason,
+            agent_type,
+            ..
+        } => {
             let mut guard = bridge.lock().await;
             if let Some(session) = guard.get_mut(connection_id) {
                 let channel_id = session.channel_id;
@@ -363,16 +334,11 @@ async fn handle_acp_event_payload(
             }
         }
 
-        "error" => {
-            let message = payload
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown error");
-            let agent_type = payload
-                .get("agent_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown");
-
+        AcpEvent::Error {
+            message,
+            agent_type,
+            ..
+        } => {
             let mut guard = bridge.lock().await;
             if let Some(session) = guard.remove(connection_id) {
                 let channel_id = session.channel_id;
@@ -402,10 +368,11 @@ async fn handle_acp_event_payload(
             }
         }
 
-        "status_changed" => {
-            let status = payload.get("status").and_then(|v| v.as_str()).unwrap_or("");
-
-            if status == "disconnected" || status == "error" {
+        AcpEvent::StatusChanged { status } => {
+            if matches!(
+                status,
+                ConnectionStatus::Disconnected | ConnectionStatus::Error
+            ) {
                 let mut guard = bridge.lock().await;
                 if let Some(session) = guard.remove(connection_id) {
                     let channel_id = session.channel_id;

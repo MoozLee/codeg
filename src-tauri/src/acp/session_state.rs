@@ -3,12 +3,14 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::acp::event_stream::{ConnectionEventStream, RecentEventsBuffer};
 use crate::acp::types::{
-    AcpEvent, AvailableCommandInfo, ConnectionStatus, PromptCapabilitiesInfo,
+    AcpEvent, AvailableCommandInfo, ConnectionStatus, EventEnvelope, PromptCapabilitiesInfo,
     SessionConfigOptionInfo, SessionModeStateInfo, ToolCallImageInfo,
 };
 use crate::models::agent::AgentType;
@@ -177,6 +179,20 @@ pub struct SessionState {
     // 事件锚点
     pub event_seq: u64,
     pub last_activity_at: DateTime<Utc>,
+
+    /// Per-connection event broadcaster used by the WS attach protocol.
+    /// New subscribers register receivers here while holding the SessionState
+    /// read lock; `emit_with_state` broadcasts after releasing the write
+    /// lock. Wrapped in `Arc` so subscriber tasks can hold a reference
+    /// independent of the SessionState lock.
+    pub(crate) event_stream: Arc<ConnectionEventStream>,
+
+    /// Bounded ring buffer of recent envelopes (most-recent-last). Pushed
+    /// by `emit_with_state` inside the write-lock critical section, kept in
+    /// strict lockstep with `event_seq`. Read by attach handlers under the
+    /// read lock to decide between sending a snapshot or a batched replay.
+    /// See `event_stream` module for size limits.
+    pub(crate) recent_events: RecentEventsBuffer,
 }
 
 impl SessionState {
@@ -210,7 +226,35 @@ impl SessionState {
             session_started_tx: None,
             event_seq: 0,
             last_activity_at: Utc::now(),
+            event_stream: Arc::new(ConnectionEventStream::new()),
+            recent_events: RecentEventsBuffer::new(),
         }
+    }
+
+    /// Clone the broadcaster handle so attach handlers and subscriber tasks
+    /// can hold an independent reference. Cheap (Arc clone).
+    pub fn event_stream(&self) -> Arc<ConnectionEventStream> {
+        Arc::clone(&self.event_stream)
+    }
+
+    /// Return events buffered after `since_seq`, or `None` if the cursor is
+    /// older than what the ring buffer holds (caller must fall back to a
+    /// snapshot). See `RecentEventsBuffer::range_after`.
+    pub fn recent_events_after(&self, since_seq: u64) -> Option<Vec<Arc<EventEnvelope>>> {
+        self.recent_events.range_after(since_seq)
+    }
+
+    /// Push an envelope into the ring buffer. Must be called under the
+    /// write lock from `emit_with_state`, immediately after `event_seq`
+    /// is incremented, so the buffer's tail seq matches `event_seq`.
+    ///
+    /// Returns the eviction count (events dropped from the buffer's head to
+    /// stay within count/byte caps, plus any wholesale clear triggered by an
+    /// oversized event). Caller propagates this into the
+    /// `EventBusMetrics::ring_buffer_evict_count` counter.
+    #[must_use = "evicted count feeds the ring_buffer_evict_count metric"]
+    pub(crate) fn push_recent_event(&mut self, envelope: Arc<EventEnvelope>) -> usize {
+        self.recent_events.push(envelope)
     }
 
     /// Install a one-shot signal that fires when `SessionStarted` applies.
@@ -251,6 +295,16 @@ impl SessionState {
             }
             AcpEvent::ModeChanged { mode_id } => {
                 self.current_mode = Some(mode_id.clone());
+                // Keep `modes.current_mode_id` consistent with the latched
+                // `current_mode`. Snapshot consumers read `modes.current_mode_id`
+                // directly (the frontend's `denormalizeSnapshot` does not look
+                // at the separate `current_mode` field), so without this sync
+                // a session that has switched modes would hydrate post-refresh
+                // showing the original default — even though the live event
+                // stream has long since corrected it.
+                if let Some(modes) = self.modes.as_mut() {
+                    modes.current_mode_id = mode_id.clone();
+                }
             }
             AcpEvent::SessionConfigOptions { config_options } => {
                 self.config_options = Some(config_options.clone());
@@ -1090,6 +1144,17 @@ mod tests {
             mode_id: "edit".into(),
         });
         assert_eq!(s.current_mode.as_deref(), Some("edit"));
+        // Snapshot consistency invariant: ModeChanged must keep
+        // `modes.current_mode_id` in sync with the scalar `current_mode`.
+        // The frontend's `denormalizeSnapshot` reads `modes.current_mode_id`
+        // exclusively; without this sync a post-refresh hydration would
+        // show the stale default even though the live event stream had
+        // long since switched modes.
+        assert_eq!(
+            s.modes.as_ref().unwrap().current_mode_id,
+            "edit",
+            "ModeChanged must keep modes.current_mode_id consistent for snapshot consumers"
+        );
     }
 
     #[test]

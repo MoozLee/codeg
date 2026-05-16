@@ -1101,6 +1101,21 @@ export interface DirectoryEntry {
   hasChildren: boolean
 }
 
+export interface DirectoryItem {
+  name: string
+  path: string
+  isDir: boolean
+  hasChildren: boolean
+  size: number | null
+}
+
+export interface UploadAttachmentResult {
+  path: string
+  name: string
+  size: number
+  mimeType: string | null
+}
+
 export interface FilePreviewContent {
   path: string
   content: string
