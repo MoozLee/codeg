@@ -247,6 +247,7 @@ type Action =
       connectionId: string
       agentType: AgentType
       workingDir: string | null
+      contextManagement: ContextManagementState
     }
   | {
       type: "HYDRATE_FROM_SNAPSHOT"
@@ -373,6 +374,12 @@ type Action =
       value: string | boolean
     }
   | {
+      type: "COMPACTION_STATUS_CHANGED"
+      contextKey: string
+      status: CompactionTriggerStatus
+      error?: string | null
+    }
+  | {
       type: "PLAN_UPDATE"
       contextKey: string
       entries: PlanEntryInfo[]
@@ -409,6 +416,19 @@ type ConnectionsMap = Map<string, ConnectionState>
 const MAX_LIVE_TOOL_RAW_OUTPUT_CHARS = 200_000
 const MAX_BUFFERED_UNMAPPED_EVENTS_PER_CONNECTION = 64
 const MAX_BUFFERED_UNMAPPED_CONNECTIONS = 128
+const DEFAULT_AUTO_COMPACTION_THRESHOLD = 80
+const CLAUDE_NATIVE_AUTO_COMPACTION_ENV_KEYS = [
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+]
+const CLAUDE_NATIVE_AUTO_COMPACTION_CONFIG_KEYS = [
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+  "claudeCodeAutoCompactWindow",
+  "claude_code_auto_compact_window",
+  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+  "claudeAutocompactPctOverride",
+  "claude_autocompact_pct_override",
+]
 
 const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementState = {
   configuredModel: null,
@@ -457,6 +477,417 @@ function asFiniteNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function parseJsonObject(
+  raw: string | null | undefined
+): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    return asRecord(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+function stringFromRecord(
+  record: Record<string, unknown> | null | undefined,
+  key: string
+): string | null {
+  const value = record?.[key]
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null
+}
+
+function envValue(
+  env: Record<string, string> | null | undefined,
+  key: string
+): string | null {
+  const value = env?.[key]
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null
+}
+
+function parsePercentValue(
+  value: string | number | null | undefined
+): number | null {
+  if (value == null) return null
+  const normalized = String(value).trim().replace(/%$/, "")
+  if (!normalized) return null
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed)) return null
+  const percent = parsed > 0 && parsed <= 1 ? parsed * 100 : parsed
+  if (percent < 1 || percent > 100) return null
+  return percent
+}
+
+function parsePositiveIntegerValue(
+  value: string | number | null | undefined
+): number | null {
+  if (value == null) return null
+  const parsed = Number(String(value).trim())
+  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  return Math.floor(parsed)
+}
+
+const CONTEXT_CONFIG_FIELD_PATTERNS = [
+  "model",
+  "compact",
+  "compaction",
+  "context",
+]
+const SECRET_FIELD_PATTERNS = [
+  "key",
+  "token",
+  "secret",
+  "password",
+  "credential",
+  "auth",
+]
+
+function isContextConfigKey(key: string): boolean {
+  const normalized = key.toLowerCase()
+  return CONTEXT_CONFIG_FIELD_PATTERNS.some((pattern) =>
+    normalized.includes(pattern)
+  )
+}
+
+function isSecretKey(key: string): boolean {
+  const normalized = key.toLowerCase()
+  return SECRET_FIELD_PATTERNS.some((pattern) => normalized.includes(pattern))
+}
+
+function safeContextConfigFields(
+  record: Record<string, unknown> | null | undefined
+): RuntimeConfigField[] {
+  if (!record) return []
+  return Object.entries(record)
+    .filter(([key, value]) => {
+      if (!isContextConfigKey(key) || isSecretKey(key)) return false
+      return ["string", "number", "boolean"].includes(typeof value)
+    })
+    .map(([key, value]) => ({ key, value: String(value) }))
+    .sort((a, b) => a.key.localeCompare(b.key))
+}
+
+function modelEnvKeysForAgent(agentType: AgentType): string[] {
+  if (agentType === "claude_code") {
+    return ["ANTHROPIC_MODEL"]
+  }
+  if (agentType === "gemini") {
+    return ["GEMINI_MODEL", "GOOGLE_GEMINI_MODEL", "MODEL"]
+  }
+  return ["OPENAI_MODEL", "MODEL", "ANTHROPIC_MODEL", "GEMINI_MODEL"]
+}
+
+function firstEnvValue(
+  record: Record<string, string> | null | undefined,
+  keys: string[]
+): string | null {
+  for (const key of keys) {
+    const value = envValue(record, key)
+    if (value) return value
+  }
+  return null
+}
+
+function firstRecordString(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[]
+): string | null {
+  for (const key of keys) {
+    const value = stringFromRecord(record, key)
+    if (value) return value
+  }
+  return null
+}
+
+function contextWindowMaxEnvKeysForAgent(agentType: AgentType): string[] {
+  if (agentType === "claude_code") {
+    return ["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]
+  }
+  return []
+}
+
+function contextWindowMaxRootKeysForAgent(agentType: AgentType): string[] {
+  if (agentType === "claude_code") {
+    return [
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+      "claudeCodeAutoCompactWindow",
+      "claude_code_auto_compact_window",
+    ]
+  }
+  return []
+}
+
+function firstPositiveIntegerEnvValue(
+  record: Record<string, string> | null | undefined,
+  keys: string[]
+): number | null {
+  for (const key of keys) {
+    const value = parsePositiveIntegerValue(envValue(record, key))
+    if (value != null) return value
+  }
+  return null
+}
+
+function firstPositiveIntegerRecordValue(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[]
+): number | null {
+  for (const key of keys) {
+    const raw = record?.[key]
+    if (typeof raw !== "string" && typeof raw !== "number") continue
+    const value = parsePositiveIntegerValue(raw)
+    if (value != null) return value
+  }
+  return null
+}
+
+function firstPercentRecordValue(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[]
+): number | null {
+  for (const key of keys) {
+    const raw = record?.[key]
+    if (typeof raw !== "string" && typeof raw !== "number") continue
+    const value = parsePercentValue(raw)
+    if (value != null) return value
+  }
+  return null
+}
+
+function hasScalarRecordValue(
+  record: Record<string, unknown> | null | undefined,
+  key: string
+): boolean {
+  const value = record?.[key]
+  if (typeof value === "string") return value.trim().length > 0
+  return typeof value === "number" || typeof value === "boolean"
+}
+
+function hasNativeClaudeAutoCompactionConfig(
+  env: Record<string, string> | null | undefined,
+  configEnv: Record<string, unknown> | null | undefined,
+  config: Record<string, unknown> | null | undefined
+): boolean {
+  return (
+    CLAUDE_NATIVE_AUTO_COMPACTION_ENV_KEYS.some(
+      (key) =>
+        envValue(env, key) != null || hasScalarRecordValue(configEnv, key)
+    ) ||
+    CLAUDE_NATIVE_AUTO_COMPACTION_CONFIG_KEYS.some((key) =>
+      hasScalarRecordValue(config, key)
+    )
+  )
+}
+
+function contextManagementFromAgentStatus(
+  agent: AcpAgentStatus | null,
+  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT
+): ContextManagementState {
+  if (!agent) return previous
+
+  const config = parseJsonObject(agent.config_json)
+  const configEnv = asRecord(config?.env)
+  const rootModel = stringFromRecord(config, "model")
+  const modelEnvKeys = modelEnvKeysForAgent(agent.agent_type)
+  const contextWindowMaxKeys = contextWindowMaxEnvKeysForAgent(agent.agent_type)
+  const envConfiguredModel = firstEnvValue(agent.env, modelEnvKeys)
+  const configEnvConfiguredModel = firstRecordString(configEnv, modelEnvKeys)
+  const agentConfiguredModel =
+    envConfiguredModel ?? configEnvConfiguredModel ?? rootModel
+  const configuredModelSource: ConfiguredModelSource | null = envConfiguredModel
+    ? "agent_env"
+    : configEnvConfiguredModel
+      ? "agent_config_env"
+      : rootModel
+        ? "agent_root_config"
+        : null
+
+  const claudeAutoCompactPercent =
+    parsePercentValue(
+      envValue(agent.env, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") ??
+        stringFromRecord(configEnv, "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
+    ) ??
+    firstPercentRecordValue(config, [
+      "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+      "claudeAutocompactPctOverride",
+      "claude_autocompact_pct_override",
+    ])
+  const envConfiguredContextWindowMax = firstPositiveIntegerEnvValue(
+    agent.env,
+    contextWindowMaxKeys
+  )
+  const configEnvConfiguredContextWindowMax = firstPositiveIntegerRecordValue(
+    configEnv,
+    contextWindowMaxKeys
+  )
+  const contextWindowMaxRootKeys = contextWindowMaxRootKeysForAgent(
+    agent.agent_type
+  )
+  const rootConfiguredContextWindowMax = firstPositiveIntegerRecordValue(
+    config,
+    contextWindowMaxRootKeys
+  )
+  const claudeAutoCompactWindow =
+    envConfiguredContextWindowMax ??
+    configEnvConfiguredContextWindowMax ??
+    rootConfiguredContextWindowMax
+  const hasNativeAutoCompactionConfig =
+    agent.agent_type === "claude_code" &&
+    hasNativeClaudeAutoCompactionConfig(agent.env, configEnv, config)
+
+  return {
+    ...previous,
+    configuredModel: agentConfiguredModel ?? previous.configuredModel,
+    configuredModelSource:
+      configuredModelSource ?? previous.configuredModelSource,
+    configuredContextWindowMaxTokens:
+      claudeAutoCompactWindow ?? previous.configuredContextWindowMaxTokens,
+    contextWindowMaxSource:
+      envConfiguredContextWindowMax != null
+        ? "agent_env"
+        : configEnvConfiguredContextWindowMax != null
+          ? "agent_config_env"
+          : rootConfiguredContextWindowMax != null
+            ? "agent_root_config"
+            : previous.contextWindowMaxSource,
+    autoCompactionEnabled:
+      claudeAutoCompactPercent != null || claudeAutoCompactWindow != null
+        ? true
+        : previous.autoCompactionEnabled,
+    autoCompactionThreshold:
+      claudeAutoCompactPercent ?? previous.autoCompactionThreshold,
+    compactionSupport: hasNativeAutoCompactionConfig
+      ? "native_managed"
+      : previous.compactionSupport,
+    runtimeConfig: {
+      agentType: agent.agent_type,
+      configFilePath: agent.config_file_path ?? null,
+      safeEnvFields: safeContextConfigFields(agent.env),
+      safeRootConfigFields: safeContextConfigFields(config),
+      safeConfigEnvFields: safeContextConfigFields(configEnv),
+      selectorModel: previous.runtimeConfig?.selectorModel ?? null,
+    },
+  }
+}
+
+function configOptionCurrentValue(
+  option: SessionConfigOptionInfo
+): string | boolean {
+  return option.kind.current_value
+}
+
+function parseBooleanConfigValue(
+  option: SessionConfigOptionInfo | undefined
+): boolean | null {
+  if (!option) return null
+  if (option.kind.type === "boolean") return option.kind.current_value
+
+  const normalized = option.kind.current_value.trim().toLowerCase()
+  if (["true", "on", "yes", "enabled", "enable", "auto"].includes(normalized)) {
+    return true
+  }
+  if (
+    ["false", "off", "no", "disabled", "disable", "manual", "never"].includes(
+      normalized
+    )
+  ) {
+    return false
+  }
+  return null
+}
+
+function parsePercentConfigValue(
+  option: SessionConfigOptionInfo | undefined
+): number | null {
+  if (!option || option.kind.type !== "select") return null
+  return parsePercentValue(option.kind.current_value)
+}
+
+function findCompactionCommand(
+  commands: AvailableCommandInfo[] | null
+): AvailableCommandInfo | null {
+  if (!commands) return null
+  return (
+    commands.find((command) => {
+      const name = command.name.replace(/^\//, "").toLowerCase()
+      return name === "compact" || name === "summarize"
+    }) ?? null
+  )
+}
+
+function contextManagementFromSelectors(
+  options: SessionConfigOptionInfo[] | null,
+  commands: AvailableCommandInfo[] | null,
+  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT
+): ContextManagementState {
+  const modelOption = options?.find((option) => option.category === "model")
+  const selectorModel = modelOption
+    ? String(configOptionCurrentValue(modelOption))
+    : null
+  const shouldUseSelectorModel =
+    selectorModel != null && previous.configuredModelSource == null
+  const autoCompactOption = options?.find((option) => {
+    const id = option.id.toLowerCase()
+    const name = option.name.toLowerCase()
+    return (
+      id.includes("auto_compact") ||
+      id.includes("auto-compact") ||
+      id.includes("autocompact") ||
+      id.includes("auto_compaction") ||
+      name.includes("auto compact") ||
+      name.includes("auto-compaction")
+    )
+  })
+  const thresholdOption = options?.find((option) => {
+    const id = option.id.toLowerCase()
+    const name = option.name.toLowerCase()
+    return (
+      id.includes("compact_threshold") ||
+      id.includes("compaction_threshold") ||
+      id.includes("context_threshold") ||
+      name.includes("compact threshold") ||
+      name.includes("compaction threshold") ||
+      name.includes("context threshold")
+    )
+  })
+  const compactionCommand = findCompactionCommand(commands)
+  const compactionSupport: CompactionSupport =
+    previous.compactionSupport === "native_managed"
+      ? "native_managed"
+      : compactionCommand
+        ? "agent_managed"
+        : commands
+          ? "unsupported"
+          : previous.compactionSupport
+  const runtimeConfig = previous.runtimeConfig
+    ? {
+        ...previous.runtimeConfig,
+        selectorModel,
+      }
+    : previous.runtimeConfig
+
+  return {
+    ...previous,
+    configuredModel: shouldUseSelectorModel
+      ? selectorModel
+      : previous.configuredModel,
+    configuredModelSource: shouldUseSelectorModel
+      ? "selector"
+      : previous.configuredModelSource,
+    autoCompactionEnabled:
+      parseBooleanConfigValue(autoCompactOption) ??
+      previous.autoCompactionEnabled,
+    autoCompactionThreshold:
+      parsePercentConfigValue(thresholdOption) ??
+      previous.autoCompactionThreshold,
+    compactionSupport,
+    runtimeConfig,
+  }
 }
 
 function parseClaudeApiRetryEvent(
@@ -647,7 +1078,7 @@ function sameConfigOptions(
     const rightKind = right.kind
     if (leftKind.type !== rightKind.type) return false
 
-    if (leftKind.type === "select") {
+    if (leftKind.type === "select" && rightKind.type === "select") {
       if (leftKind.current_value !== rightKind.current_value) return false
       if (leftKind.options.length !== rightKind.options.length) return false
       if (leftKind.groups.length !== rightKind.groups.length) return false
@@ -681,6 +1112,12 @@ function sameConfigOptions(
           }
         }
       }
+    } else if (
+      leftKind.type === "boolean" &&
+      rightKind.type === "boolean" &&
+      leftKind.current_value !== rightKind.current_value
+    ) {
+      return false
     }
   }
   return true
@@ -820,7 +1257,7 @@ function connectionsReducer(
         configOptions: null,
         availableCommands: null,
         usage: null,
-        contextManagement: DEFAULT_CONTEXT_MANAGEMENT,
+        contextManagement: action.contextManagement,
         liveMessage: null,
         pendingPermission: null,
         pendingQuestion: null,
@@ -889,6 +1326,11 @@ function connectionsReducer(
           modes: mergedModes,
           configOptions: mergedConfigOptions,
           availableCommands: mergedAvailableCommands,
+          contextManagement: contextManagementFromSelectors(
+            mergedConfigOptions,
+            mergedAvailableCommands,
+            current.contextManagement
+          ),
           promptCapabilities: mergedPromptCapabilities,
           selectorsReady: mergedSelectorsReady,
           supportsFork: mergedSupportsFork,
@@ -905,6 +1347,11 @@ function connectionsReducer(
         configOptions: action.patch.configOptions,
         availableCommands: action.patch.availableCommands,
         usage: action.patch.usage,
+        contextManagement: contextManagementFromSelectors(
+          action.patch.configOptions,
+          action.patch.availableCommands,
+          current.contextManagement
+        ),
         liveMessage: action.patch.liveMessage,
         pendingPermission: action.patch.pendingPermission,
         promptCapabilities: mergedPromptCapabilities,
@@ -1368,6 +1815,11 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         configOptions: action.configOptions,
+        contextManagement: contextManagementFromSelectors(
+          action.configOptions,
+          conn.availableCommands,
+          conn.contextManagement
+        ),
       })
       return next
     }
@@ -1464,7 +1916,15 @@ function connectionsReducer(
         }
       }
       const next = new Map(state)
-      next.set(action.contextKey, { ...conn, configOptions: updated })
+      next.set(action.contextKey, {
+        ...conn,
+        configOptions: updated,
+        contextManagement: contextManagementFromSelectors(
+          updated,
+          conn.availableCommands,
+          conn.contextManagement
+        ),
+      })
       return next
     }
 
@@ -1568,6 +2028,32 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         availableCommands: commands,
+        contextManagement: contextManagementFromSelectors(
+          conn.configOptions,
+          commands,
+          conn.contextManagement
+        ),
+      })
+      return next
+    }
+
+    case "COMPACTION_STATUS_CHANGED": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      if (
+        conn.contextManagement.compactionStatus === action.status &&
+        conn.contextManagement.lastCompactionError === (action.error ?? null)
+      ) {
+        return state
+      }
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        contextManagement: {
+          ...conn.contextManagement,
+          compactionStatus: action.status,
+          lastCompactionError: action.error ?? null,
+        },
       })
       return next
     }
@@ -1587,10 +2073,29 @@ function connectionsReducer(
       ) {
         return state
       }
+      const configuredMax =
+        conn.contextManagement.configuredContextWindowMaxTokens
+      const runtimeMax = action.usage.size > 0 ? action.usage.size : null
+      const runtimeContextWindowClamped =
+        configuredMax != null &&
+        runtimeMax != null &&
+        runtimeMax < configuredMax
+      const contextManagement = {
+        ...conn.contextManagement,
+        runtimeContextWindowMaxTokens: runtimeMax,
+        runtimeContextWindowClamped,
+        ...(conn.contextManagement.compactionStatus === "failed"
+          ? {
+              compactionStatus: "idle" as const,
+              lastCompactionError: null,
+            }
+          : null),
+      }
       const next = new Map(state)
       next.set(action.contextKey, {
         ...conn,
         usage: action.usage,
+        contextManagement,
       })
       return next
     }
@@ -1891,6 +2396,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   // Populated by the `useAcpEvent` hook; read by the primary `acp://event`
   // listener and the buffered-events replay loop.
   const eventSubscribersRef = useRef<Set<EventSubscriberRef>>(new Set())
+  const compactionTriggerZonesRef = useRef(new Set<string>())
 
   // ── Notify helpers ──
 
@@ -2028,6 +2534,61 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     const compacted = Array.from(grouped.values()).flat()
     dispatch({ type: "STREAM_BATCH", actions: compacted })
   }, [dispatch])
+
+  const maybeTriggerAgentCompaction = useCallback(
+    (contextKey: string) => {
+      const conn = storeRef.current.connections.get(contextKey)
+      if (!conn?.usage || conn.usage.used <= 0) return
+      const management = conn.contextManagement
+      if (management.compactionSupport !== "agent_managed") return
+      if (management.autoCompactionEnabled !== true) return
+      if (
+        management.compactionStatus === "triggered" ||
+        management.compactionStatus === "running"
+      ) {
+        return
+      }
+      if (conn.status !== "connected") return
+      const command = findCompactionCommand(conn.availableCommands)
+      if (!command) return
+      const effectiveContextMax =
+        management.configuredContextWindowMaxTokens ?? conn.usage.size
+      if (effectiveContextMax <= 0) return
+      const percent = (conn.usage.used / effectiveContextMax) * 100
+      const threshold =
+        management.autoCompactionThreshold ?? DEFAULT_AUTO_COMPACTION_THRESHOLD
+      if (percent < threshold) return
+      const zone = Math.floor(percent / 5) * 5
+      const sessionKey = conn.sessionId ?? conn.connectionId
+      const triggerKey = `${conn.connectionId}:${sessionKey}:${threshold}:${effectiveContextMax}:${zone}`
+      if (compactionTriggerZonesRef.current.has(triggerKey)) return
+      compactionTriggerZonesRef.current.add(triggerKey)
+      dispatch({
+        type: "COMPACTION_STATUS_CHANGED",
+        contextKey,
+        status: "triggered",
+      })
+      const commandText = command.name.startsWith("/")
+        ? command.name
+        : `/${command.name}`
+      dispatch({
+        type: "COMPACTION_STATUS_CHANGED",
+        contextKey,
+        status: "running",
+      })
+      acpPrompt(conn.connectionId, [{ type: "text", text: commandText }]).catch(
+        (error: unknown) => {
+          dispatch({
+            type: "COMPACTION_STATUS_CHANGED",
+            contextKey,
+            status: "failed",
+            error: normalizeErrorMessage(error),
+          })
+        }
+      )
+    },
+    [dispatch]
+  )
 
   const enqueueStreamingAction = useCallback(
     (action: StreamingAction) => {
@@ -2346,6 +2907,17 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             contextKey,
             stopReason: e.stop_reason,
           })
+          const completedConn = storeRef.current.connections.get(contextKey)
+          if (
+            completedConn?.contextManagement.compactionStatus === "running" ||
+            completedConn?.contextManagement.compactionStatus === "triggered"
+          ) {
+            dispatch({
+              type: "COMPACTION_STATUS_CHANGED",
+              contextKey,
+              status: "completed",
+            })
+          }
           // Detect pending question from tool calls in the completed turn
           const turnConn = storeRef.current.connections.get(contextKey)
           if (turnConn?.liveMessage) {
@@ -2505,6 +3077,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               size: e.size,
             },
           })
+          maybeTriggerAgentCompaction(contextKey)
           break
       }
     },
@@ -2513,6 +3086,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       enqueueStreamingAction,
       flushPendingToolCallUpdates,
       flushStreamingQueue,
+      maybeTriggerAgentCompaction,
       scheduleToolCallUpdateFlush,
       t,
       tChat,
@@ -3004,6 +3578,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           connectionId,
           agentType,
           workingDir: nextWorkingDir,
+          contextManagement: contextManagementFromAgentStatus(configuredAgent),
         })
 
         // Subscribe-with-Snapshot path. When the active transport supports
