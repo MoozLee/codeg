@@ -138,6 +138,8 @@ export function StatusBarTokens() {
 
   const hasTokenSection = rows.length > 0
   const compactionSupport = contextManagement?.compactionSupport ?? "unknown"
+  const compactionStatus = contextManagement?.compactionStatus ?? "idle"
+  const lastCompactionError = contextManagement?.lastCompactionError ?? null
   const autoCompactionEnabled = contextManagement?.autoCompactionEnabled
   const autoCompactionThreshold = contextManagement?.autoCompactionThreshold
   const configuredModel = contextManagement?.configuredModel ?? null
@@ -348,6 +350,16 @@ export function StatusBarTokens() {
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>{t("compactionSupport")}</span>
               <span>{t(`compactionSupportState.${compactionSupport}`)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("compactionStatus")}</span>
+              <span
+                className="max-w-36 truncate text-right"
+                title={lastCompactionError ?? undefined}
+              >
+                {lastCompactionError ??
+                  t(`compactionStatusState.${compactionStatus}`)}
+              </span>
             </div>
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>{t("selectorModel")}</span>
