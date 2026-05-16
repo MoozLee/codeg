@@ -2,13 +2,13 @@
 #
 # Codeg Server installer
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/xintaofei/codeg/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/xintaofei/codeg/main/install.sh | bash -s -- --version v0.5.0
+#   curl -fsSL https://raw.githubusercontent.com/MoozLee/codeg/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/MoozLee/codeg/main/install.sh | bash -s -- --version v0.5.0
 #
 
 set -euo pipefail
 
-REPO="xintaofei/codeg"
+REPO="MoozLee/codeg"
 INSTALL_DIR="${CODEG_INSTALL_DIR:-/usr/local/bin}"
 VERSION=""
 # Stale codeg-server binaries elsewhere in PATH are removed by default so the
