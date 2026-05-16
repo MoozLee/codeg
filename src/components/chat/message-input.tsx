@@ -119,8 +119,10 @@ interface MessageInputProps {
   onEnqueue?: (draft: PromptDraft, modeId: string | null) => void
   editingDraftText?: string | null
   isEditingQueueItem?: boolean
+  isRetryEditingMessage?: boolean
   onSaveQueueEdit?: (draft: PromptDraft) => void
   onCancelQueueEdit?: () => void
+  onCancelRetryEdit?: () => void
   onForkSend?: (draft: PromptDraft, modeId?: string | null) => void
 }
 
@@ -465,8 +467,10 @@ export function MessageInput({
   onEnqueue,
   editingDraftText,
   isEditingQueueItem = false,
+  isRetryEditingMessage = false,
   onSaveQueueEdit,
   onCancelQueueEdit,
+  onCancelRetryEdit,
   onForkSend,
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
@@ -677,11 +681,12 @@ export function MessageInput({
     isPromptingRef.current = isPrompting
   }, [isPrompting])
 
-  // Load external draft text when editing a queue item
+  // Load external draft text when editing a queue item or retrying a message.
   const prevEditingDraftRef = useRef<string | null>(null)
+  const isExternalDraftEditing = isEditingQueueItem || isRetryEditingMessage
   useEffect(() => {
     if (
-      isEditingQueueItem &&
+      isExternalDraftEditing &&
       editingDraftText != null &&
       editingDraftText !== prevEditingDraftRef.current
     ) {
@@ -691,10 +696,10 @@ export function MessageInput({
       requestAnimationFrame(() => {
         textareaRef.current?.focus()
       })
-    } else if (!isEditingQueueItem) {
+    } else if (!isExternalDraftEditing) {
       prevEditingDraftRef.current = null
     }
-  }, [isEditingQueueItem, editingDraftText, clearPastedTexts])
+  }, [isExternalDraftEditing, editingDraftText, clearPastedTexts])
 
   const setDragActiveIfChanged = useCallback((next: boolean) => {
     if (dragActiveRef.current === next) return
@@ -703,12 +708,12 @@ export function MessageInput({
   }, [])
 
   useEffect(() => {
-    if (!effectiveDraftStorageKey || isEditingQueueItem) return
+    if (!effectiveDraftStorageKey || isExternalDraftEditing) return
     saveMessageInputDraft(effectiveDraftStorageKey, {
       text,
       pastedTexts,
     })
-  }, [effectiveDraftStorageKey, text, pastedTexts, isEditingQueueItem])
+  }, [effectiveDraftStorageKey, text, pastedTexts, isExternalDraftEditing])
 
   const availableModes = useMemo(() => modes ?? [], [modes])
   const availableConfigOptions = useMemo(
@@ -1777,10 +1782,21 @@ export function MessageInput({
     setAttachments((prev) => prev.filter((item) => item.id !== id))
   }, [])
 
-  const handleCancelQueueEditClick = useCallback(() => {
+  const handleCancelExternalEditClick = useCallback(() => {
     clearPastedTexts()
-    onCancelQueueEdit?.()
-  }, [clearPastedTexts, onCancelQueueEdit])
+    if (isEditingQueueItem) {
+      onCancelQueueEdit?.()
+    } else if (isRetryEditingMessage) {
+      onCancelRetryEdit?.()
+    }
+    setText("")
+  }, [
+    clearPastedTexts,
+    isEditingQueueItem,
+    isRetryEditingMessage,
+    onCancelQueueEdit,
+    onCancelRetryEdit,
+  ])
 
   const buildDraft = useCallback((): PromptDraft | null => {
     const expandedText = expandPastedTextPlaceholders(
@@ -1843,6 +1859,21 @@ export function MessageInput({
       return
     }
 
+    // Retry-edit mode must only resend when the current prompt is idle.
+    if (isRetryEditingMessage) {
+      if (disabled || isPrompting) return
+      onSend(draft, showModeSelector ? effectiveModeId : null)
+      onCancelRetryEdit?.()
+      if (effectiveDraftStorageKey) {
+        clearMessageInputDraft(effectiveDraftStorageKey)
+      }
+      setText("")
+      clearPastedTexts()
+      setAttachments([])
+      setInputExpanded(false)
+      return
+    }
+
     // Prompting mode: enqueue instead of sending
     if (isPrompting && onEnqueue) {
       onEnqueue(draft, showModeSelector ? effectiveModeId : null)
@@ -1864,8 +1895,11 @@ export function MessageInput({
   }, [
     buildDraft,
     isEditingQueueItem,
+    isRetryEditingMessage,
+    disabled,
     isPrompting,
     onSaveQueueEdit,
+    onCancelRetryEdit,
     onEnqueue,
     onSend,
     effectiveModeId,
@@ -1970,9 +2004,9 @@ export function MessageInput({
         }
       }
 
-      if (isEditingQueueItem && e.key === "Escape") {
+      if (isExternalDraftEditing && e.key === "Escape") {
         e.preventDefault()
-        handleCancelQueueEditClick()
+        handleCancelExternalEditClick()
         return
       }
 
@@ -1996,7 +2030,8 @@ export function MessageInput({
       disabled,
       isPrompting,
       isEditingQueueItem,
-      handleCancelQueueEditClick,
+      isExternalDraftEditing,
+      handleCancelExternalEditClick,
       handleSend,
       shortcuts,
       slashMenuOpen,
@@ -2110,10 +2145,10 @@ export function MessageInput({
     </>
   )
 
-  const actionButtons = isEditingQueueItem ? (
+  const actionButtons = isExternalDraftEditing ? (
     <div className="flex items-center gap-1">
       <Button
-        onClick={handleCancelQueueEditClick}
+        onClick={handleCancelExternalEditClick}
         variant="ghost"
         size="icon"
         className="h-8 w-8"
@@ -2123,7 +2158,7 @@ export function MessageInput({
       </Button>
       <Button
         onClick={handleSend}
-        disabled={!hasSendableContent}
+        disabled={!hasSendableContent || (isRetryEditingMessage && disabled)}
         size="icon"
         className="h-8 w-8"
         title={tQueue("saveEdit")}

@@ -1924,7 +1924,8 @@
         "tokenCacheWrite": "快取寫入",
         "duration": "耗時",
         "completedAt": "完成時間",
-        "jumpToPreviousUserMessage": "跳轉到上一條使用者訊息"
+        "jumpToPreviousUserMessage": "跳轉到上一條使用者訊息",
+        "retryEditMessage": "重新編輯"
       },
       "liveTurnStats": {
         "thinking": "思考中...",
