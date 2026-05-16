@@ -417,10 +417,6 @@ pub fn build_router(
             post(handlers::system_settings::get_system_proxy_settings),
         )
         .route(
-            "/get_system_language_settings",
-            post(handlers::system_settings::get_system_language_settings),
-        )
-        .route(
             "/get_system_open_target_settings",
             post(handlers::system_settings::get_system_open_target_settings),
         )
