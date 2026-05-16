@@ -58,8 +58,10 @@ interface ConversationShellProps {
   editingItemId?: string | null
   editingDraftText?: string | null
   isEditingQueueItem?: boolean
+  isRetryEditingMessage?: boolean
   onSaveQueueEdit?: (draft: PromptDraft) => void
   onCancelQueueEdit?: () => void
+  onCancelRetryEdit?: () => void
   onForkSend?: (draft: PromptDraft, modeId?: string | null) => void
 }
 
@@ -101,8 +103,10 @@ export function ConversationShell({
   editingItemId,
   editingDraftText,
   isEditingQueueItem,
+  isRetryEditingMessage,
   onSaveQueueEdit,
   onCancelQueueEdit,
+  onCancelRetryEdit,
   onForkSend,
 }: ConversationShellProps) {
   const tAcp = useTranslations("Folder.chat.acpConnections")
@@ -203,8 +207,10 @@ export function ConversationShell({
           editingItemId={editingItemId}
           editingDraftText={editingDraftText}
           isEditingQueueItem={isEditingQueueItem}
+          isRetryEditingMessage={isRetryEditingMessage}
           onSaveQueueEdit={onSaveQueueEdit}
           onCancelQueueEdit={onCancelQueueEdit}
+          onCancelRetryEdit={onCancelRetryEdit}
           onForkSend={onForkSend}
         />
       )}

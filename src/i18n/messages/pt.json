@@ -1924,7 +1924,8 @@
         "tokenCacheWrite": "Escrita de cache",
         "duration": "Duração",
         "completedAt": "Concluído às",
-        "jumpToPreviousUserMessage": "Ir para a mensagem do usuário"
+        "jumpToPreviousUserMessage": "Ir para a mensagem do usuário",
+        "retryEditMessage": "Editar e reenviar"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",

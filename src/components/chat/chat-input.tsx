@@ -45,8 +45,10 @@ interface ChatInputProps {
   editingItemId?: string | null
   editingDraftText?: string | null
   isEditingQueueItem?: boolean
+  isRetryEditingMessage?: boolean
   onSaveQueueEdit?: (draft: PromptDraft) => void
   onCancelQueueEdit?: () => void
+  onCancelRetryEdit?: () => void
   onForkSend?: (draft: PromptDraft, modeId?: string | null) => void
 }
 
@@ -80,8 +82,10 @@ export const ChatInput = memo(function ChatInput({
   editingItemId,
   editingDraftText,
   isEditingQueueItem,
+  isRetryEditingMessage,
   onSaveQueueEdit,
   onCancelQueueEdit,
+  onCancelRetryEdit,
   onForkSend,
 }: ChatInputProps) {
   const t = useTranslations("Folder.chat.chatInput")
@@ -131,8 +135,10 @@ export const ChatInput = memo(function ChatInput({
         onEnqueue={onEnqueue}
         editingDraftText={editingDraftText}
         isEditingQueueItem={isEditingQueueItem}
+        isRetryEditingMessage={isRetryEditingMessage}
         onSaveQueueEdit={onSaveQueueEdit}
         onCancelQueueEdit={onCancelQueueEdit}
+        onCancelRetryEdit={onCancelRetryEdit}
         onForkSend={onForkSend}
         placeholder={
           isConnecting

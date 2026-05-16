@@ -44,6 +44,7 @@ import {
   CopyIcon,
   Info,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
 } from "lucide-react"
@@ -61,7 +62,16 @@ import {
   saveConversationUserAnchor,
   setConversationActiveAnchor,
 } from "@/lib/conversation-anchor-storage"
-import type { AgentType, ConnectionStatus, SessionStats } from "@/lib/types"
+import {
+  addConversationRetryEditReplacementListener,
+  collectHiddenRetryEditAnchorIds,
+} from "@/lib/conversation-retry-edit-storage"
+import type {
+  AgentType,
+  ConnectionStatus,
+  MessageTurn,
+  SessionStats,
+} from "@/lib/types"
 import type { LiveMessage } from "@/contexts/acp-connections-context"
 import { cn, copyTextToClipboard } from "@/lib/utils"
 import { VirtualizedMessageThread } from "@/components/message/virtualized-message-thread"
@@ -92,6 +102,7 @@ interface MessageListViewProps {
   hideEmptyState?: boolean
   onReload?: () => void
   onNewSession?: () => void
+  onRetryEditTurn?: (turn: MessageTurn) => void
 }
 
 interface UserAnchorItem {
@@ -136,6 +147,8 @@ type ThreadRenderItem =
       group: ResolvedMessageGroup
       phase: "persisted" | "optimistic" | "streaming"
       anchorId: string | null
+      sourceTurn: MessageTurn
+      canRetryEdit: boolean
       showStats: boolean
       isRoleTransition: boolean
       previousUserIndex: number | null
@@ -296,6 +309,49 @@ function isEmptyTurnItem(item: ThreadRenderItem): boolean {
   return true
 }
 
+function isAssistantTextTurn(turn: MessageTurn): boolean {
+  if (turn.role !== "assistant") return false
+  return turn.blocks.some(
+    (block) => block.type === "text" && block.text.trim().length > 0
+  )
+}
+
+function isTextOnlyUserTurn(turn: MessageTurn): boolean {
+  return (
+    turn.role === "user" && turn.blocks.every((block) => block.type === "text")
+  )
+}
+
+function findRetryEditableUserAnchorId(turns: MessageTurn[]): string | null {
+  let userTurnCountAfterCandidate = 0
+
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index]
+    if (turn.role === "assistant" && isAssistantTextTurn(turn)) {
+      return null
+    }
+    if (turn.role !== "user") {
+      continue
+    }
+
+    userTurnCountAfterCandidate += 1
+    if (userTurnCountAfterCandidate > 1) {
+      return null
+    }
+
+    const anchorId = turn.anchor_id ?? null
+    if (
+      !anchorId ||
+      isOptimisticAnchorId(anchorId) ||
+      !isTextOnlyUserTurn(turn)
+    ) {
+      return null
+    }
+    return anchorId
+  }
+  return null
+}
+
 /**
  * Collapse runs of consecutive assistant turn render items into a single
  * synthetic turn so tool-groups straddling a turn boundary fold into one
@@ -325,6 +381,7 @@ function mergeConsecutiveAssistantTurns(
       const mergedParts = mergeAdjacentToolGroups(allParts)
       const last = buffer[buffer.length - 1]
       const first = buffer[0]
+      const sourceTurn = first.sourceTurn
 
       // Aggregate stats across the merged sub-turns so the post-stream
       // stats row reflects the whole assistant response, not just the
@@ -364,6 +421,8 @@ function mergeConsecutiveAssistantTurns(
       result.push({
         ...last,
         key: `merged-${first.key}`,
+        sourceTurn,
+        canRetryEdit: false,
         group: {
           ...last.group,
           id: first.group.id,
@@ -447,18 +506,39 @@ const UserMessageCopyButton = memo(function UserMessageCopyButton({
   )
 })
 
+const UserMessageRetryEditButton = memo(function UserMessageRetryEditButton({
+  onRetryEdit,
+}: {
+  onRetryEdit: () => void
+}) {
+  const t = useTranslations("Folder.chat.messageList")
+
+  return (
+    <MessageAction
+      tooltip={t("retryEditMessage")}
+      className="opacity-0 group-hover/user-msg:opacity-100 transition-opacity self-end"
+      onClick={onRetryEdit}
+      size="icon-xs"
+    >
+      <Pencil size={12} />
+    </MessageAction>
+  )
+})
+
 const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   group,
   dimmed = false,
   showStats = true,
   previousUserIndex = null,
   isResponseComplete = true,
+  onRetryEdit,
 }: {
   group: ResolvedMessageGroup
   dimmed?: boolean
   showStats?: boolean
   previousUserIndex?: number | null
   isResponseComplete?: boolean
+  onRetryEdit?: () => void
 }) {
   if (group.role === "system") {
     return <CollapsibleSystemMessage group={group} />
@@ -472,7 +552,12 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
         ) : null}
         {group.role === "user" ? (
           <div className="group/user-msg flex w-fit ml-auto max-w-full items-start gap-1">
-            <UserMessageCopyButton parts={group.parts} />
+            <div className="flex items-center gap-0.5 self-end">
+              {onRetryEdit ? (
+                <UserMessageRetryEditButton onRetryEdit={onRetryEdit} />
+              ) : null}
+              <UserMessageCopyButton parts={group.parts} />
+            </div>
             <MessageContent>
               <ContentPartsRenderer parts={group.parts} role={group.role} />
             </MessageContent>
@@ -883,6 +968,7 @@ export function MessageListView({
   hideEmptyState = false,
   onReload,
   onNewSession,
+  onRetryEditTurn,
 }: MessageListViewProps) {
   const t = useTranslations("Folder.chat.messageList")
   const sharedT = useTranslations("Folder.chat.shared")
@@ -890,6 +976,7 @@ export function MessageListView({
   const session = getSession(conversationId)
   const liveMessage = session?.liveMessage ?? null
   const timelineTurns = getTimelineTurns(conversationId)
+  const [replacementRevision, setReplacementRevision] = useState(0)
   const virtualizerRef = useRef<VirtualizerHandle | null>(null)
   const stickToBottomRef = useRef<StickToBottomContext | null>(null)
   const rowElementRefs = useRef(new Map<string, HTMLDivElement>())
@@ -952,6 +1039,16 @@ export function MessageListView({
 
   const sessionSyncState = session?.syncState ?? "idle"
 
+  useEffect(() => {
+    return addConversationRetryEditReplacementListener(
+      (updatedConversationId) => {
+        if (updatedConversationId === storageConversationId) {
+          setReplacementRevision((revision) => revision + 1)
+        }
+      }
+    )
+  }, [storageConversationId])
+
   // Per-instance turn adapter: caches per-turn `AdaptedMessage` so unchanged
   // historical turns survive every streaming-token re-render with stable refs.
   const [turnAdapter] = useState<MessageTurnAdapter>(() =>
@@ -966,10 +1063,27 @@ export function MessageListView({
   )
 
   const { threadItems, nonStreamingAdapted, userAnchors } = useMemo(() => {
-    const allTurns = timelineTurns.map((item) => item.turn)
+    void replacementRevision
+    const rawTurns = timelineTurns.map((item) => item.turn)
+    const hiddenAnchorIds = collectHiddenRetryEditAnchorIds(
+      storageConversationId,
+      rawTurns
+    )
+    const retryEditableAnchorId =
+      connStatus === "connected" &&
+      onRetryEditTurn &&
+      sessionSyncState !== "awaiting_persist" &&
+      !showPromptingState
+        ? findRetryEditableUserAnchorId(rawTurns)
+        : null
+    const visibleTimelineTurns = timelineTurns.filter((item) => {
+      const anchorId = item.turn.anchor_id ?? null
+      return !anchorId || !hiddenAnchorIds.has(anchorId)
+    })
+    const allTurns = visibleTimelineTurns.map((item) => item.turn)
     const streamingIndices = new Set<number>()
     const inProgressToolCallIdsByIndex = new Map<number, Set<string>>()
-    timelineTurns.forEach((item, i) => {
+    visibleTimelineTurns.forEach((item, i) => {
       if (item.phase === "streaming") {
         streamingIndices.add(i)
         if (item.inProgressToolCallIds && item.inProgressToolCallIds.size > 0) {
@@ -988,14 +1102,14 @@ export function MessageListView({
 
     // Collect non-streaming adapted messages for plan extraction
     const nonStreaming = allAdapted.filter(
-      (_, index) => timelineTurns[index].phase !== "streaming"
+      (_, index) => visibleTimelineTurns[index].phase !== "streaming"
     )
 
     // Map each adapted message directly to a render item (1:1).
     // Backend group_into_turns() already ensures each turn is a complete unit.
     const rawItems: ThreadRenderItem[] = allAdapted.map((msg, i) => {
-      const phase = timelineTurns[i].phase
-      const turn = timelineTurns[i].turn
+      const phase = visibleTimelineTurns[i].phase
+      const turn = visibleTimelineTurns[i].turn
       const role = msg.role === "tool" ? "assistant" : msg.role
       const key = `${phase}-${msg.id}-${i}`
       let group = groupCache.get(msg)
@@ -1023,6 +1137,11 @@ export function MessageListView({
         group,
         phase,
         anchorId: role === "user" ? (turn.anchor_id ?? null) : null,
+        sourceTurn: turn,
+        canRetryEdit:
+          role === "user" &&
+          retryEditableAnchorId !== null &&
+          turn.anchor_id === retryEditableAnchorId,
         showStats: false,
         isRoleTransition: false,
         previousUserIndex: null,
@@ -1078,7 +1197,8 @@ export function MessageListView({
       }
     }
 
-    const lastPhase = timelineTurns[timelineTurns.length - 1]?.phase ?? null
+    const lastPhase =
+      visibleTimelineTurns[visibleTimelineTurns.length - 1]?.phase ?? null
     if (
       lastPhase === "optimistic" &&
       (showPromptingState || sessionSyncState === "awaiting_persist")
@@ -1093,8 +1213,12 @@ export function MessageListView({
     }
   }, [
     adapterText,
+    connStatus,
+    onRetryEditTurn,
+    replacementRevision,
     sessionSyncState,
     showPromptingState,
+    storageConversationId,
     timelineTurns,
     turnAdapter,
     groupCache,
@@ -1502,6 +1626,10 @@ export function MessageListView({
             item.group.role === "user" &&
             item.anchorId !== null &&
             item.anchorId === activeAnchorId
+          const handleRetryEdit =
+            item.canRetryEdit && onRetryEditTurn
+              ? () => onRetryEditTurn(item.sourceTurn)
+              : undefined
 
           return (
             <div
@@ -1531,6 +1659,7 @@ export function MessageListView({
                 showStats={item.showStats}
                 previousUserIndex={item.previousUserIndex}
                 isResponseComplete={item.phase === "persisted"}
+                onRetryEdit={handleRetryEdit}
               />
             </div>
           )
@@ -1541,7 +1670,7 @@ export function MessageListView({
           return null
       }
     },
-    [activeAnchorId]
+    [activeAnchorId, onRetryEditTurn]
   )
 
   const emptyState = useMemo(

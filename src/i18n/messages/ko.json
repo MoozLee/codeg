@@ -1924,7 +1924,8 @@
         "tokenCacheWrite": "캐시 쓰기",
         "duration": "소요 시간",
         "completedAt": "완료 시각",
-        "jumpToPreviousUserMessage": "이전 사용자 메시지로 이동"
+        "jumpToPreviousUserMessage": "이전 사용자 메시지로 이동",
+        "retryEditMessage": "수정 후 다시 보내기"
       },
       "liveTurnStats": {
         "thinking": "생각 중...",

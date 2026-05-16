@@ -76,6 +76,10 @@ import {
   clearMessageInputDraft,
 } from "@/lib/message-input-draft"
 import {
+  isStableRetryEditAnchorId,
+  saveConversationRetryEditReplacement,
+} from "@/lib/conversation-retry-edit-storage"
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -155,6 +159,17 @@ function buildOptimisticUserTurnFromDraft(
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
+}
+
+function extractTextFromMessageTurn(turn: MessageTurn): string | null {
+  const textBlocks: string[] = []
+  for (const block of turn.blocks) {
+    if (block.type !== "text") {
+      return null
+    }
+    textBlocks.push(block.text)
+  }
+  return textBlocks.join("\n")
 }
 
 function isExpectedConnectError(error: unknown): boolean {
@@ -257,6 +272,10 @@ const ConversationTabView = memo(function ConversationTabView({
     null
   )
   const [hasSentMessage, setHasSentMessage] = useState(false)
+  const [retryEditingTurn, setRetryEditingTurn] = useState<MessageTurn | null>(
+    null
+  )
+  const pendingRetryReplacementOldAnchorRef = useRef<string | null>(null)
 
   const hasPersistedConversation = dbConversationId != null
 
@@ -722,6 +741,15 @@ const ConversationTabView = memo(function ConversationTabView({
       setSyncState(effectiveConversationId, "awaiting_persist")
       setHasSentMessage(true)
 
+      const oldRetryAnchorId = pendingRetryReplacementOldAnchorRef.current
+      if (oldRetryAnchorId && dbConvIdRef.current != null) {
+        saveConversationRetryEditReplacement(dbConvIdRef.current, {
+          old_anchor_id: oldRetryAnchorId,
+          created_at: new Date().toISOString(),
+        })
+        pendingRetryReplacementOldAnchorRef.current = null
+      }
+
       const persistedId = dbConvIdRef.current
       if (persistedId != null) {
         updateConversationLocal(persistedId, { status: "in_progress" })
@@ -985,16 +1013,33 @@ const ConversationTabView = memo(function ConversationTabView({
     return item?.draft.displayText ?? null
   }, [mqEditingItemId, msgQueue])
 
+  const handleCancelRetryEdit = useCallback(() => {
+    pendingRetryReplacementOldAnchorRef.current = null
+    setRetryEditingTurn(null)
+  }, [])
+
   const handleQueueEdit = useCallback(
     (id: string) => {
+      handleCancelRetryEdit()
       mqStartEditing(id)
     },
-    [mqStartEditing]
+    [handleCancelRetryEdit, mqStartEditing]
   )
 
   const handleQueueCancelEdit = useCallback(() => {
     mqCancelEditing()
   }, [mqCancelEditing])
+
+  const handleRetryEditTurn = useCallback(
+    (turn: MessageTurn) => {
+      if (!isStableRetryEditAnchorId(turn.anchor_id)) return
+      if (extractTextFromMessageTurn(turn) == null) return
+      mqCancelEditing()
+      pendingRetryReplacementOldAnchorRef.current = turn.anchor_id
+      setRetryEditingTurn(turn)
+    },
+    [mqCancelEditing]
+  )
 
   const handleSaveQueueEdit = useCallback(
     (draft: PromptDraft) => {
@@ -1004,6 +1049,14 @@ const ConversationTabView = memo(function ConversationTabView({
     },
     [mqEditingItemId, mqUpdateItem]
   )
+
+  const retryEditingDraftText = useMemo(() => {
+    return retryEditingTurn
+      ? extractTextFromMessageTurn(retryEditingTurn)
+      : null
+  }, [retryEditingTurn])
+  const effectiveEditingDraftText =
+    retryEditingDraftText ?? editingQueueDraftText
 
   const showDraftHeader = !hasPersistedConversation && !hasSentMessage
   const isWelcomeMode = showDraftHeader
@@ -1050,6 +1103,7 @@ const ConversationTabView = memo(function ConversationTabView({
       onNewSession={
         canShowDetailErrorActions ? handleOpenNewSession : undefined
       }
+      onRetryEditTurn={handleRetryEditTurn}
     />
   )
 
@@ -1089,10 +1143,12 @@ const ConversationTabView = memo(function ConversationTabView({
       onQueueEdit={handleQueueEdit}
       onQueueDelete={mqRemove}
       editingItemId={mqEditingItemId}
-      editingDraftText={editingQueueDraftText}
+      editingDraftText={effectiveEditingDraftText}
       isEditingQueueItem={mqEditingItemId != null}
+      isRetryEditingMessage={retryEditingTurn != null}
       onSaveQueueEdit={handleSaveQueueEdit}
       onCancelQueueEdit={handleQueueCancelEdit}
+      onCancelRetryEdit={handleCancelRetryEdit}
       onForkSend={
         connStatus === "connected" &&
         hasPersistedConversation &&

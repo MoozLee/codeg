@@ -35,6 +35,10 @@ import {
   getConversationActiveAnchor,
   subscribeConversationAnchorState,
 } from "@/lib/conversation-anchor-storage"
+import {
+  addConversationRetryEditReplacementListener,
+  collectHiddenRetryEditAnchorIds,
+} from "@/lib/conversation-retry-edit-storage"
 import type { MessageTurn } from "@/lib/types"
 import { cn, copyTextToClipboard } from "@/lib/utils"
 
@@ -164,6 +168,7 @@ function UserMessagesTabContent({
     count: INITIAL_VISIBLE_USER_MESSAGES,
   }))
   const [showScrollToTop, setShowScrollToTop] = useState(false)
+  const [replacementRevision, setReplacementRevision] = useState(0)
   const scrollViewportRef = useRef<OverlayScrollbarsComponentRef>(null)
   const messageNodeRefs = useRef<Map<string, HTMLElement | null>>(new Map())
 
@@ -184,6 +189,16 @@ function UserMessagesTabContent({
     () => null
   )
 
+  useEffect(() => {
+    return addConversationRetryEditReplacementListener(
+      (updatedConversationId) => {
+        if (updatedConversationId === conversationId) {
+          setReplacementRevision((revision) => revision + 1)
+        }
+      }
+    )
+  }, [conversationId])
+
   const dateFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -201,9 +216,14 @@ function UserMessagesTabContent({
   )
 
   const { userMessages, userMessageGroups } = useMemo(() => {
+    void replacementRevision
     const todaySerial = getLocalDaySerial(new Date())
     const timelineTurns = getTimelineTurns(conversationId).map(
       (item) => item.turn
+    )
+    const hiddenAnchorIds = collectHiddenRetryEditAnchorIds(
+      conversationId,
+      timelineTurns
     )
     const chronologicalMessages: UserMessageListItem[] = []
     const chronologicalGroups: UserMessageSequenceGroup[] = []
@@ -289,6 +309,9 @@ function UserMessagesTabContent({
       if (turn.role !== "user" || !turn.anchor_id) {
         continue
       }
+      if (hiddenAnchorIds.has(turn.anchor_id)) {
+        continue
+      }
 
       sequence += 1
       const message = createUserMessageItem(turn, sequence)
@@ -302,7 +325,14 @@ function UserMessagesTabContent({
       userMessages: chronologicalMessages.reverse(),
       userMessageGroups: chronologicalGroups.reverse(),
     }
-  }, [conversationId, dateFormatter, getTimelineTurns, t, timeFormatter])
+  }, [
+    conversationId,
+    dateFormatter,
+    getTimelineTurns,
+    replacementRevision,
+    t,
+    timeFormatter,
+  ])
 
   const visibleCount =
     visibleState.conversationId === conversationId

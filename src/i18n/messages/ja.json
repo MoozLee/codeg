@@ -1924,7 +1924,8 @@
         "tokenCacheWrite": "キャッシュ書込",
         "duration": "所要時間",
         "completedAt": "完了時刻",
-        "jumpToPreviousUserMessage": "前のユーザーメッセージへ"
+        "jumpToPreviousUserMessage": "前のユーザーメッセージへ",
+        "retryEditMessage": "編集して再送信"
       },
       "liveTurnStats": {
         "thinking": "考え中...",
