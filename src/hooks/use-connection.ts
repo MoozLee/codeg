@@ -43,6 +43,7 @@ export interface UseConnectionReturn {
   pendingPermission: PendingPermission | null
   pendingQuestion: PendingQuestion | null
   claudeApiRetry: ClaudeApiRetryState | null
+  lastTurnStopReason: string | null
   error: string | null
   loadError: string | null
   connect: (
@@ -101,6 +102,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const pendingPermission = connection?.pendingPermission ?? null
   const pendingQuestion = connection?.pendingQuestion ?? null
   const claudeApiRetry = connection?.claudeApiRetry ?? null
+  const lastTurnStopReason = connection?.lastTurnStopReason ?? null
   const error = connection?.error ?? null
   const loadError = connection?.loadError ?? null
 
@@ -167,6 +169,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingPermission,
       pendingQuestion,
       claudeApiRetry,
+      lastTurnStopReason,
       error,
       loadError,
       connect,
@@ -194,6 +197,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingPermission,
       pendingQuestion,
       claudeApiRetry,
+      lastTurnStopReason,
       error,
       loadError,
       connect,

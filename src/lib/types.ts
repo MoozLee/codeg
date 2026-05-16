@@ -512,6 +512,13 @@ export type AcpEvent =
       options: PermissionOptionInfo[]
     }
   | {
+      type: "user_prompt"
+      conversation_id?: number | null
+      origin_connection_id: string
+      origin_client_id?: string | null
+      blocks: PromptInputBlock[]
+    }
+  | {
       type: "turn_complete"
       session_id: string
       stop_reason: string

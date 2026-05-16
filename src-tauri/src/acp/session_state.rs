@@ -408,6 +408,11 @@ impl SessionState {
                     created_at: Utc::now(),
                 });
             }
+            AcpEvent::UserPrompt { .. } => {
+                // Live notification only. Submitted user prompts are rendered by
+                // frontend runtime state and later by parsed conversation history,
+                // not stored in the in-flight backend snapshot.
+            }
             AcpEvent::TurnComplete { .. } => {
                 self.live_message = None;
                 self.active_tool_calls.clear();

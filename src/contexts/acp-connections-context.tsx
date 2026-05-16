@@ -203,6 +203,7 @@ export interface ConnectionState {
   pendingPermission: PendingPermission | null
   pendingQuestion: PendingQuestion | null
   claudeApiRetry: ClaudeApiRetryState | null
+  lastTurnStopReason: string | null
   error: string | null
   /**
    * Set when the agent rejected `session/load` non-recoverably (currently
@@ -334,6 +335,11 @@ type Action =
       pendingQuestion: PendingQuestion
     }
   | { type: "CLEAR_PENDING_QUESTION"; contextKey: string }
+  | {
+      type: "TURN_COMPLETE"
+      contextKey: string
+      stopReason: string
+    }
   | { type: "SESSION_STARTED"; contextKey: string; sessionId: string }
   | {
       type: "SESSION_MODES"
@@ -819,6 +825,7 @@ function connectionsReducer(
         pendingPermission: null,
         pendingQuestion: null,
         claudeApiRetry: null,
+        lastTurnStopReason: null,
         error: null,
         loadError: null,
         lastAppliedSeq: 0,
@@ -955,6 +962,7 @@ function connectionsReducer(
         }
         updated.pendingQuestion = null
         updated.claudeApiRetry = null
+        updated.lastTurnStopReason = null
         updated.error = null
       } else if (conn.status === "prompting") {
         // Prompt cycle ended: clear in-flight Claude API retry banner.
@@ -1314,6 +1322,19 @@ function connectionsReducer(
       return next
     }
 
+    case "TURN_COMPLETE": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        status: "connected",
+        claudeApiRetry: null,
+        lastTurnStopReason: action.stopReason,
+      })
+      return next
+    }
+
     case "SESSION_STARTED": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
@@ -1599,6 +1620,12 @@ export interface ConnectionStoreApi {
 
 const ConnectionStoreContext = createContext<ConnectionStoreApi | null>(null)
 
+const CLIENT_ORIGIN_ID = randomUUID()
+
+export function getClientOriginId(): string {
+  return CLIENT_ORIGIN_ID
+}
+
 export function useConnectionStore(): ConnectionStoreApi {
   const ctx = useContext(ConnectionStoreContext)
   if (!ctx) {
@@ -1665,7 +1692,10 @@ export function useAcpActions(): AcpActionsValue {
 // physical Tauri/WebSocket subscription; consumers register callbacks here
 // instead of opening a second listener. See `useAcpEvent` below.
 
-type EventSubscriberHandler = (envelope: EventEnvelope) => void
+type EventSubscriberHandler = (
+  envelope: EventEnvelope,
+  contextKey: string
+) => void
 type EventSubscriberRef = { current: EventSubscriberHandler }
 
 interface AcpEventSubscriberApi {
@@ -1683,7 +1713,8 @@ const AcpEventSubscriberContext = createContext<AcpEventSubscriberApi | null>(
  * actions for that envelope (state is consistent at fire time). It also
  * inherits the provider's `seq` dedup — duplicates the primary listener
  * would skip are skipped here too. Unmapped events (no `contextKey`) do
- * NOT fan out.
+ * NOT fan out. The mapped `contextKey` is passed as the second argument so
+ * subscribers can target the same connection scope that received the event.
  *
  * Stability: the latest `handler` is stored in a ref each render, so callers
  * may pass an inline function. There is no need for caller-side refs to keep
@@ -2123,6 +2154,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         case "thinking":
           enqueueStreamingAction({ type: "THINKING", contextKey, text: e.text })
           break
+        case "user_prompt":
+          flushStreamingQueue()
+          break
         case "claude_sdk_message":
           flushStreamingQueue()
           dispatch({
@@ -2308,9 +2342,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           flushStreamingQueue()
           flushPendingToolCallUpdates()
           dispatch({
-            type: "STATUS_CHANGED",
+            type: "TURN_COMPLETE",
             contextKey,
-            status: "connected",
+            stopReason: e.stop_reason,
           })
           // Detect pending question from tool calls in the completed turn
           const turnConn = storeRef.current.connections.get(contextKey)
@@ -2498,7 +2532,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "EVENT_APPLIED", contextKey, seq: envelope.seq })
       for (const ref of eventSubscribersRef.current) {
         try {
-          ref.current(envelope)
+          ref.current(envelope, contextKey)
         } catch (err) {
           console.error("[acp-context] subscriber threw:", err)
         }
@@ -2650,7 +2684,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       // subscriber must not kill the others — wrap each call in try/catch.
       for (const ref of eventSubscribersRef.current) {
         try {
-          ref.current(envelope)
+          ref.current(envelope, contextKey)
         } catch (err) {
           console.error("[acp-context] subscriber threw:", err)
         }
@@ -3172,7 +3206,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         conn.connectionId,
         blocks,
         opts?.folderId ?? null,
-        opts?.conversationId ?? null
+        opts?.conversationId ?? null,
+        CLIENT_ORIGIN_ID
       )
     },
     []

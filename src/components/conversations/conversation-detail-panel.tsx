@@ -36,7 +36,7 @@ import { useTaskContext } from "@/contexts/task-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
 import { toErrorMessage } from "@/lib/app-error"
 import { findFirstWorkspaceFileTarget } from "@/lib/local-file-target"
-import { cn, copyTextToClipboard, randomUUID } from "@/lib/utils"
+import { cn, copyTextToClipboard } from "@/lib/utils"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
 import { MessageListView } from "@/components/message/message-list-view"
@@ -53,14 +53,13 @@ import {
 import { useConversationRuntime } from "@/contexts/conversation-runtime-context"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import {
-  extractUserImagesFromDraft,
-  extractUserResourcesFromDraft,
+  buildUserTurnFromDraft,
+  createOptimisticUserIdentity,
   getPromptDraftDisplayText,
 } from "@/lib/prompt-draft"
 import {
   AGENT_LABELS,
   type AgentType,
-  type ContentBlock,
   type EventEnvelope,
   type MessageTurn,
   type PromptDraft,
@@ -103,56 +102,6 @@ interface ConversationTabViewProps {
   workingDir?: string
   isActive: boolean
   reloadSignal: number
-}
-
-function createOptimisticUserIdentity(): {
-  id: string
-  anchorId: string
-} {
-  const optimisticId = randomUUID()
-  return {
-    id: `optimistic-${optimisticId}`,
-    anchorId: `optimistic:${optimisticId}`,
-  }
-}
-
-function buildOptimisticUserTurnFromDraft(
-  draft: PromptDraft,
-  attachedResourcesFallback: string
-): MessageTurn {
-  const displayText = getPromptDraftDisplayText(
-    draft,
-    attachedResourcesFallback
-  )
-  const resources = extractUserResourcesFromDraft(draft)
-  const resourceLines = resources.map((resource) => {
-    const label = resource.uri.toLowerCase().startsWith("file://")
-      ? resource.name
-      : `@${resource.name}`
-    return `[${label}](${resource.uri})`
-  })
-  const text = [displayText, ...resourceLines].join("\n").trim()
-
-  const blocks: ContentBlock[] = []
-  for (const image of extractUserImagesFromDraft(draft)) {
-    blocks.push({
-      type: "image",
-      data: image.data,
-      mime_type: image.mime_type,
-      uri: image.uri ?? null,
-    })
-  }
-  blocks.push({ type: "text", text })
-
-  const optimisticIdentity = createOptimisticUserIdentity()
-
-  return {
-    id: optimisticIdentity.id,
-    anchor_id: optimisticIdentity.anchorId,
-    role: "user",
-    blocks,
-    timestamp: new Date().toISOString(),
-  }
 }
 
 function normalizeErrorMessage(error: unknown): string {
@@ -739,7 +688,7 @@ const ConversationTabView = memo(function ConversationTabView({
       }
       if (connStatus !== "connected") return
 
-      const optimisticTurn = buildOptimisticUserTurnFromDraft(
+      const optimisticTurn = buildUserTurnFromDraft(
         draft,
         sharedT("attachedResources")
       )
@@ -1107,6 +1056,7 @@ const ConversationTabView = memo(function ConversationTabView({
       detailError={detailError}
       acpLoadError={acpLoadError}
       hideEmptyState={!hasPersistedConversation || hasSentMessage}
+      lastTurnStopReason={conn.lastTurnStopReason}
       onReload={canShowDetailErrorActions ? handleReloadDetail : undefined}
       onNewSession={
         canShowDetailErrorActions ? handleOpenNewSession : undefined

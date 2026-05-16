@@ -3,7 +3,13 @@ import type {
   UserImageDisplay,
   UserResourceDisplay,
 } from "@/lib/adapters/ai-elements-adapter"
-import type { PromptDraft, PromptInputBlock } from "@/lib/types"
+import { randomUUID } from "@/lib/utils"
+import type {
+  ContentBlock,
+  MessageTurn,
+  PromptDraft,
+  PromptInputBlock,
+} from "@/lib/types"
 
 function isResourceLinkBlock(
   block: PromptInputBlock
@@ -38,6 +44,23 @@ function deriveResourceNameFromUri(uri: string): string {
     }
   }
   return decoded || fallback
+}
+
+function resourceLabel(resource: UserResourceDisplay): string {
+  return resource.uri.toLowerCase().startsWith("file://")
+    ? resource.name
+    : `@${resource.name}`
+}
+
+export function createOptimisticUserIdentity(): {
+  id: string
+  anchorId: string
+} {
+  const optimisticId = randomUUID()
+  return {
+    id: `optimistic-${optimisticId}`,
+    anchorId: `optimistic:${optimisticId}`,
+  }
 }
 
 export function getPromptDraftDisplayText(
@@ -93,10 +116,79 @@ function deriveImageName(
 export function extractUserImagesFromDraft(
   draft: PromptDraft
 ): UserImageDisplay[] {
-  return draft.blocks.filter(isImageBlock).map((image) => ({
+  return extractUserImagesFromPromptBlocks(draft.blocks)
+}
+
+export function extractUserResourcesFromPromptBlocks(
+  blocks: PromptInputBlock[]
+): UserResourceDisplay[] {
+  const linked = blocks.filter(isResourceLinkBlock).map((resource) => ({
+    name: resource.name,
+    uri: resource.uri,
+    mime_type: resource.mime_type ?? null,
+  }))
+  const embedded = blocks.filter(isEmbeddedResourceBlock).map((resource) => ({
+    name: deriveResourceNameFromUri(resource.uri),
+    uri: resource.uri,
+    mime_type: resource.mime_type ?? null,
+  }))
+  return [...linked, ...embedded]
+}
+
+export function extractUserImagesFromPromptBlocks(
+  blocks: PromptInputBlock[]
+): UserImageDisplay[] {
+  return blocks.filter(isImageBlock).map((image) => ({
     name: deriveImageName(image.uri, image.mime_type),
     data: image.data,
     mime_type: image.mime_type,
     uri: image.uri ?? null,
   }))
+}
+
+export function buildUserTurnFromPromptBlocks(
+  blocks: PromptInputBlock[],
+  attachedResourcesFallback: string
+): MessageTurn {
+  const textBlocks = blocks
+    .filter(
+      (block): block is Extract<PromptInputBlock, { type: "text" }> =>
+        block.type === "text"
+    )
+    .map((block) => block.text.trim())
+    .filter((text) => text.length > 0)
+  const displayText = textBlocks.join("\n").trim() || attachedResourcesFallback
+  const resources = extractUserResourcesFromPromptBlocks(blocks)
+  const resourceLines = resources.map(
+    (resource) => `[${resourceLabel(resource)}](${resource.uri})`
+  )
+  const text = [displayText, ...resourceLines].join("\n").trim()
+
+  const contentBlocks: ContentBlock[] = []
+  for (const image of extractUserImagesFromPromptBlocks(blocks)) {
+    contentBlocks.push({
+      type: "image",
+      data: image.data,
+      mime_type: image.mime_type,
+      uri: image.uri ?? null,
+    })
+  }
+  contentBlocks.push({ type: "text", text })
+
+  const optimisticIdentity = createOptimisticUserIdentity()
+
+  return {
+    id: optimisticIdentity.id,
+    anchor_id: optimisticIdentity.anchorId,
+    role: "user",
+    blocks: contentBlocks,
+    timestamp: new Date().toISOString(),
+  }
+}
+
+export function buildUserTurnFromDraft(
+  draft: PromptDraft,
+  attachedResourcesFallback: string
+): MessageTurn {
+  return buildUserTurnFromPromptBlocks(draft.blocks, attachedResourcesFallback)
 }

@@ -420,6 +420,53 @@ impl ConnectionManager {
         self.send_prompt_inner(conn_id, blocks).await
     }
 
+    /// Emit a submitted user prompt to every active connection bound to the
+    /// same conversation. The event is delivered on each target connection's
+    /// stream (and Tauri listener) with that target's `connection_id`, while
+    /// carrying `origin_client_id` so only the browser/webview instance that
+    /// sent the prompt ignores its own echo. `origin_connection_id` is retained
+    /// for connection-level diagnostics but is not a frontend client identity.
+    async fn emit_user_prompt_to_conversation_connections(
+        &self,
+        origin_conn_id: &str,
+        origin_client_id: Option<&str>,
+        conversation_id: i32,
+        blocks: Vec<PromptInputBlock>,
+    ) {
+        let targets = {
+            let connections = self.connections.lock().await;
+            let mut targets = Vec::new();
+            for conn in connections.values() {
+                let state = conn.state.read().await;
+                if state.conversation_id != Some(conversation_id) {
+                    continue;
+                }
+                if matches!(
+                    state.status,
+                    ConnectionStatus::Disconnected | ConnectionStatus::Error
+                ) {
+                    continue;
+                }
+                targets.push((conn.state.clone(), conn.emitter.clone()));
+            }
+            targets
+        };
+
+        for (state, emitter) in targets {
+            emit_with_state(
+                &state,
+                &emitter,
+                AcpEvent::UserPrompt {
+                    conversation_id: Some(conversation_id),
+                    origin_connection_id: origin_conn_id.to_string(),
+                    origin_client_id: origin_client_id.map(str::to_string),
+                    blocks: blocks.clone(),
+                },
+            )
+            .await;
+        }
+    }
+
     /// Send a prompt while ensuring a `Conversation` DB row is bound to this
     /// connection. On the first call (when `state.conversation_id` is None),
     /// either:
@@ -440,6 +487,7 @@ impl ConnectionManager {
         blocks: Vec<PromptInputBlock>,
         folder_id: Option<i32>,
         conversation_id: Option<i32>,
+        origin_client_id: Option<String>,
     ) -> Result<(), AcpError> {
         // Caller-supplied conversation_id requires folder_id (we include it in
         // the emitted ConversationLinked event so subscribers don't have to
@@ -570,6 +618,16 @@ impl ConnectionManager {
                     conversation_id: cid,
                     status: ConversationStatus::InProgress,
                 },
+            )
+            .await;
+        }
+
+        if let Some(cid) = conversation_id_for_status {
+            self.emit_user_prompt_to_conversation_connections(
+                conn_id,
+                origin_client_id.as_deref(),
+                cid,
+                blocks.clone(),
             )
             .await;
         }
@@ -1124,7 +1182,7 @@ mod tests {
         // First call: creates conversation row, sets state.conversation_id.
         // The mpsc send error after linking is expected and ignored here.
         let _ = mgr
-            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None)
+            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None, None)
             .await;
         let snap = mgr
             .get_state(conn_id)
@@ -1142,7 +1200,7 @@ mod tests {
 
         // Second call: ignores folder_id, does NOT create another row.
         let _ = mgr
-            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None)
+            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None, None)
             .await;
         let snap2 = mgr
             .get_state(conn_id)
@@ -1165,7 +1223,7 @@ mod tests {
             map.insert(conn_id.into(), fake_connection(conn_id, None));
         }
         let result = mgr
-            .send_prompt_linked(&db, conn_id, vec![], None, None)
+            .send_prompt_linked(&db, conn_id, vec![], None, None, None)
             .await;
         assert!(
             result.is_err(),
@@ -1219,7 +1277,14 @@ mod tests {
 
         // Send with caller-supplied conversation_id + folder_id.
         let _ = mgr
-            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), Some(pre_existing.id))
+            .send_prompt_linked(
+                &db,
+                conn_id,
+                vec![],
+                Some(folder_id),
+                Some(pre_existing.id),
+                None,
+            )
             .await;
 
         // No new conversation row was created.
@@ -1261,7 +1326,7 @@ mod tests {
         .await;
 
         let err = mgr
-            .send_prompt_linked(&db, conn_id, vec![], None, Some(42))
+            .send_prompt_linked(&db, conn_id, vec![], None, Some(42), None)
             .await
             .expect_err("should reject conversation_id without folder_id");
         assert!(matches!(err, AcpError::Protocol(_)));
@@ -1297,7 +1362,7 @@ mod tests {
 
         let before = count_conversation_rows(&db).await;
         let _ = mgr
-            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), Some(pre.id))
+            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), Some(pre.id), None)
             .await;
         let after = count_conversation_rows(&db).await;
         assert_eq!(after, before);
@@ -1367,7 +1432,7 @@ mod tests {
         //   2. ConversationStatusChanged(InProgress)  [pre-send write]
         //   3. ConversationStatusChanged(Cancelled)   [rollback after send failure]
         let _ = mgr
-            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None)
+            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None, None)
             .await;
 
         let env1 = recv_first_acp_event(&mut rx).await;
@@ -1435,7 +1500,7 @@ mod tests {
             .unwrap();
 
         let _ = mgr
-            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None)
+            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None, None)
             .await;
 
         let env4 = recv_first_acp_event(&mut rx).await;
@@ -1760,6 +1825,112 @@ mod tests {
         );
     }
 
+    /// A submitted user prompt is emitted on every connection stream bound to
+    /// the same conversation_id. The origin frontend ignores its own event via
+    /// `origin_connection_id`; emitting it is still required for other Tauri/Web
+    /// frontends attached to the reused origin connection id.
+    #[tokio::test]
+    async fn send_prompt_linked_emits_user_prompt_to_conversation_connections() {
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/user-prompt-siblings").await;
+        let conversation = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Sibling mirror".into()),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let mgr = ConnectionManager::new();
+        let origin_id = "origin-conn";
+        let sibling_id = "sibling-conn";
+        let unrelated_id = "unrelated-conn";
+        {
+            let mut map = mgr.connections.lock().await;
+            map.insert(
+                origin_id.into(),
+                fake_connection(origin_id, Some(conversation.id)),
+            );
+            map.insert(
+                sibling_id.into(),
+                fake_connection(sibling_id, Some(conversation.id)),
+            );
+            map.insert(
+                unrelated_id.into(),
+                fake_connection(unrelated_id, Some(conversation.id + 1)),
+            );
+        }
+        let mut origin_rx = subscribe_conn_stream(&mgr, origin_id).await;
+        let mut sibling_rx = subscribe_conn_stream(&mgr, sibling_id).await;
+        let mut unrelated_rx = subscribe_conn_stream(&mgr, unrelated_id).await;
+
+        let blocks = vec![PromptInputBlock::Text {
+            text: "hello sibling".to_string(),
+        }];
+        let _ = mgr
+            .send_prompt_linked(
+                &db,
+                origin_id,
+                blocks.clone(),
+                Some(folder_id),
+                Some(conversation.id),
+                Some("client-origin".to_string()),
+            )
+            .await;
+
+        let origin_status = recv_first_acp_event(&mut origin_rx).await;
+        match origin_status.payload {
+            AcpEvent::ConversationStatusChanged { status, .. } => {
+                assert_eq!(status, ConversationStatus::InProgress);
+            }
+            other => panic!("origin should first receive status, got {other:?}"),
+        }
+
+        let origin_prompt = recv_first_acp_event(&mut origin_rx).await;
+        match origin_prompt.payload {
+            AcpEvent::UserPrompt {
+                conversation_id,
+                origin_connection_id,
+                origin_client_id,
+                blocks: emitted_blocks,
+            } => {
+                assert_eq!(conversation_id, Some(conversation.id));
+                assert_eq!(origin_connection_id, origin_id);
+                assert_eq!(origin_client_id.as_deref(), Some("client-origin"));
+                assert_eq!(emitted_blocks.len(), 1);
+            }
+            other => {
+                panic!("origin should receive user prompt for attached clients, got {other:?}")
+            }
+        }
+
+        let sibling_event = recv_first_acp_event(&mut sibling_rx).await;
+        match sibling_event.payload {
+            AcpEvent::UserPrompt {
+                conversation_id,
+                origin_connection_id,
+                origin_client_id,
+                blocks: emitted_blocks,
+            } => {
+                assert_eq!(conversation_id, Some(conversation.id));
+                assert_eq!(origin_connection_id, origin_id);
+                assert_eq!(origin_client_id.as_deref(), Some("client-origin"));
+                assert_eq!(emitted_blocks.len(), 1);
+            }
+            other => panic!("sibling should receive mirrored UserPrompt, got {other:?}"),
+        }
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), unrelated_rx.recv())
+                .await
+                .is_err(),
+            "unrelated conversation connection must not receive mirrored user prompt"
+        );
+    }
+
     /// Two concurrent `send_prompt_linked` calls on the SAME connection
     /// must serialize through the per-connection `prompt_lock` so the
     /// backend-creates branch can't fire twice and produce duplicate
@@ -1786,12 +1957,12 @@ mod tests {
         tokio::join!(
             async {
                 let _ = mgr_ref
-                    .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None)
+                    .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None, None)
                     .await;
             },
             async {
                 let _ = mgr_ref
-                    .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None)
+                    .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None, None)
                     .await;
             },
         );
@@ -1912,7 +2083,7 @@ mod tests {
         let mut rx = subscribe_conn_stream(&mgr, conn_id).await;
 
         let result = mgr
-            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None)
+            .send_prompt_linked(&db, conn_id, vec![], Some(folder_id), None, None)
             .await;
         assert!(
             matches!(result, Err(AcpError::ProcessExited)),
