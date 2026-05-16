@@ -113,6 +113,16 @@ pub enum AcpEvent {
         tool_call: serde_json::Value,
         options: Vec<PermissionOptionInfo>,
     },
+    /// User submitted prompt blocks. Broadcast so every attached client can
+    /// render the user turn immediately, not only the originating client that
+    /// created an optimistic local turn.
+    UserPrompt {
+        conversation_id: Option<i32>,
+        origin_connection_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origin_client_id: Option<String>,
+        blocks: Vec<PromptInputBlock>,
+    },
     /// Turn completed
     TurnComplete {
         session_id: String,

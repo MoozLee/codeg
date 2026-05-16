@@ -107,7 +107,6 @@ pub async fn acp_connect(
         runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
     }
 
-
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
     // can prompt the user to install it from Agent Settings.
@@ -171,6 +170,7 @@ pub struct AcpPromptParams {
     pub blocks: Vec<crate::acp::types::PromptInputBlock>,
     pub folder_id: Option<i32>,
     pub conversation_id: Option<i32>,
+    pub origin_client_id: Option<String>,
 }
 
 pub async fn acp_prompt(
@@ -185,6 +185,7 @@ pub async fn acp_prompt(
             params.blocks,
             params.folder_id,
             params.conversation_id,
+            params.origin_client_id,
         )
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;

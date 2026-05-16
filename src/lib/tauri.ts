@@ -113,9 +113,10 @@ export async function acpConnect(
 
 export async function acpPrompt(
   connectionId: string,
-  blocks: PromptInputBlock[]
+  blocks: PromptInputBlock[],
+  originClientId: string | null = null
 ): Promise<void> {
-  return invoke("acp_prompt", { connectionId, blocks })
+  return invoke("acp_prompt", { connectionId, blocks, originClientId })
 }
 
 export async function acpSetMode(

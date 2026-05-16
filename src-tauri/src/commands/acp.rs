@@ -2225,11 +2225,19 @@ pub async fn acp_prompt(
     blocks: Vec<PromptInputBlock>,
     folder_id: Option<i32>,
     conversation_id: Option<i32>,
+    origin_client_id: Option<String>,
     db: State<'_, crate::db::AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
     manager
-        .send_prompt_linked(&db, &connection_id, blocks, folder_id, conversation_id)
+        .send_prompt_linked(
+            &db,
+            &connection_id,
+            blocks,
+            folder_id,
+            conversation_id,
+            origin_client_id,
+        )
         .await
 }
 
@@ -2401,7 +2409,8 @@ pub(crate) async fn acp_get_agent_status_core(
         installed_version,
         env,
         config_json: local_config_json,
-        config_file_path: agent_local_config_path(agent_type).map(|path| path.display().to_string()),
+        config_file_path: agent_local_config_path(agent_type)
+            .map(|path| path.display().to_string()),
     })
 }
 

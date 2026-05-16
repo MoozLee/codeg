@@ -103,6 +103,7 @@ interface MessageListViewProps {
   onReload?: () => void
   onNewSession?: () => void
   onRetryEditTurn?: (turn: MessageTurn) => void
+  lastTurnStopReason?: string | null
 }
 
 interface UserAnchorItem {
@@ -322,12 +323,29 @@ function isTextOnlyUserTurn(turn: MessageTurn): boolean {
   )
 }
 
-function findRetryEditableUserAnchorId(turns: MessageTurn[]): string | null {
+function isInterruptedStopReason(
+  stopReason: string | null | undefined
+): boolean {
+  return stopReason === "cancelled"
+}
+
+function findRetryEditableUserAnchorId(
+  turns: MessageTurn[],
+  lastTurnStopReason: string | null | undefined
+): string | null {
   let userTurnCountAfterCandidate = 0
+  let skippedInterruptedAssistant = false
 
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index]
     if (turn.role === "assistant" && isAssistantTextTurn(turn)) {
+      if (
+        !skippedInterruptedAssistant &&
+        isInterruptedStopReason(lastTurnStopReason)
+      ) {
+        skippedInterruptedAssistant = true
+        continue
+      }
       return null
     }
     if (turn.role !== "user") {
@@ -969,6 +987,7 @@ export function MessageListView({
   onReload,
   onNewSession,
   onRetryEditTurn,
+  lastTurnStopReason = null,
 }: MessageListViewProps) {
   const t = useTranslations("Folder.chat.messageList")
   const sharedT = useTranslations("Folder.chat.shared")
@@ -1074,7 +1093,7 @@ export function MessageListView({
       onRetryEditTurn &&
       sessionSyncState !== "awaiting_persist" &&
       !showPromptingState
-        ? findRetryEditableUserAnchorId(rawTurns)
+        ? findRetryEditableUserAnchorId(rawTurns, lastTurnStopReason)
         : null
     const visibleTimelineTurns = timelineTurns.filter((item) => {
       const anchorId = item.turn.anchor_id ?? null
@@ -1214,6 +1233,7 @@ export function MessageListView({
   }, [
     adapterText,
     connStatus,
+    lastTurnStopReason,
     onRetryEditTurn,
     replacementRevision,
     sessionSyncState,

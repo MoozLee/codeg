@@ -143,13 +143,15 @@ export async function acpPrompt(
   connectionId: string,
   blocks: PromptInputBlock[],
   folderId: number | null = null,
-  conversationId: number | null = null
+  conversationId: number | null = null,
+  originClientId: string | null = null
 ): Promise<void> {
   return getTransport().call("acp_prompt", {
     connectionId,
     blocks,
     folderId,
     conversationId,
+    originClientId,
   })
 }
 

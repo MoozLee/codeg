@@ -9,21 +9,27 @@ import {
   useRef,
   type ReactNode,
 } from "react"
-import type {
-  LiveMessage,
-  ToolCallInfo,
+import { useTranslations } from "next-intl"
+import {
+  getClientOriginId,
+  useAcpEvent,
+  useConnectionStore,
+  type LiveMessage,
+  type ToolCallInfo,
 } from "@/contexts/acp-connections-context"
 import { getFolderConversation } from "@/lib/api"
 import type {
   AgentExecutionStats,
   DbConversationDetail,
   MessageTurn,
+  PromptInputBlock,
   SessionStats,
   ToolCallStatus,
   TurnUsage,
 } from "@/lib/types"
 import { inferLiveToolName } from "@/lib/tool-call-normalization"
 import { toErrorMessage } from "@/lib/app-error"
+import { buildUserTurnFromPromptBlocks } from "@/lib/prompt-draft"
 
 export type ConversationSyncState = "idle" | "awaiting_persist"
 
@@ -117,6 +123,7 @@ type Action =
       conversationId: number
       turn: MessageTurn
       turnToken: string
+      syncState?: ConversationSyncState
     }
   | {
       type: "SET_LIVE_MESSAGE"
@@ -174,6 +181,20 @@ type Action =
     }
   | { type: "REMOVE_CONVERSATION"; conversationId: number }
   | { type: "RESET" }
+
+function getUserTurnContentKey(turn: MessageTurn): string | null {
+  if (turn.role !== "user") return null
+  return JSON.stringify(turn.blocks)
+}
+
+function hasMatchingUserTurn(
+  turns: MessageTurn[],
+  candidate: MessageTurn
+): boolean {
+  const candidateKey = getUserTurnContentKey(candidate)
+  if (!candidateKey) return false
+  return turns.some((turn) => getUserTurnContentKey(turn) === candidateKey)
+}
 
 function createEmptySession(
   conversationId: number
@@ -804,7 +825,7 @@ function reducer(
       return updateSessionInState(state, action.conversationId, (current) => ({
         ...current,
         optimisticTurns: [...current.optimisticTurns, action.turn],
-        syncState: "awaiting_persist",
+        syncState: action.syncState ?? "awaiting_persist",
         activeTurnToken: action.turnToken,
       }))
 
@@ -1004,7 +1025,8 @@ interface ConversationRuntimeContextValue {
   appendOptimisticTurn: (
     conversationId: number,
     turn: MessageTurn,
-    turnToken: string
+    turnToken: string,
+    syncState?: ConversationSyncState
   ) => void
   setLiveMessage: (
     conversationId: number,
@@ -1040,6 +1062,8 @@ export function ConversationRuntimeProvider({
 }) {
   const [state, dispatch] = useReducer(reducer, initialState)
 
+  const tShared = useTranslations("Folder.chat.shared")
+  const connectionStore = useConnectionStore()
   const stateRef = useRef(state)
   // eslint-disable-next-line react-hooks/refs -- stateRef is only read in callbacks, not during render
   stateRef.current = state
@@ -1312,12 +1336,18 @@ export function ConversationRuntimeProvider({
   )
 
   const appendOptimisticTurn = useCallback(
-    (conversationId: number, turn: MessageTurn, turnToken: string) => {
+    (
+      conversationId: number,
+      turn: MessageTurn,
+      turnToken: string,
+      syncState?: ConversationSyncState
+    ) => {
       dispatch({
         type: "APPEND_OPTIMISTIC_TURN",
         conversationId,
         turn,
         turnToken,
+        syncState,
       })
     },
     []
@@ -1385,6 +1415,54 @@ export function ConversationRuntimeProvider({
   const reset = useCallback(() => {
     dispatch({ type: "RESET" })
   }, [])
+
+  const mirrorRemoteUserPrompt = useCallback(
+    (conversationId: number, blocks: PromptInputBlock[]) => {
+      const userTurn = buildUserTurnFromPromptBlocks(
+        blocks,
+        tShared("attachedResources")
+      )
+      const session = stateRef.current.byConversationId.get(conversationId)
+      const existingTurns = [
+        ...(session?.detail?.turns ?? []),
+        ...(session?.localTurns ?? []),
+        ...(session?.optimisticTurns ?? []),
+      ]
+      if (hasMatchingUserTurn(existingTurns, userTurn)) return
+
+      dispatch({
+        type: "APPEND_OPTIMISTIC_TURN",
+        conversationId,
+        turn: userTurn,
+        turnToken: userTurn.id,
+        syncState: "idle",
+      })
+    },
+    [tShared]
+  )
+
+  useAcpEvent(
+    useCallback(
+      (envelope, contextKey) => {
+        if (envelope.type !== "user_prompt") return
+
+        if (envelope.origin_client_id === getClientOriginId()) return
+
+        const conn = connectionStore.getConnection(contextKey)
+        const sessionId = conn?.sessionId ?? null
+        const conversationId =
+          envelope.conversation_id ??
+          (sessionId
+            ? (stateRef.current.conversationIdByExternalId.get(sessionId) ??
+              null)
+            : null)
+        if (conversationId == null) return
+
+        mirrorRemoteUserPrompt(conversationId, envelope.blocks)
+      },
+      [connectionStore, mirrorRemoteUserPrompt]
+    )
+  )
 
   const value = useMemo<ConversationRuntimeContextValue>(
     () => ({
