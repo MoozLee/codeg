@@ -35,9 +35,10 @@ use crate::acp::session_state::SessionState;
 use crate::acp::terminal_runtime::{TerminalRuntime, TerminalRuntimeError};
 use crate::acp::types::{
     AcpEvent, AvailableCommandInfo, ConnectionInfo, ConnectionStatus, PermissionOptionInfo,
-    PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock, SessionConfigKindInfo,
-    SessionConfigOptionInfo, SessionConfigSelectGroupInfo, SessionConfigSelectInfo,
-    SessionConfigSelectOptionInfo, SessionModeInfo, SessionModeStateInfo, ToolCallImageInfo,
+    PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock, SessionConfigBooleanInfo,
+    SessionConfigKindInfo, SessionConfigOptionInfo, SessionConfigSelectGroupInfo,
+    SessionConfigSelectInfo, SessionConfigSelectOptionInfo, SessionModeInfo, SessionModeStateInfo,
+    ToolCallImageInfo,
 };
 use crate::models::agent::AgentType;
 use crate::network::proxy;
@@ -625,6 +626,15 @@ fn map_session_config_option(option: &SessionConfigOption) -> Option<SessionConf
                 }),
             })
         }
+        SessionConfigKind::Boolean(boolean) => Some(SessionConfigOptionInfo {
+            id: option.id.to_string(),
+            name: option.name.clone(),
+            description: option.description.clone(),
+            category: option.category.as_ref().map(map_session_config_category),
+            kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
+                current_value: boolean.current_value,
+            }),
+        }),
         _ => None,
     }
 }
@@ -1880,20 +1890,30 @@ async fn apply_preferred_session_options(
     let session_id = session.session_id().clone();
     let mut options = initial_config_options;
     for (config_id, value) in preferred_config_values {
-        // Skip the round-trip when the agent's current value already matches.
-        // Note: Codex omits "mode" from its advertised options but accepts
-        // `set_config_option` for it (see `ensure_codex_mode_option`), so we
-        // do NOT skip on "config_id not in options" — let the agent decide.
-        let already_matches = options.iter().any(|o| {
-            o.id.to_string() == *config_id
-                && matches!(
-                    &o.kind,
-                    SessionConfigKind::Select(s) if s.current_value.to_string() == *value
-                )
-        });
-        if already_matches {
+        if config_id == "mode" {
             continue;
         }
+
+        let Some(option) = options.iter().find(|o| o.id.to_string() == *config_id) else {
+            continue;
+        };
+        let SessionConfigKind::Select(select) = &option.kind else {
+            continue;
+        };
+        let is_advertised_value = match &select.options {
+            SessionConfigSelectOptions::Ungrouped(options) => {
+                options.iter().any(|o| o.value.to_string() == *value)
+            }
+            SessionConfigSelectOptions::Grouped(groups) => groups
+                .iter()
+                .flat_map(|group| group.options.iter())
+                .any(|o| o.value.to_string() == *value),
+            _ => false,
+        };
+        if !is_advertised_value || select.current_value.to_string() == *value {
+            continue;
+        }
+
         match set_session_config_option_inner(
             cx,
             &session_id,

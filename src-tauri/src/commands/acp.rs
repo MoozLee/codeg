@@ -2256,13 +2256,18 @@ pub async fn acp_set_mode(
 pub async fn acp_set_config_option(
     connection_id: String,
     config_id: String,
-    value: serde_json::Value,
+    value_id: Option<String>,
+    value: Option<bool>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
-    let value = match value {
-        serde_json::Value::Bool(value) => SessionConfigCommandValue::Boolean(value),
-        serde_json::Value::String(value) => SessionConfigCommandValue::ValueId(value),
-        other => SessionConfigCommandValue::ValueId(other.to_string()),
+    let value = match (value_id, value) {
+        (Some(value_id), _) => SessionConfigCommandValue::ValueId(value_id),
+        (None, Some(value)) => SessionConfigCommandValue::Boolean(value),
+        (None, None) => {
+            return Err(AcpError::protocol(
+                "Missing session config option value".to_string(),
+            ));
+        }
     };
     manager
         .set_config_option(&connection_id, config_id, value)
