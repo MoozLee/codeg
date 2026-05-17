@@ -2811,7 +2811,6 @@ async fn run_conversation_loop<'a>(
                 // to avoid deadlocking when the agent awaits a permission response.
                 loop {
                     tokio::select! {
-                        biased;
                         update = session.read_update() => {
                             let update = match update {
                                 Ok(u) => u,
