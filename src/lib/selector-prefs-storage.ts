@@ -28,11 +28,53 @@ interface SelectorPrefs {
 
 type AllPrefs = Record<string, SelectorPrefs>
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : undefined
+}
+
+function normalizeConfigValues(
+  value: unknown
+): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined
+  const entries = Object.entries(value).flatMap(([configId, configValue]) => {
+    const normalizedConfigId = nonEmptyString(configId)
+    const normalizedConfigValue = nonEmptyString(configValue)
+    return normalizedConfigId && normalizedConfigValue
+      ? [[normalizedConfigId, normalizedConfigValue]]
+      : []
+  })
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
+function normalizePrefs(value: unknown): SelectorPrefs | undefined {
+  if (!isRecord(value)) return undefined
+  const modeId = nonEmptyString(value.modeId)
+  const configValues = normalizeConfigValues(value.configValues)
+  if (!modeId && !configValues) return undefined
+  return { modeId, configValues }
+}
+
 function readAll(): AllPrefs {
   if (typeof window === "undefined") return {}
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as AllPrefs) : {}
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([agentType, prefs]) => {
+        const normalized = normalizePrefs(prefs)
+        return nonEmptyString(agentType) && normalized
+          ? [[agentType, normalized]]
+          : []
+      })
+    )
   } catch {
     return {}
   }
@@ -67,7 +109,6 @@ function updatePrefs(
 
 // ── Read ──
 
-/** Read saved mode id for an agent (no validation, just the raw value). */
 export function getSavedModeId(agentType: string): string | null {
   const all = readAll()
   return all[agentType]?.modeId ?? null
