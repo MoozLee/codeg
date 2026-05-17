@@ -537,6 +537,85 @@ jobs:
           includeUpdaterJson: true
           retryAttempts: 2
 
+      # Verify the freshly-signed updater archives against the public key
+      # committed in `src-tauri/tauri.conf.json`. This guards against the
+      # 0.13.4-x failure mode where the GitHub `TAURI_SIGNING_PRIVATE_KEY`
+      # secret was rotated to a key whose KeyId no longer matched the
+      # `plugins.updater.pubkey` shipped to clients — in that mode every
+      # signed asset uploads cleanly but no installed client can verify the
+      # signature, so in-app updates silently fail (Error::SignatureFailed).
+      #
+      # Scoped to macOS because that is the only platform in the active
+      # matrix that publishes updater-signed bundles (Linux entry runs with
+      # `includeUpdaterJson: false`). The sanity check runs *after*
+      # tauri-action has uploaded to the draft release, but failing this
+      # step fails the matrix job, which blocks `publish-release` from
+      # flipping the draft flag (gated on `build-tauri.result == 'success'`).
+      - name: Verify updater signatures match committed pubkey
+        if: matrix.target != 'aarch64-unknown-linux-gnu' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          brew install minisign
+
+          # `plugins.updater.pubkey` in tauri.conf.json is itself a base64
+          # encoding of the two-line minisign public key file (untrusted
+          # comment + base64 key body). One decode round-trips us back to
+          # the file format minisign -p expects.
+          PUBKEY_B64=$(python3 -c '
+          import json, sys
+          with open("src-tauri/tauri.conf.json", "r", encoding="utf-8") as fh:
+              cfg = json.load(fh)
+          pubkey = cfg["plugins"]["updater"]["pubkey"]
+          if not pubkey:
+              sys.exit("plugins.updater.pubkey is empty")
+          sys.stdout.write(pubkey)
+          ')
+          printf '%s' "$PUBKEY_B64" | base64 --decode > pubkey.pub
+
+          BUNDLE_ROOT="src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [[ ! -d "$BUNDLE_ROOT" ]]; then
+            echo "Expected bundle directory not found: $BUNDLE_ROOT" >&2
+            exit 1
+          fi
+
+          # Collect every signed updater archive tauri-action produced for
+          # this target. macOS bundles `.app.tar.gz`; the `.sig` sibling is
+          # what `tauri-plugin-updater` verifies on the client.
+          # NUL-delimited read keeps us safe against spaces in bundle names
+          # and stays portable across bash 3.2 (system /bin/bash) and the
+          # newer homebrew bash that GitHub runners typically resolve to.
+          declare -a SIG_FILES=()
+          while IFS= read -r -d '' f; do
+            SIG_FILES+=("$f")
+          done < <(find "$BUNDLE_ROOT" -type f -name "*.sig" -print0)
+          if [[ ${#SIG_FILES[@]} -eq 0 ]]; then
+            echo "No updater signature files found under $BUNDLE_ROOT" >&2
+            exit 1
+          fi
+
+          FAILED=0
+          for sig in "${SIG_FILES[@]}"; do
+            archive="${sig%.sig}"
+            if [[ ! -f "$archive" ]]; then
+              echo "Signature has no matching archive: $sig" >&2
+              FAILED=1
+              continue
+            fi
+            echo "Verifying $archive against committed pubkey"
+            if ! minisign -Vm "$archive" -p pubkey.pub -x "$sig"; then
+              echo "::error file=src-tauri/tauri.conf.json::Updater signature verification failed for $archive. The signing key in CI no longer matches plugins.updater.pubkey shipped to clients."
+              FAILED=1
+            fi
+          done
+
+          rm -f pubkey.pub
+
+          if [[ $FAILED -ne 0 ]]; then
+            exit 1
+          fi
+
   build-server:
     needs: create-draft-release
     name: Server ${{ matrix.name }}

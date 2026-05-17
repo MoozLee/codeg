@@ -162,6 +162,32 @@ mod tauri_app {
             )
             .plugin(tauri_plugin_opener::init())
             .plugin(tauri_plugin_dialog::init())
+            // Install a global `log` subscriber so the updater plugin's
+            // diagnostics (e.g. `tauri_plugin_updater` `Error::SignatureFailed`
+            // from a pubkey/private-key KeyId mismatch) actually surface.
+            // Before this, `log::*` calls inside `tauri-plugin-updater` had no
+            // logger and were silently dropped, which is how the 0.13.4-x
+            // signing-key drift went undetected by anyone other than minisign.
+            //
+            // `Stdout` makes the records visible when the user launches
+            // `/Applications/codeg.app/Contents/MacOS/codeg` from a terminal;
+            // `Webview` mirrors them into the devtools console for in-window
+            // debugging via the `attachConsole` API.
+            .plugin(
+                tauri_plugin_log::Builder::new()
+                    .level(tauri_plugin_log::log::LevelFilter::Info)
+                    .level_for(
+                        "tauri_plugin_updater",
+                        tauri_plugin_log::log::LevelFilter::Debug,
+                    )
+                    .target(tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::Stdout,
+                    ))
+                    .target(tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::Webview,
+                    ))
+                    .build(),
+            )
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init())
             .plugin(tauri_plugin_notification::init())

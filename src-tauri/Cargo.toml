@@ -25,6 +25,7 @@ tauri-runtime = [
     "dep:tauri-build",
     "dep:tauri-plugin-window-state",
     "dep:tauri-plugin-updater",
+    "dep:tauri-plugin-log",
     "dep:tauri-plugin-process",
     "dep:tauri-plugin-notification",
     "dep:tauri-plugin-single-instance",
@@ -94,6 +95,7 @@ fontdb = { version = "0.23", optional = true }
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-window-state = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
+tauri-plugin-log = { version = "2", optional = true }
 tauri-plugin-process = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }
