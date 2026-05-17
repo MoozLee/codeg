@@ -2811,6 +2811,7 @@ async fn run_conversation_loop<'a>(
                 // to avoid deadlocking when the agent awaits a permission response.
                 loop {
                     tokio::select! {
+                        biased;
                         update = session.read_update() => {
                             let update = match update {
                                 Ok(u) => u,
@@ -4045,6 +4046,22 @@ mod tests {
             .expect("should emit");
         assert_eq!(payload, "line-2\n");
         assert!(append, "prefix extension must emit with append=true");
+    }
+
+    #[test]
+    fn agent_message_chunk_counts_as_turn_output() {
+        let update = SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+            TextContent::new("hello"),
+        )));
+
+        assert!(is_agent_output_update(&update));
+    }
+
+    #[test]
+    fn metadata_update_does_not_count_as_turn_output() {
+        let update = SessionUpdate::SessionInfoUpdate(Default::default());
+
+        assert!(!is_agent_output_update(&update));
     }
 
     #[test]
