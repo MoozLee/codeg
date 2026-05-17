@@ -596,6 +596,7 @@ jobs:
           fi
 
           FAILED=0
+          VERIFIED=0
           for sig in "${SIG_FILES[@]}"; do
             archive="${sig%.sig}"
             if [[ ! -f "$archive" ]]; then
@@ -603,11 +604,27 @@ jobs:
               FAILED=1
               continue
             fi
+            # tauri-bundler emits `.sig` as base64-wrapped minisign text:
+            # the file body is a single base64 blob that decodes to the
+            # canonical 4-line minisign signature (untrusted comment +
+            # signature + trusted comment + global signature). Feeding the
+            # wrapped form straight into `minisign -V` fails with
+            # "Untrusted signature comment too long" because minisign reads
+            # the entire base64 string as the comment line. Decode once
+            # before verification so future readers do not re-trip this.
+            if ! base64 --decode < "$sig" > "${sig}.minisig"; then
+              echo "::error file=$sig::Failed to base64-decode tauri-bundler signature file $sig before minisign verification."
+              FAILED=1
+              continue
+            fi
             echo "Verifying $archive against committed pubkey"
-            if ! minisign -Vm "$archive" -p pubkey.pub -x "$sig"; then
+            if ! minisign -Vm "$archive" -p pubkey.pub -x "${sig}.minisig"; then
               echo "::error file=src-tauri/tauri.conf.json::Updater signature verification failed for $archive. The signing key in CI no longer matches plugins.updater.pubkey shipped to clients."
               FAILED=1
+            else
+              VERIFIED=$((VERIFIED + 1))
             fi
+            rm -f "${sig}.minisig"
           done
 
           rm -f pubkey.pub
@@ -615,6 +632,8 @@ jobs:
           if [[ $FAILED -ne 0 ]]; then
             exit 1
           fi
+
+          echo "All ${VERIFIED} updater signatures verified against committed pubkey (KeyId from tauri.conf.json)"
 
   build-server:
     needs: create-draft-release
