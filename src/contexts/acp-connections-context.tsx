@@ -686,9 +686,9 @@ function hasNativeClaudeAutoCompactionConfig(
 
 function contextManagementFromAgentStatus(
   agent: AcpAgentStatus | null,
-  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT
+  previous?: ContextManagementState
 ): ContextManagementState {
-  if (!agent) return previous
+  if (!agent) return previous ?? DEFAULT_CONTEXT_MANAGEMENT
 
   const config = parseJsonObject(agent.config_json)
   const configEnv = asRecord(config?.env)
@@ -741,12 +741,14 @@ function contextManagementFromAgentStatus(
     hasNativeClaudeAutoCompactionConfig(agent.env, configEnv, config)
 
   return {
-    ...previous,
-    configuredModel: agentConfiguredModel ?? previous.configuredModel,
-    configuredModelSource:
-      configuredModelSource ?? previous.configuredModelSource,
-    configuredContextWindowMaxTokens:
-      claudeAutoCompactWindow ?? previous.configuredContextWindowMaxTokens,
+    ...(previous ?? DEFAULT_CONTEXT_MANAGEMENT),
+    configuredModel: agentConfiguredModel,
+    configuredModelSource: configuredModelSource,
+    runtimeModel:
+      previous?.runtimeConfig?.agentType === agent.agent_type
+        ? (previous.runtimeModel ?? null)
+        : null,
+    configuredContextWindowMaxTokens: claudeAutoCompactWindow,
     contextWindowMaxSource:
       envConfiguredContextWindowMax != null
         ? "agent_env"
@@ -754,23 +756,33 @@ function contextManagementFromAgentStatus(
           ? "agent_config_env"
           : rootConfiguredContextWindowMax != null
             ? "agent_root_config"
-            : previous.contextWindowMaxSource,
+            : null,
+    runtimeContextWindowMaxTokens:
+      previous?.runtimeConfig?.agentType === agent.agent_type
+        ? (previous.runtimeContextWindowMaxTokens ?? null)
+        : null,
+    runtimeContextWindowClamped:
+      previous?.runtimeConfig?.agentType === agent.agent_type
+        ? previous.runtimeContextWindowClamped
+        : false,
     autoCompactionEnabled:
       claudeAutoCompactPercent != null || claudeAutoCompactWindow != null
         ? true
-        : previous.autoCompactionEnabled,
-    autoCompactionThreshold:
-      claudeAutoCompactPercent ?? previous.autoCompactionThreshold,
+        : null,
+    autoCompactionThreshold: claudeAutoCompactPercent,
     compactionSupport: hasNativeAutoCompactionConfig
       ? "native_managed"
-      : previous.compactionSupport,
+      : "unknown",
     runtimeConfig: {
       agentType: agent.agent_type,
       configFilePath: agent.config_file_path ?? null,
       safeEnvFields: safeContextConfigFields(agent.env),
       safeRootConfigFields: safeContextConfigFields(config),
       safeConfigEnvFields: safeContextConfigFields(configEnv),
-      selectorModel: previous.runtimeConfig?.selectorModel ?? null,
+      selectorModel:
+        previous?.runtimeConfig?.agentType === agent.agent_type
+          ? (previous.runtimeConfig.selectorModel ?? null)
+          : null,
     },
   }
 }
@@ -830,7 +842,9 @@ function contextManagementFromSelectors(
     ? String(configOptionCurrentValue(modelOption))
     : null
   const shouldUseSelectorModel =
-    selectorModel != null && previous.configuredModelSource == null
+    selectorModel != null &&
+    (previous.configuredModelSource == null ||
+      previous.runtimeConfig?.agentType !== "claude_code")
   const autoCompactOption = options?.find((option) => {
     const id = option.id.toLowerCase()
     const name = option.name.toLowerCase()
@@ -1257,7 +1271,14 @@ function connectionsReducer(
         configOptions: null,
         availableCommands: null,
         usage: null,
-        contextManagement: action.contextManagement,
+        contextManagement: {
+          ...action.contextManagement,
+          compactionSupport:
+            action.contextManagement.compactionSupport === "unknown" &&
+            action.agentType !== "claude_code"
+              ? "unsupported"
+              : action.contextManagement.compactionSupport,
+        },
         liveMessage: null,
         pendingPermission: null,
         pendingQuestion: null,
