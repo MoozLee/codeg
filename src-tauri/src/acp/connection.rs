@@ -654,40 +654,94 @@ fn map_session_config_options(
 /// loading).  When that happens, synthesize the option so the user can still
 /// pick a preset.  codex-acp's `set_config_option` handler always accepts
 /// `config_id = "mode"` regardless of whether it was advertised.
+const CODEX_MODE_CONFIG_ID: &str = "mode";
+const CODEX_MODE_READ_ONLY: &str = "read-only";
+const CODEX_MODE_AUTO: &str = "auto";
+const CODEX_MODE_FULL_ACCESS: &str = "full-access";
+
+fn codex_mode_select_options() -> Vec<SessionConfigSelectOptionInfo> {
+    vec![
+        SessionConfigSelectOptionInfo {
+            value: CODEX_MODE_READ_ONLY.to_string(),
+            name: "Read Only".to_string(),
+            description: Some("Codex can only read files".to_string()),
+        },
+        SessionConfigSelectOptionInfo {
+            value: CODEX_MODE_AUTO.to_string(),
+            name: "Default".to_string(),
+            description: Some("Codex can edit files, but asks before running commands".to_string()),
+        },
+        SessionConfigSelectOptionInfo {
+            value: CODEX_MODE_FULL_ACCESS.to_string(),
+            name: "Full Access".to_string(),
+            description: Some("Codex runs without asking for approval".to_string()),
+        },
+    ]
+}
+
+/// Return the config options that are safe to use as the replay allowlist.
+///
+/// Most agents must advertise a select option before we replay a saved value.
+/// Codex is the narrow exception: it may omit the `mode` select, while its ACP
+/// server still accepts the three built-in approval preset values through
+/// `session/set_config_option`.  We synthesize the same option used by the UI so
+/// startup replay can restore official-release Codex behavior without sending
+/// arbitrary stale config IDs or invalid values.
+fn replayable_config_options(
+    agent_type: AgentType,
+    config_options: &[SessionConfigOption],
+) -> Vec<SessionConfigOptionInfo> {
+    let mut mapped = map_session_config_options(config_options);
+    if agent_type == AgentType::Codex {
+        ensure_codex_mode_option(&mut mapped);
+    }
+    mapped
+}
+
+fn select_info_has_value(select: &SessionConfigSelectInfo, value: &str) -> bool {
+    select.options.iter().any(|option| option.value == value)
+        || select
+            .groups
+            .iter()
+            .flat_map(|group| group.options.iter())
+            .any(|option| option.value == value)
+}
+
+fn replayable_select_value<'a>(
+    replayable_options: &'a [SessionConfigOptionInfo],
+    config_id: &str,
+    value: &str,
+) -> Option<&'a SessionConfigSelectInfo> {
+    if config_id.trim().is_empty() || value.trim().is_empty() {
+        return None;
+    }
+
+    let option = replayable_options
+        .iter()
+        .find(|option| option.id == config_id)?;
+    let SessionConfigKindInfo::Select(select) = &option.kind else {
+        return None;
+    };
+
+    select_info_has_value(select, value).then_some(select)
+}
+
 fn ensure_codex_mode_option(options: &mut Vec<SessionConfigOptionInfo>) {
-    if options.iter().any(|o| o.id == "mode") {
+    if options.iter().any(|o| o.id == CODEX_MODE_CONFIG_ID) {
         return;
     }
     options.insert(
         0,
         SessionConfigOptionInfo {
-            id: "mode".to_string(),
+            id: CODEX_MODE_CONFIG_ID.to_string(),
             name: "Approval Preset".to_string(),
             description: Some(
                 "Choose an approval and sandboxing preset for your session".to_string(),
             ),
             category: Some("mode".to_string()),
             kind: SessionConfigKindInfo::Select(SessionConfigSelectInfo {
-                current_value: "auto".to_string(),
-                options: vec![
-                    SessionConfigSelectOptionInfo {
-                        value: "read-only".to_string(),
-                        name: "Read Only".to_string(),
-                        description: Some("Codex can only read files".to_string()),
-                    },
-                    SessionConfigSelectOptionInfo {
-                        value: "auto".to_string(),
-                        name: "Default".to_string(),
-                        description: Some(
-                            "Codex can edit files, but asks before running commands".to_string(),
-                        ),
-                    },
-                    SessionConfigSelectOptionInfo {
-                        value: "full-access".to_string(),
-                        name: "Full Access".to_string(),
-                        description: Some("Codex runs without asking for approval".to_string()),
-                    },
-                ],
+                current_value: CODEX_MODE_AUTO.to_string(),
+                options: codex_mode_select_options(),
                 groups: vec![],
             }),
         },
@@ -1413,6 +1467,7 @@ async fn run_connection(
                             &mut session,
                             &state,
                             &emitter_clone,
+                            agent_type,
                             preferred_mode_id.as_deref(),
                             &preferred_config_values,
                             initial_config_options.unwrap_or_default(),
@@ -1551,6 +1606,7 @@ async fn run_connection(
                             &mut session,
                             &state,
                             &emitter_clone,
+                            agent_type,
                             preferred_mode_id.as_deref(),
                             &preferred_config_values,
                             initial_config_options.unwrap_or_default(),
@@ -1628,6 +1684,7 @@ async fn run_connection(
                     &mut session,
                     &state,
                     &emitter_clone,
+                    agent_type,
                     preferred_mode_id.as_deref(),
                     &preferred_config_values,
                     initial_config_options.unwrap_or_default(),
@@ -1866,6 +1923,7 @@ async fn apply_preferred_session_options(
     session: &mut sacp::ActiveSession<'_, Agent>,
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
+    agent_type: AgentType,
     preferred_mode_id: Option<&str>,
     preferred_config_values: &BTreeMap<String, String>,
     initial_config_options: Vec<SessionConfigOption>,
@@ -1889,28 +1947,12 @@ async fn apply_preferred_session_options(
 
     let session_id = session.session_id().clone();
     let mut options = initial_config_options;
+    let mut replayable_options = replayable_config_options(agent_type, &options);
     for (config_id, value) in preferred_config_values {
-        if config_id == "mode" {
-            continue;
-        }
-
-        let Some(option) = options.iter().find(|o| o.id.to_string() == *config_id) else {
+        let Some(select) = replayable_select_value(&replayable_options, config_id, value) else {
             continue;
         };
-        let SessionConfigKind::Select(select) = &option.kind else {
-            continue;
-        };
-        let is_advertised_value = match &select.options {
-            SessionConfigSelectOptions::Ungrouped(options) => {
-                options.iter().any(|o| o.value.to_string() == *value)
-            }
-            SessionConfigSelectOptions::Grouped(groups) => groups
-                .iter()
-                .flat_map(|group| group.options.iter())
-                .any(|o| o.value.to_string() == *value),
-            _ => false,
-        };
-        if !is_advertised_value || select.current_value.to_string() == *value {
+        if select.current_value == *value {
             continue;
         }
 
@@ -1922,7 +1964,10 @@ async fn apply_preferred_session_options(
         )
         .await
         {
-            Ok(updated) => options = updated,
+            Ok(updated) => {
+                options = updated;
+                replayable_options = replayable_config_options(agent_type, &options);
+            }
             Err(e) => eprintln!(
                 "[ACP] failed to apply preferred config '{config_id}'='{value}' \
                  on connect: {e}"
@@ -3842,6 +3887,45 @@ mod tests {
             .and_then(|m| m.get("claudeCode"))
             .and_then(|v| v.get("options"))
             .is_none());
+    }
+
+    #[test]
+    fn replayable_config_options_synthesizes_codex_mode_allowlist() {
+        let options = replayable_config_options(AgentType::Codex, &[]);
+        let mode = options
+            .iter()
+            .find(|option| option.id == CODEX_MODE_CONFIG_ID)
+            .expect("Codex mode should be synthesized for replay");
+        let SessionConfigKindInfo::Select(select) = &mode.kind else {
+            panic!("Codex mode should be a select option");
+        };
+
+        assert!(select_info_has_value(select, CODEX_MODE_READ_ONLY));
+        assert!(select_info_has_value(select, CODEX_MODE_AUTO));
+        assert!(select_info_has_value(select, CODEX_MODE_FULL_ACCESS));
+    }
+
+    #[test]
+    fn replayable_select_value_filters_stale_codex_mode_values() {
+        let options = replayable_config_options(AgentType::Codex, &[]);
+
+        assert!(
+            replayable_select_value(&options, CODEX_MODE_CONFIG_ID, CODEX_MODE_FULL_ACCESS)
+                .is_some()
+        );
+        assert!(replayable_select_value(&options, CODEX_MODE_CONFIG_ID, "").is_none());
+        assert!(replayable_select_value(&options, CODEX_MODE_CONFIG_ID, "unknown").is_none());
+        assert!(replayable_select_value(&options, "effort", "high").is_none());
+    }
+
+    #[test]
+    fn replayable_config_options_does_not_synthesize_mode_for_other_agents() {
+        let options = replayable_config_options(AgentType::ClaudeCode, &[]);
+
+        assert!(
+            replayable_select_value(&options, CODEX_MODE_CONFIG_ID, CODEX_MODE_FULL_ACCESS)
+                .is_none()
+        );
     }
 
     #[test]
