@@ -162,6 +162,8 @@ export interface RuntimeConfigField {
 export interface RuntimeConfigSnapshot {
   agentType: AgentType
   configFilePath: string | null
+  connectionId: string | null
+  sessionId: string | null
   safeEnvFields: RuntimeConfigField[]
   safeRootConfigFields: RuntimeConfigField[]
   safeConfigEnvFields: RuntimeConfigField[]
@@ -686,9 +688,19 @@ function hasNativeClaudeAutoCompactionConfig(
 
 function contextManagementFromAgentStatus(
   agent: AcpAgentStatus | null,
-  previous?: ContextManagementState
+  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT,
+  connectionId: string | null = null,
+  sessionId: string | null = null
 ): ContextManagementState {
-  if (!agent) return previous ?? DEFAULT_CONTEXT_MANAGEMENT
+  if (!agent) return previous
+
+  const sameRuntimeIdentity =
+    previous.runtimeConfig?.agentType === agent.agent_type &&
+    previous.runtimeConfig.configFilePath ===
+      (agent.config_file_path ?? null) &&
+    previous.runtimeConfig.connectionId === connectionId &&
+    previous.runtimeConfig.sessionId === sessionId
+  const base = sameRuntimeIdentity ? previous : DEFAULT_CONTEXT_MANAGEMENT
 
   const config = parseJsonObject(agent.config_json)
   const configEnv = asRecord(config?.env)
@@ -741,13 +753,9 @@ function contextManagementFromAgentStatus(
     hasNativeClaudeAutoCompactionConfig(agent.env, configEnv, config)
 
   return {
-    ...(previous ?? DEFAULT_CONTEXT_MANAGEMENT),
+    ...base,
     configuredModel: agentConfiguredModel,
-    configuredModelSource: configuredModelSource,
-    runtimeModel:
-      previous?.runtimeConfig?.agentType === agent.agent_type
-        ? (previous.runtimeModel ?? null)
-        : null,
+    configuredModelSource,
     configuredContextWindowMaxTokens: claudeAutoCompactWindow,
     contextWindowMaxSource:
       envConfiguredContextWindowMax != null
@@ -757,32 +765,26 @@ function contextManagementFromAgentStatus(
           : rootConfiguredContextWindowMax != null
             ? "agent_root_config"
             : null,
-    runtimeContextWindowMaxTokens:
-      previous?.runtimeConfig?.agentType === agent.agent_type
-        ? (previous.runtimeContextWindowMaxTokens ?? null)
-        : null,
-    runtimeContextWindowClamped:
-      previous?.runtimeConfig?.agentType === agent.agent_type
-        ? previous.runtimeContextWindowClamped
-        : false,
     autoCompactionEnabled:
       claudeAutoCompactPercent != null || claudeAutoCompactWindow != null
         ? true
-        : null,
-    autoCompactionThreshold: claudeAutoCompactPercent,
+        : base.autoCompactionEnabled,
+    autoCompactionThreshold:
+      claudeAutoCompactPercent ?? base.autoCompactionThreshold,
     compactionSupport: hasNativeAutoCompactionConfig
       ? "native_managed"
-      : "unknown",
+      : base.compactionSupport,
     runtimeConfig: {
       agentType: agent.agent_type,
       configFilePath: agent.config_file_path ?? null,
+      connectionId,
+      sessionId,
       safeEnvFields: safeContextConfigFields(agent.env),
       safeRootConfigFields: safeContextConfigFields(config),
       safeConfigEnvFields: safeContextConfigFields(configEnv),
-      selectorModel:
-        previous?.runtimeConfig?.agentType === agent.agent_type
-          ? (previous.runtimeConfig.selectorModel ?? null)
-          : null,
+      selectorModel: sameRuntimeIdentity
+        ? (previous.runtimeConfig?.selectorModel ?? null)
+        : null,
     },
   }
 }
@@ -835,16 +837,15 @@ function findCompactionCommand(
 function contextManagementFromSelectors(
   options: SessionConfigOptionInfo[] | null,
   commands: AvailableCommandInfo[] | null,
-  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT
+  previous: ContextManagementState = DEFAULT_CONTEXT_MANAGEMENT,
+  optionsBelongToPrevious = true
 ): ContextManagementState {
   const modelOption = options?.find((option) => option.category === "model")
   const selectorModel = modelOption
     ? String(configOptionCurrentValue(modelOption))
     : null
   const shouldUseSelectorModel =
-    selectorModel != null &&
-    (previous.configuredModelSource == null ||
-      previous.runtimeConfig?.agentType !== "claude_code")
+    selectorModel != null && previous.configuredModelSource == null
   const autoCompactOption = options?.find((option) => {
     const id = option.id.toLowerCase()
     const name = option.name.toLowerCase()
@@ -881,7 +882,7 @@ function contextManagementFromSelectors(
   const runtimeConfig = previous.runtimeConfig
     ? {
         ...previous.runtimeConfig,
-        selectorModel,
+        selectorModel: optionsBelongToPrevious ? selectorModel : null,
       }
     : previous.runtimeConfig
 
@@ -1271,14 +1272,7 @@ function connectionsReducer(
         configOptions: null,
         availableCommands: null,
         usage: null,
-        contextManagement: {
-          ...action.contextManagement,
-          compactionSupport:
-            action.contextManagement.compactionSupport === "unknown" &&
-            action.agentType !== "claude_code"
-              ? "unsupported"
-              : action.contextManagement.compactionSupport,
-        },
+        contextManagement: action.contextManagement,
         liveMessage: null,
         pendingPermission: null,
         pendingQuestion: null,
@@ -1350,7 +1344,8 @@ function connectionsReducer(
           contextManagement: contextManagementFromSelectors(
             mergedConfigOptions,
             mergedAvailableCommands,
-            current.contextManagement
+            current.contextManagement,
+            action.patch.connectionId === current.connectionId
           ),
           promptCapabilities: mergedPromptCapabilities,
           selectorsReady: mergedSelectorsReady,
@@ -1371,7 +1366,8 @@ function connectionsReducer(
         contextManagement: contextManagementFromSelectors(
           action.patch.configOptions,
           action.patch.availableCommands,
-          current.contextManagement
+          current.contextManagement,
+          action.patch.connectionId === current.connectionId
         ),
         liveMessage: action.patch.liveMessage,
         pendingPermission: action.patch.pendingPermission,
@@ -3599,7 +3595,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           connectionId,
           agentType,
           workingDir: nextWorkingDir,
-          contextManagement: contextManagementFromAgentStatus(configuredAgent),
+          contextManagement: contextManagementFromAgentStatus(
+            configuredAgent,
+            DEFAULT_CONTEXT_MANAGEMENT,
+            connectionId,
+            sessionId ?? null
+          ),
         })
 
         // Subscribe-with-Snapshot path. When the active transport supports
