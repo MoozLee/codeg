@@ -2401,11 +2401,8 @@ pub(crate) async fn acp_get_agent_status_core(
     };
 
     let local_config_json = load_agent_local_config_json(agent_type);
-    let env = setting
-        .as_ref()
-        .and_then(|m| m.env_json.as_deref())
-        .and_then(|s| serde_json::from_str::<BTreeMap<String, String>>(s).ok())
-        .unwrap_or_default();
+    let env =
+        build_runtime_env_from_setting(agent_type, setting.as_ref(), local_config_json.as_deref());
 
     Ok(crate::acp::types::AcpAgentStatus {
         agent_type,
@@ -2479,34 +2476,8 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             }
         };
 
-        let mut env = setting
-            .and_then(|m| m.env_json.as_deref())
-            .and_then(|s| serde_json::from_str::<BTreeMap<String, String>>(s).ok())
-            .unwrap_or_default();
         let local_config_json = load_agent_local_config_json(agent_type);
-        if let Some(raw_local_config) = local_config_json.as_deref() {
-            if let Ok(local_cfg) = serde_json::from_str::<AgentRuntimeConfig>(raw_local_config) {
-                for (key, value) in local_cfg.env {
-                    let trimmed = value.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    env.insert(key, trimmed.to_string());
-                }
-                let (api_base_url_key, api_key_key, model_key) = agent_env_keys(agent_type);
-                if let Some(value) = trim_non_empty(local_cfg.api_base_url) {
-                    env.insert(api_base_url_key.to_string(), value);
-                }
-                if let Some(value) = trim_non_empty(local_cfg.api_key) {
-                    env.insert(api_key_key.to_string(), value);
-                }
-                if agent_type != AgentType::ClaudeCode {
-                    if let Some(value) = trim_non_empty(local_cfg.model) {
-                        env.insert(model_key.to_string(), value);
-                    }
-                }
-            }
-        }
+        let env = build_runtime_env_from_setting(agent_type, setting, local_config_json.as_deref());
         let sort_order = setting.map(|m| m.sort_order).unwrap_or(idx as i32);
         // Persist detected version to DB for binary agents (npx written during install/upgrade)
         if dist_type == "binary" {
@@ -3703,6 +3674,98 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("codeg-acp-{name}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("create test directory");
         dir
+    }
+
+    fn test_agent_setting(
+        env: BTreeMap<String, String>,
+    ) -> crate::db::entities::agent_setting::Model {
+        crate::db::entities::agent_setting::Model {
+            id: 1,
+            agent_type: serde_json::to_string(&AgentType::ClaudeCode)
+                .expect("serialize agent type"),
+            registry_id: registry::registry_id_for(AgentType::ClaudeCode).to_string(),
+            enabled: true,
+            sort_order: 0,
+            installed_version: None,
+            env_json: serialize_env_map(&env).expect("serialize env map"),
+            model_provider_id: None,
+            created_at: chrono::Utc::now().into(),
+            updated_at: chrono::Utc::now().into(),
+        }
+    }
+
+    #[test]
+    fn runtime_env_prefers_current_local_config_env_over_db_env() {
+        let setting = test_agent_setting(BTreeMap::from([(
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+            "1M".to_string(),
+        )]));
+        let local_config_json = r#"{
+            "env": {
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000",
+                "OTHER_ENV": " local "
+            }
+        }"#;
+
+        let env = build_runtime_env_from_setting(
+            AgentType::ClaudeCode,
+            Some(&setting),
+            Some(local_config_json),
+        );
+
+        assert_eq!(
+            env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .map(String::as_str),
+            Some("300000")
+        );
+        assert_eq!(env.get("OTHER_ENV").map(String::as_str), Some("local"));
+    }
+
+    #[test]
+    fn runtime_env_ignores_blank_local_config_env_values() {
+        let setting = test_agent_setting(BTreeMap::from([(
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+            "1M".to_string(),
+        )]));
+        let local_config_json = r#"{
+            "env": {
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "   "
+            }
+        }"#;
+
+        let env = build_runtime_env_from_setting(
+            AgentType::ClaudeCode,
+            Some(&setting),
+            Some(local_config_json),
+        );
+
+        assert_eq!(
+            env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .map(String::as_str),
+            Some("1M")
+        );
+    }
+
+    #[test]
+    fn runtime_env_uses_claude_api_keys_but_not_model_from_local_config() {
+        let local_config_json = r#"{
+            "apiBaseUrl": " https://example.test ",
+            "apiKey": " token ",
+            "model": "claude-sonnet"
+        }"#;
+
+        let env =
+            build_runtime_env_from_setting(AgentType::ClaudeCode, None, Some(local_config_json));
+
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://example.test")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("token")
+        );
+        assert!(!env.contains_key("ANTHROPIC_MODEL"));
     }
 
     #[test]
