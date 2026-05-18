@@ -24,6 +24,19 @@ interface SessionConfigSelectorProps {
   onSelect: (configId: string, value: string | boolean) => void
 }
 
+// Some upstream agents (e.g. Codex / Claude Code via sacp) emit option
+// values that are the literal string "null" / "undefined" or pure
+// whitespace — picking one of those would round-trip to the agent and
+// be rejected with `Invalid value for config option ...`. Filter them
+// out of the dropdown entirely and treat them as "no selection" when
+// they happen to also be the advertised `current_value`.
+function isInvalidConfigValueString(s: string): boolean {
+  const trimmed = s.trim()
+  if (trimmed.length === 0) return true
+  const lower = trimmed.toLowerCase()
+  return lower === "null" || lower === "undefined"
+}
+
 export function SessionConfigSelector({
   option,
   onSelect,
@@ -58,14 +71,29 @@ export function SessionConfigSelector({
     )
   }
 
-  const allOptions =
-    option.kind.groups.length > 0
-      ? option.kind.groups.flatMap((group) => group.options)
-      : option.kind.options
-  const selected = allOptions.find(
-    (item) => item.value === option.kind.current_value
+  const filteredGroups = option.kind.groups
+    .map((group) => ({
+      ...group,
+      options: group.options.filter(
+        (item) => !isInvalidConfigValueString(item.value)
+      ),
+    }))
+    .filter((group) => group.options.length > 0)
+  const filteredOptions = option.kind.options.filter(
+    (item) => !isInvalidConfigValueString(item.value)
   )
-  const currentLabel = selected?.name ?? option.kind.current_value
+  const allOptions =
+    filteredGroups.length > 0
+      ? filteredGroups.flatMap((group) => group.options)
+      : filteredOptions
+  const currentValueIsInvalid = isInvalidConfigValueString(
+    option.kind.current_value
+  )
+  const selected = currentValueIsInvalid
+    ? undefined
+    : allOptions.find((item) => item.value === option.kind.current_value)
+  const currentLabel =
+    selected?.name ?? (currentValueIsInvalid ? "" : option.kind.current_value)
 
   return (
     <DropdownMenuSub>
@@ -85,11 +113,11 @@ export function SessionConfigSelector({
         }}
       >
         <DropdownMenuRadioGroup
-          value={option.kind.current_value}
+          value={currentValueIsInvalid ? "" : option.kind.current_value}
           onValueChange={(value) => onSelect(option.id, value)}
         >
-          {option.kind.groups.length > 0
-            ? option.kind.groups.map((group, index) => (
+          {filteredGroups.length > 0
+            ? filteredGroups.map((group, index) => (
                 <Fragment key={group.group}>
                   {index > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuLabel>{group.name}</DropdownMenuLabel>
@@ -106,7 +134,7 @@ export function SessionConfigSelector({
                   ))}
                 </Fragment>
               ))
-            : option.kind.options.map((item) => (
+            : filteredOptions.map((item) => (
                 <DropdownMenuRadioItem key={item.value} value={item.value}>
                   <DropdownRadioItemContent
                     label={item.name}
@@ -146,14 +174,29 @@ export function InlineSessionConfigSelector({
     )
   }
 
-  const allOptions =
-    option.kind.groups.length > 0
-      ? option.kind.groups.flatMap((group) => group.options)
-      : option.kind.options
-  const selected = allOptions.find(
-    (item) => item.value === option.kind.current_value
+  const filteredGroups = option.kind.groups
+    .map((group) => ({
+      ...group,
+      options: group.options.filter(
+        (item) => !isInvalidConfigValueString(item.value)
+      ),
+    }))
+    .filter((group) => group.options.length > 0)
+  const filteredOptions = option.kind.options.filter(
+    (item) => !isInvalidConfigValueString(item.value)
   )
-  const currentLabel = selected?.name ?? option.kind.current_value
+  const allOptions =
+    filteredGroups.length > 0
+      ? filteredGroups.flatMap((group) => group.options)
+      : filteredOptions
+  const currentValueIsInvalid = isInvalidConfigValueString(
+    option.kind.current_value
+  )
+  const selected = currentValueIsInvalid
+    ? undefined
+    : allOptions.find((item) => item.value === option.kind.current_value)
+  const currentLabel =
+    selected?.name ?? (currentValueIsInvalid ? "" : option.kind.current_value)
 
   return (
     <DropdownMenu>
@@ -179,11 +222,11 @@ export function InlineSessionConfigSelector({
         }}
       >
         <DropdownMenuRadioGroup
-          value={option.kind.current_value}
+          value={currentValueIsInvalid ? "" : option.kind.current_value}
           onValueChange={(value) => onSelect(option.id, value)}
         >
-          {option.kind.groups.length > 0
-            ? option.kind.groups.map((group, index) => (
+          {filteredGroups.length > 0
+            ? filteredGroups.map((group, index) => (
                 <Fragment key={group.group}>
                   {index > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuLabel>{group.name}</DropdownMenuLabel>
@@ -200,7 +243,7 @@ export function InlineSessionConfigSelector({
                   ))}
                 </Fragment>
               ))
-            : option.kind.options.map((item) => (
+            : filteredOptions.map((item) => (
                 <DropdownMenuRadioItem key={item.value} value={item.value}>
                   <DropdownRadioItemContent
                     label={item.name}

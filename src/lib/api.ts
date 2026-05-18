@@ -162,11 +162,26 @@ export async function acpSetMode(
   return getTransport().call("acp_set_mode", { connectionId, modeId })
 }
 
+// Some upstream agents (e.g. Codex / Claude Code via sacp) advertise
+// selector options whose `value` is the literal JS string "null" or
+// "undefined" — values the agent itself rejects on round-trip with
+// `Invalid value for config option ...`. Filter the obviously-bogus
+// shapes here so we never make the request in the first place.
+function isInvalidConfigValueString(s: string): boolean {
+  const trimmed = s.trim()
+  if (trimmed.length === 0) return true
+  const lower = trimmed.toLowerCase()
+  return lower === "null" || lower === "undefined"
+}
+
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
   value: string | boolean
 ): Promise<void> {
+  if (typeof value === "string" && isInvalidConfigValueString(value)) {
+    throw new Error("Invalid config option value")
+  }
   return getTransport().call("acp_set_config_option", {
     connectionId,
     configId,

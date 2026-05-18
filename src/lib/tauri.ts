@@ -126,11 +126,25 @@ export async function acpSetMode(
   return invoke("acp_set_mode", { connectionId, modeId })
 }
 
+// Mirrors the guard in `api.ts` — keep them in lockstep. Some upstream
+// agents advertise selector options whose `value` is the literal JS
+// string "null" / "undefined", which the agent itself then rejects on
+// round-trip. Reject before we hit the IPC boundary.
+function isInvalidConfigValueString(s: string): boolean {
+  const trimmed = s.trim()
+  if (trimmed.length === 0) return true
+  const lower = trimmed.toLowerCase()
+  return lower === "null" || lower === "undefined"
+}
+
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
   value: string | boolean
 ): Promise<void> {
+  if (typeof value === "string" && isInvalidConfigValueString(value)) {
+    throw new Error("Invalid config option value")
+  }
   return invoke("acp_set_config_option", {
     connectionId,
     configId,
