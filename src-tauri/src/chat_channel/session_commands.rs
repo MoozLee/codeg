@@ -11,8 +11,11 @@ use super::types::{MessageLevel, RichMessage};
 use crate::acp::manager::ConnectionManager;
 use crate::acp::registry::all_acp_agents;
 use crate::acp::types::PromptInputBlock;
+use crate::commands::acp as acp_commands;
 use crate::db::entities::conversation;
-use crate::db::service::{conversation_service, folder_service, sender_context_service};
+use crate::db::service::{
+    agent_setting_service, conversation_service, folder_service, sender_context_service,
+};
 use crate::models::agent::AgentType;
 use crate::web::event_bridge::EventEmitter;
 
@@ -25,6 +28,25 @@ pub struct FollowupRequest<'a> {
     pub bridge: &'a Arc<Mutex<SessionBridge>>,
     pub lang: Lang,
     pub prefix: &'a str,
+}
+
+async fn build_chat_channel_runtime_env(
+    db: &DatabaseConnection,
+    agent_type: AgentType,
+) -> BTreeMap<String, String> {
+    let setting = agent_setting_service::get_by_agent_type(db, agent_type)
+        .await
+        .ok()
+        .flatten();
+    let local_config_json = acp_commands::load_agent_local_config_json(agent_type);
+    let mut runtime_env = acp_commands::build_runtime_env_from_setting(
+        agent_type,
+        setting.as_ref(),
+        local_config_json.as_deref(),
+    );
+    acp_commands::apply_model_provider_env(agent_type, setting.as_ref(), &mut runtime_env, db)
+        .await;
+    runtime_env
 }
 
 // ── /folder ──
@@ -299,13 +321,14 @@ pub async fn handle_task(
     };
 
     // 5. Spawn ACP agent
+    let runtime_env = build_chat_channel_runtime_env(db, agent_type).await;
     let owner_label = format!("chat_channel:{}:{}", channel_id, sender_id);
     let connection_id = match conn_mgr
         .spawn_agent(
             agent_type,
             Some(folder.path.clone()),
             None,
-            BTreeMap::new(),
+            runtime_env,
             owner_label,
             emitter.clone(),
             None,
@@ -479,13 +502,14 @@ pub async fn handle_resume(
     };
 
     // Spawn agent with session_id for resume
+    let runtime_env = build_chat_channel_runtime_env(db, conv.agent_type).await;
     let owner_label = format!("chat_channel:{}:{}", channel_id, sender_id);
     let connection_id = match conn_mgr
         .spawn_agent(
             conv.agent_type,
             Some(folder.path.clone()),
             conv.external_id.clone(),
-            BTreeMap::new(),
+            runtime_env,
             owner_label,
             emitter.clone(),
             None,
