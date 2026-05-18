@@ -33,9 +33,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0
-    ? value
-    : undefined
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return undefined
+  // Reject the literal strings "null" / "undefined" (case-insensitive)
+  // — some upstream agents advertise these as option values, and a
+  // legacy localStorage entry can carry them too. Both cause the
+  // backend to round-trip with `Invalid value for config option ...`.
+  const lower = trimmed.toLowerCase()
+  if (lower === "null" || lower === "undefined") return undefined
+  return value
 }
 
 function normalizeConfigValues(

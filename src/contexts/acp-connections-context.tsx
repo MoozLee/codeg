@@ -3830,6 +3830,20 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     async (contextKey: string, configId: string, value: string | boolean) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
+      // Reject obviously-bogus string values (empty / "null" / "undefined",
+      // case-insensitive) before they get persisted to localStorage or sent
+      // to the agent. Some upstream agents advertise these as option values
+      // but reject them on round-trip with `Invalid value for config option
+      // ...`. The transport-layer wrapper guards the IPC boundary too —
+      // this stops the bad value from being saved as a preference in the
+      // first place.
+      if (typeof value === "string") {
+        const trimmed = value.trim()
+        const lower = trimmed.toLowerCase()
+        if (trimmed.length === 0 || lower === "null" || lower === "undefined") {
+          return
+        }
+      }
       dispatch({
         type: "CONFIG_OPTION_CHANGED",
         contextKey,
