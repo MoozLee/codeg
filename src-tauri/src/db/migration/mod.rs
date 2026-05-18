@@ -91,9 +91,7 @@ mod tests {
         let conn = sea_orm::Database::connect("sqlite::memory:")
             .await
             .expect("open in-memory sqlite");
-        Migrator::up(&conn, None)
-            .await
-            .expect("run all migrations");
+        Migrator::up(&conn, None).await.expect("run all migrations");
 
         let stmt = Statement::from_string(
             DbBackend::Sqlite,

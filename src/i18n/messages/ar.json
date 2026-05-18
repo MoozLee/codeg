@@ -1586,6 +1586,9 @@
       "openInBrowser": "فتح في المتصفح",
       "openInEditor": "فتح في المحرر",
       "openInTerminal": "فتح في الطرفية",
+      "upload": "رفع ملفات/مجلد",
+      "download": "تنزيل ملف",
+      "downloadAsZip": "تنزيل كملف ZIP",
       "actions": {
         "select": "تحديد",
         "unselect": "إلغاء التحديد",
@@ -1616,7 +1619,9 @@
         "saveCopyFailed": "فشل الحفظ كنسخة",
         "watchStartFailed": "فشل بدء مراقبة الملفات",
         "createFailed": "فشل في الإنشاء",
-        "openInBrowserFailed": "فشل الفتح في المتصفح"
+        "openInBrowserFailed": "فشل الفتح في المتصفح",
+        "downloadFailed": "فشل تنزيل {name}",
+        "downloadSaved": "تم تنزيل {name}"
       },
       "createDialog": {
         "newFile": "ملف جديد",
@@ -1631,6 +1636,31 @@
         "description": "أدخل اسمًا جديدًا (الاسم فقط، بدون مسار).",
         "placeholderDirectory": "اسم-مجلد-جديد",
         "placeholderFile": "اسم-ملف-جديد.ext"
+      },
+      "uploadDialog": {
+        "title": "رفع إلى مساحة العمل",
+        "description": "اضبط الوجهة عند الحاجة، ثم أضف الملفات أو المجلدات.",
+        "workspaceRoot": "جذر مساحة العمل",
+        "targetPathLabel": "رفع إلى",
+        "targetPathHint": "المسار النهائي: {path}",
+        "dropHint": "اسحب الملفات أو المجلدات هنا، أو استخدم الأزرار أدناه",
+        "dropHintActive": "حرّر للإضافة إلى قائمة الانتظار",
+        "selectFiles": "اختيار ملفات",
+        "selectFolder": "اختيار مجلد",
+        "startUpload": "بدء الرفع",
+        "clearQueue": "مسح المنتهية",
+        "removeItem": "إزالة من قائمة الانتظار",
+        "retry": "إعادة المحاولة",
+        "dropZoneAria": "أفلت الملفات هنا أو نشّط للاستعراض",
+        "folderEmpty": "لم يتم العثور على ملفات في المجلد المسحوب",
+        "summary": "الإجمالي: {total} · نجح: {succeeded} · فشل: {failed}",
+        "status": {
+          "pending": "قيد الانتظار",
+          "uploading": "جاري الرفع",
+          "success": "تم",
+          "error": "فشل",
+          "cancelled": "ملغى"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "حدد الملفات ضمن المجلد {path} لإضافتها إلى VCS.",

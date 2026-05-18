@@ -3295,16 +3295,36 @@ pub async fn delete_file_tree_entry(
     }
 
     let target = resolve_tree_path(&root, &path)?;
-    if !target.exists() {
-        return Err(AppCommandError::not_found("Target file does not exist"));
-    }
+    // `Path::exists` follows symlinks and silently returns false on a
+    // dangling link or any I/O error along the resolve chain, which gave
+    // us "Target file does not exist" toasts even for files that were
+    // physically present (case-only mismatches against a case-preserving
+    // FS, NFD/NFC mismatches on macOS, files under a non-traversable
+    // ancestor). `symlink_metadata` only stats the leaf and surfaces the
+    // real OS error code in `detail`, which is what we want to diagnose
+    // those reports.
+    let meta = match std::fs::symlink_metadata(&target) {
+        Ok(m) => m,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(AppCommandError::not_found("Target file does not exist")
+                .with_detail(format!("resolved={} relative={}", target.display(), path)));
+        }
+        Err(err) => {
+            return Err(
+                AppCommandError::io_error("Failed to stat target").with_detail(format!(
+                    "resolved={} relative={} error={}",
+                    target.display(),
+                    path,
+                    err
+                )),
+            );
+        }
+    };
     if target == root {
         return Err(AppCommandError::invalid_input(
             "Cannot delete workspace root",
         ));
     }
-
-    let meta = std::fs::symlink_metadata(&target).map_err(AppCommandError::io)?;
     if meta.is_dir() {
         std::fs::remove_dir_all(&target).map_err(AppCommandError::io)?;
     } else {

@@ -1586,6 +1586,9 @@
       "openInBrowser": "브라우저에서 열기",
       "openInEditor": "편집기에서 열기",
       "openInTerminal": "터미널에서 열기",
+      "upload": "파일/폴더 업로드",
+      "download": "파일 다운로드",
+      "downloadAsZip": "ZIP으로 다운로드",
       "actions": {
         "select": "선택",
         "unselect": "선택 해제",
@@ -1616,7 +1619,9 @@
         "saveCopyFailed": "사본으로 저장하지 못했습니다",
         "watchStartFailed": "파일 감시 시작에 실패했습니다",
         "createFailed": "생성 실패",
-        "openInBrowserFailed": "브라우저에서 열지 못했습니다"
+        "openInBrowserFailed": "브라우저에서 열지 못했습니다",
+        "downloadFailed": "{name} 다운로드 실패",
+        "downloadSaved": "{name} 다운로드 완료"
       },
       "createDialog": {
         "newFile": "새 파일",
@@ -1631,6 +1636,31 @@
         "description": "새 이름을 입력하세요(이름만, 경로 제외).",
         "placeholderDirectory": "새-폴더-이름",
         "placeholderFile": "새-파일-이름.ext"
+      },
+      "uploadDialog": {
+        "title": "작업 공간에 업로드",
+        "description": "필요하면 업로드 위치를 변경한 다음 파일이나 폴더를 추가하세요.",
+        "workspaceRoot": "작업 공간 루트",
+        "targetPathLabel": "업로드 위치",
+        "targetPathHint": "실제 경로: {path}",
+        "dropHint": "파일 또는 폴더를 여기에 끌어오거나 아래 버튼을 사용하세요",
+        "dropHintActive": "놓으면 대기열에 추가됩니다",
+        "selectFiles": "파일 선택",
+        "selectFolder": "폴더 선택",
+        "startUpload": "업로드 시작",
+        "clearQueue": "완료된 항목 지우기",
+        "removeItem": "대기열에서 제거",
+        "retry": "다시 시도",
+        "dropZoneAria": "파일을 여기에 드롭하거나 Enter 키로 찾아보기",
+        "folderEmpty": "드롭한 폴더에서 파일을 찾을 수 없습니다",
+        "summary": "합계: {total} · 성공: {succeeded} · 실패: {failed}",
+        "status": {
+          "pending": "대기 중",
+          "uploading": "업로드 중",
+          "success": "완료",
+          "error": "실패",
+          "cancelled": "취소됨"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "디렉터리 {path} 아래에서 VCS에 추가할 파일을 선택하세요.",

@@ -1586,6 +1586,9 @@
       "openInBrowser": "Abrir no navegador",
       "openInEditor": "Abrir no editor",
       "openInTerminal": "Abrir no terminal",
+      "upload": "Enviar arquivos/pasta",
+      "download": "Baixar arquivo",
+      "downloadAsZip": "Baixar como ZIP",
       "actions": {
         "select": "Selecionar",
         "unselect": "Desmarcar",
@@ -1616,7 +1619,9 @@
         "saveCopyFailed": "Falha ao salvar como cópia",
         "watchStartFailed": "Falha ao iniciar monitoramento de arquivos",
         "createFailed": "Falha ao criar",
-        "openInBrowserFailed": "Falha ao abrir no navegador"
+        "openInBrowserFailed": "Falha ao abrir no navegador",
+        "downloadFailed": "Falha ao baixar {name}",
+        "downloadSaved": "{name} baixado"
       },
       "createDialog": {
         "newFile": "Novo arquivo",
@@ -1631,6 +1636,31 @@
         "description": "Digite um novo nome (apenas nome, sem caminho).",
         "placeholderDirectory": "novo-nome-da-pasta",
         "placeholderFile": "novo-nome-do-arquivo.ext"
+      },
+      "uploadDialog": {
+        "title": "Enviar para o workspace",
+        "description": "Ajuste o destino se necessário e adicione arquivos ou pastas.",
+        "workspaceRoot": "raiz do workspace",
+        "targetPathLabel": "Enviar para",
+        "targetPathHint": "Caminho resolvido: {path}",
+        "dropHint": "Arraste arquivos ou pastas aqui, ou use os botões abaixo",
+        "dropHintActive": "Solte para adicionar à fila",
+        "selectFiles": "Selecionar arquivos",
+        "selectFolder": "Selecionar pasta",
+        "startUpload": "Iniciar upload",
+        "clearQueue": "Limpar finalizados",
+        "removeItem": "Remover da fila",
+        "retry": "Tentar novamente",
+        "dropZoneAria": "Solte arquivos aqui ou ative para procurar",
+        "folderEmpty": "Nenhum arquivo encontrado na pasta solta",
+        "summary": "Total: {total} · Sucesso: {succeeded} · Falhas: {failed}",
+        "status": {
+          "pending": "Aguardando",
+          "uploading": "Enviando",
+          "success": "Concluído",
+          "error": "Falhou",
+          "cancelled": "Cancelado"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "Selecione arquivos no diretório {path} para adicionar ao VCS.",

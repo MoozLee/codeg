@@ -10,6 +10,7 @@ use crate::pet_state_mapper::PetStateHandle;
 use crate::terminal::manager::TerminalManager;
 use crate::web::event_bridge::{EventEmitter, WebEventBroadcaster};
 use crate::web::WebServerState;
+use crate::workspace_transfer::WorkspaceTransferManager;
 
 pub struct AppState {
     pub db: AppDatabase,
@@ -25,6 +26,7 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub web_server_state: WebServerState,
     pub chat_channel_manager: ChatChannelManager,
+    pub workspace_transfer: Arc<WorkspaceTransferManager>,
     /// Latest ambient `PetState` written by `pet_state_subscriber_task`.
     /// Read by `pet_get_current_state` so a freshly-opened pet window can
     /// pick up the current state without waiting for the next transition.

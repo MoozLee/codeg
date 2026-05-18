@@ -804,9 +804,9 @@ pub async fn open_commit_window(
         .inner_size(1220.0, 820.0)
         .min_inner_size(980.0, 620.0)
         .center();
-    let builder = builder
-        .parent(&window)
-        .map_err(|e| AppCommandError::window("Failed to attach commit window to parent", e.to_string()))?;
+    let builder = builder.parent(&window).map_err(|e| {
+        AppCommandError::window("Failed to attach commit window to parent", e.to_string())
+    })?;
     let commit_window = apply_platform_window_style(builder)
         .build()
         .map_err(|e| AppCommandError::window("Failed to open commit window", e.to_string()))?;
@@ -1044,9 +1044,9 @@ pub async fn open_merge_window(
         .inner_size(1400.0, 900.0)
         .min_inner_size(1100.0, 650.0)
         .center();
-    let builder = builder
-        .parent(&window)
-        .map_err(|e| AppCommandError::window("Failed to attach merge window to parent", e.to_string()))?;
+    let builder = builder.parent(&window).map_err(|e| {
+        AppCommandError::window("Failed to attach merge window to parent", e.to_string())
+    })?;
     let merge_window = apply_platform_window_style(builder)
         .build()
         .map_err(|e| AppCommandError::window("Failed to open merge window", e.to_string()))?;
@@ -1217,9 +1217,9 @@ pub async fn open_push_window(
         .inner_size(1100.0, 700.0)
         .min_inner_size(800.0, 500.0)
         .center();
-    let builder = builder
-        .parent(&window)
-        .map_err(|e| AppCommandError::window("Failed to attach push window to parent", e.to_string()))?;
+    let builder = builder.parent(&window).map_err(|e| {
+        AppCommandError::window("Failed to attach push window to parent", e.to_string())
+    })?;
     let push_window = apply_platform_window_style(builder)
         .build()
         .map_err(|e| AppCommandError::window("Failed to open push window", e.to_string()))?;
@@ -1449,10 +1449,8 @@ fn spawn_pet_hover_watcher(app: AppHandle) {
             let Ok(cursor) = app.cursor_position() else {
                 continue;
             };
-            let inside = cursor.x >= x_min
-                && cursor.x < x_max
-                && cursor.y >= y_min
-                && cursor.y < y_max;
+            let inside =
+                cursor.x >= x_min && cursor.x < x_max && cursor.y >= y_min && cursor.y < y_max;
             let was_inside = PET_HOVER_WAS_INSIDE.load(AtomicOrdering::Relaxed);
             if inside && !was_inside {
                 let _ = app.emit(PET_HOVER_ENTER_EVENT, ());
@@ -1571,8 +1569,7 @@ pub async fn pet_show_context_menu(
     let config = crate::commands::pet::pet_get_settings_core(&db.conn).await?;
     let current = config.scale;
 
-    let menu_err =
-        |stage: &str, e: tauri::Error| AppCommandError::window(stage, e.to_string());
+    let menu_err = |stage: &str, e: tauri::Error| AppCommandError::window(stage, e.to_string());
 
     // Disabled header acts as a "Scale" section label. macOS renders this as
     // dimmed gray text, Linux/Windows as a non-clickable item — close enough
@@ -1608,14 +1605,8 @@ pub async fn pet_show_context_menu(
         None::<&str>,
     )
     .map_err(|e| menu_err("Failed to build pet menu manager item", e))?;
-    let close_item = MenuItem::with_id(
-        &app,
-        PET_MENU_ID_CLOSE,
-        &labels.close,
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| menu_err("Failed to build pet menu close item", e))?;
+    let close_item = MenuItem::with_id(&app, PET_MENU_ID_CLOSE, &labels.close, true, None::<&str>)
+        .map_err(|e| menu_err("Failed to build pet menu close item", e))?;
 
     let mut builder = MenuBuilder::new(&app).item(&header).item(&sep1);
     for item in &scale_items {
@@ -1704,8 +1695,7 @@ pub async fn update_appearance_mode(
 /// (light, dark, accent). The colored window icon won't get this
 /// treatment and looks out of place next to other system icons.
 #[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
-const MACOS_TRAY_TEMPLATE_PNG: &[u8] =
-    include_bytes!("../../icons/tray-icon-template.png");
+const MACOS_TRAY_TEMPLATE_PNG: &[u8] = include_bytes!("../../icons/tray-icon-template.png");
 
 #[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
 fn load_macos_tray_template_icon() -> Result<tauri::image::Image<'static>, String> {
@@ -1838,8 +1828,7 @@ pub fn install_tray_icon(
         None::<&str>,
     )?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit_item =
-        MenuItem::with_id(app, TRAY_MENU_ID_QUIT, labels.quit, true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, TRAY_MENU_ID_QUIT, labels.quit, true, None::<&str>)?;
     let menu = MenuBuilder::new(app)
         .items(&[&show_item, &separator, &quit_item])
         .build()?;
@@ -1919,8 +1908,7 @@ pub fn refresh_tray_menu(
         None::<&str>,
     )?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit_item =
-        MenuItem::with_id(app, TRAY_MENU_ID_QUIT, labels.quit, true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, TRAY_MENU_ID_QUIT, labels.quit, true, None::<&str>)?;
     let menu = MenuBuilder::new(app)
         .items(&[&show_item, &separator, &quit_item])
         .build()?;

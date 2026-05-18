@@ -27,20 +27,23 @@
 //! the inner-attribute form here would duplicate the predicate.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::body::Bytes;
 use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
     Engine as _,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, Stream, StreamExt};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, EventTarget, State, WebviewWindow};
 use tokio::sync::{mpsc, watch, Mutex, RwLock};
 use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest, handshake::client::Request, http::HeaderValue, Message,
 };
+use tokio_util::sync::CancellationToken;
 
 /// Outbound mpsc capacity per remote WS. Bounded so a runaway frontend
 /// cannot exhaust memory by piling client-→-server messages, but generous
@@ -59,6 +62,10 @@ use crate::app_error::{
 };
 use crate::db::service::remote_workspace_connection_service;
 use crate::db::AppDatabase;
+use crate::workspace_transfer::{
+    TransferDirection, TransferState, WorkspaceTransferManager, WorkspaceTransferProgress,
+    WORKSPACE_TRANSFER_PROGRESS_EVENT,
+};
 
 /// HTTP request timeout. Long enough to survive remote ACP prompts (which
 /// can stream for a while) but bounded so a hung remote can't lock a
@@ -124,6 +131,7 @@ pub struct RemoteProxyState {
     tasks: Mutex<HashMap<i32, Arc<WsTaskEntry>>>,
     destroyed_window_instances: Mutex<HashSet<String>>,
     http: reqwest::Client,
+    workspace_http: reqwest::Client,
 }
 
 impl RemoteProxyState {
@@ -135,6 +143,9 @@ impl RemoteProxyState {
                 .timeout(HTTP_TIMEOUT)
                 .build()
                 .expect("failed to build reqwest client for remote proxy"),
+            workspace_http: reqwest::Client::builder()
+                .build()
+                .expect("failed to build reqwest workspace client for remote proxy"),
         }
     }
 
@@ -635,6 +646,746 @@ fn guess_mime_from_path(path: &std::path::Path) -> Option<String> {
         _ => return None,
     };
     Some(mime.to_string())
+}
+
+// ─── Workspace file upload / download proxy ───────────────────────────
+//
+// Issue #179 follow-up: a Tauri client bound to a remote codeg-server
+// previously had no path to upload/download workspace files. The web
+// build hits `/api/upload_workspace_file` etc. directly, but a webview
+// against a plain `http://` remote is blocked by mixed-content rules
+// (same reason `remote_upload_attachment` exists). These three commands
+// proxy the workspace endpoints over reqwest.
+//
+// Workspace file transfers intentionally have no application-level size
+// limit. These bytes move between the user's own machine/browser and their
+// workspace; OS disk space, network throughput, and the remote server are
+// the natural boundaries.
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteWorkspaceUploadPathEntry {
+    pub local_path: String,
+    pub relative_path: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteWorkspaceUploadPathResult {
+    pub transfer_id: String,
+    pub files: Vec<RemoteWorkspaceUploadedFile>,
+    pub bytes: u64,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteWorkspaceUploadedFile {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceDownloadTicket {
+    url: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteWorkspaceDownloadResult {
+    pub transfer_id: String,
+    pub bytes: u64,
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn remote_upload_workspace_paths(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    proxy: State<'_, Arc<RemoteProxyState>>,
+    transfers: State<'_, Arc<WorkspaceTransferManager>>,
+    connection_id: i32,
+    root_path: String,
+    target_path: String,
+    entries: Vec<RemoteWorkspaceUploadPathEntry>,
+) -> Result<RemoteWorkspaceUploadPathResult, AppCommandError> {
+    if entries.is_empty() {
+        return Err(AppCommandError::invalid_input(
+            "No local paths were provided for upload",
+        ));
+    }
+
+    let conn = remote_workspace_connection_service::get(&db.conn, connection_id)
+        .await
+        .map_err(AppCommandError::db)?
+        .ok_or_else(|| {
+            AppCommandError::not_found(format!("Remote connection {connection_id} not found"))
+        })?;
+
+    let (transfer_id, cancel_token) = transfers.register_transfer().await;
+    let result = async {
+        let _permit = transfers
+            .remote_upload_semaphore
+            .acquire()
+            .await
+            .map_err(|_| {
+                AppCommandError::task_execution_failed(
+                    "Remote workspace upload semaphore is closed",
+                )
+            })?;
+
+        let mut uploaded = Vec::new();
+        let mut total_bytes = 0u64;
+
+        for entry in entries {
+            if cancel_token.is_cancelled() {
+                return Err(workspace_transfer_cancelled());
+            }
+            let local_path = PathBuf::from(&entry.local_path);
+            let metadata = tokio::fs::symlink_metadata(&local_path)
+                .await
+                .map_err(|e| {
+                    AppCommandError::io_error("Failed to stat local upload path")
+                        .with_detail(format!("{}: {e}", local_path.display()))
+                })?;
+            if metadata.file_type().is_symlink() {
+                return Err(AppCommandError::invalid_input(
+                    "Local upload path is a symlink; refuse to follow it",
+                ));
+            }
+            if metadata.is_dir() {
+                let base_prefix = entry
+                    .relative_path
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        local_path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                    })
+                    .unwrap_or_default();
+                for walked in walkdir::WalkDir::new(&local_path).follow_links(false) {
+                    if cancel_token.is_cancelled() {
+                        return Err(workspace_transfer_cancelled());
+                    }
+                    let walked = walked.map_err(|e| {
+                        AppCommandError::io_error("Failed to walk local upload directory")
+                            .with_detail(e.to_string())
+                    })?;
+                    if walked.file_type().is_symlink() || !walked.file_type().is_file() {
+                        continue;
+                    }
+                    let nested = walked.path().strip_prefix(&local_path).map_err(|_| {
+                        AppCommandError::io_error("Failed to calculate local relative path")
+                    })?;
+                    let relative_path = join_upload_relative(&base_prefix, nested);
+                    let file_result = upload_one_workspace_path(
+                        &app,
+                        &proxy,
+                        &conn.base_url,
+                        conn.token.trim(),
+                        &transfer_id,
+                        cancel_token.clone(),
+                        &root_path,
+                        &target_path,
+                        walked.path(),
+                        Some(relative_path),
+                    )
+                    .await?;
+                    total_bytes = total_bytes.saturating_add(file_result.size);
+                    uploaded.push(file_result);
+                }
+            } else if metadata.is_file() {
+                let file_result = upload_one_workspace_path(
+                    &app,
+                    &proxy,
+                    &conn.base_url,
+                    conn.token.trim(),
+                    &transfer_id,
+                    cancel_token.clone(),
+                    &root_path,
+                    &target_path,
+                    &local_path,
+                    entry.relative_path.filter(|s| !s.is_empty()),
+                )
+                .await?;
+                total_bytes = total_bytes.saturating_add(file_result.size);
+                uploaded.push(file_result);
+            } else {
+                return Err(AppCommandError::invalid_input(
+                    "Local upload path is not a regular file or directory",
+                ));
+            }
+        }
+
+        emit_workspace_transfer_progress(
+            &app,
+            WorkspaceTransferProgress {
+                transfer_id: transfer_id.clone(),
+                direction: TransferDirection::Upload,
+                loaded: total_bytes,
+                total: Some(total_bytes),
+                state: TransferState::Done,
+                path: None,
+                error: None,
+            },
+        );
+
+        Ok(RemoteWorkspaceUploadPathResult {
+            transfer_id: transfer_id.clone(),
+            files: uploaded,
+            bytes: total_bytes,
+        })
+    }
+    .await;
+
+    if let Err(err) = &result {
+        let state = if cancel_token.is_cancelled() {
+            TransferState::Cancelled
+        } else {
+            TransferState::Error
+        };
+        emit_workspace_transfer_progress(
+            &app,
+            WorkspaceTransferProgress {
+                transfer_id: transfer_id.clone(),
+                direction: TransferDirection::Upload,
+                loaded: 0,
+                total: None,
+                state,
+                path: None,
+                error: Some(err.message.clone()),
+            },
+        );
+    }
+    transfers.finish_transfer(&transfer_id).await;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn upload_one_workspace_path(
+    app: &AppHandle,
+    proxy: &RemoteProxyState,
+    base_url: &str,
+    token: &str,
+    transfer_id: &str,
+    cancel_token: CancellationToken,
+    root_path: &str,
+    target_path: &str,
+    local_path: &Path,
+    relative_path: Option<String>,
+) -> Result<RemoteWorkspaceUploadedFile, AppCommandError> {
+    let metadata = tokio::fs::symlink_metadata(local_path)
+        .await
+        .map_err(AppCommandError::io)?;
+    if !metadata.file_type().is_file() {
+        return Err(AppCommandError::invalid_input(
+            "Local upload path is not a regular file",
+        ));
+    }
+    let size = metadata.len();
+    let file = tokio::fs::File::open(local_path)
+        .await
+        .map_err(AppCommandError::io)?;
+    let file_name = local_path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+    let safe_name = sanitize_upload_file_name(&file_name);
+    let display_path = relative_path.clone().unwrap_or_else(|| safe_name.clone());
+
+    emit_workspace_transfer_progress(
+        app,
+        WorkspaceTransferProgress {
+            transfer_id: transfer_id.to_string(),
+            direction: TransferDirection::Upload,
+            loaded: 0,
+            total: Some(size),
+            state: TransferState::Running,
+            path: Some(display_path.clone()),
+            error: None,
+        },
+    );
+
+    let stream = file_upload_stream(
+        app.clone(),
+        transfer_id.to_string(),
+        cancel_token.clone(),
+        file,
+        size,
+        display_path.clone(),
+    );
+    let body = reqwest::Body::wrap_stream(stream);
+    let part = reqwest::multipart::Part::stream_with_length(body, size).file_name(safe_name);
+    let mut form = reqwest::multipart::Form::new()
+        .text("root_path", root_path.to_string())
+        .text("target_path", target_path.to_string());
+    if let Some(rp) = relative_path {
+        form = form.text("relative_path", rp);
+    }
+    form = form.part("file", part);
+
+    let url = format!(
+        "{}/api/upload_workspace_file",
+        base_url.trim_end_matches('/'),
+    );
+    let response = proxy
+        .workspace_http
+        .post(&url)
+        .bearer_auth(token)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| {
+            if cancel_token.is_cancelled() {
+                return workspace_transfer_cancelled();
+            }
+            AppCommandError::network("Remote workspace upload failed").with_detail(e.to_string())
+        })?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(AppCommandError::authentication_failed(
+            "Remote Workspace token is invalid",
+        ));
+    }
+    if !status.is_success() {
+        let raw_body = response.text().await.unwrap_or_default();
+        if let Ok(structured) = serde_json::from_str::<AppCommandError>(&raw_body) {
+            return Err(structured);
+        }
+        return Err(
+            AppCommandError::network(format!("Remote returned HTTP {status}")).with_detail(
+                if raw_body.is_empty() {
+                    status.canonical_reason().unwrap_or("error").to_string()
+                } else {
+                    raw_body
+                },
+            ),
+        );
+    }
+
+    let uploaded = response
+        .json::<RemoteWorkspaceUploadedFile>()
+        .await
+        .map_err(|e| {
+            AppCommandError::network("Failed to parse remote upload response")
+                .with_detail(e.to_string())
+        })?;
+    emit_workspace_transfer_progress(
+        app,
+        WorkspaceTransferProgress {
+            transfer_id: transfer_id.to_string(),
+            direction: TransferDirection::Upload,
+            loaded: size,
+            total: Some(size),
+            state: TransferState::Running,
+            path: Some(display_path),
+            error: None,
+        },
+    );
+    Ok(uploaded)
+}
+
+fn file_upload_stream(
+    app: AppHandle,
+    transfer_id: String,
+    cancel_token: CancellationToken,
+    file: tokio::fs::File,
+    total: u64,
+    path: String,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
+    futures::stream::try_unfold((file, 0u64), move |(mut file, loaded)| {
+        let app = app.clone();
+        let transfer_id = transfer_id.clone();
+        let cancel_token = cancel_token.clone();
+        let path = path.clone();
+        async move {
+            if cancel_token.is_cancelled() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "Workspace transfer cancelled",
+                ));
+            }
+            let mut buf = vec![0u8; 64 * 1024];
+            use tokio::io::AsyncReadExt;
+            let n = file.read(&mut buf).await?;
+            if n == 0 {
+                return Ok(None);
+            }
+            buf.truncate(n);
+            let loaded = loaded.saturating_add(n as u64);
+            emit_workspace_transfer_progress(
+                &app,
+                WorkspaceTransferProgress {
+                    transfer_id,
+                    direction: TransferDirection::Upload,
+                    loaded,
+                    total: Some(total),
+                    state: TransferState::Running,
+                    path: Some(path),
+                    error: None,
+                },
+            );
+            Ok(Some((Bytes::from(buf), (file, loaded))))
+        }
+    })
+}
+
+fn join_upload_relative(base: &str, nested: &Path) -> String {
+    let nested = nested.to_string_lossy().replace('\\', "/");
+    if base.is_empty() {
+        nested
+    } else if nested.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}/{nested}", base.trim_end_matches('/'))
+    }
+}
+
+fn workspace_transfer_cancelled() -> AppCommandError {
+    AppCommandError::task_execution_failed("Workspace transfer cancelled")
+}
+
+fn emit_workspace_transfer_progress(app: &AppHandle, progress: WorkspaceTransferProgress) {
+    let _ = app.emit(WORKSPACE_TRANSFER_PROGRESS_EVENT, progress);
+}
+
+#[tauri::command]
+pub async fn remote_cancel_workspace_transfer(
+    transfers: State<'_, Arc<WorkspaceTransferManager>>,
+    transfer_id: String,
+) -> Result<bool, AppCommandError> {
+    Ok(transfers.cancel(&transfer_id).await)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn remote_download_workspace_file(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    proxy: State<'_, Arc<RemoteProxyState>>,
+    transfers: State<'_, Arc<WorkspaceTransferManager>>,
+    connection_id: i32,
+    root_path: String,
+    path: String,
+    save_path: String,
+) -> Result<RemoteWorkspaceDownloadResult, AppCommandError> {
+    remote_workspace_download_stream(
+        app,
+        db,
+        proxy,
+        transfers,
+        connection_id,
+        "file",
+        root_path,
+        path,
+        save_path,
+    )
+    .await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn remote_download_workspace_dir(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    proxy: State<'_, Arc<RemoteProxyState>>,
+    transfers: State<'_, Arc<WorkspaceTransferManager>>,
+    connection_id: i32,
+    root_path: String,
+    path: String,
+    save_path: String,
+) -> Result<RemoteWorkspaceDownloadResult, AppCommandError> {
+    remote_workspace_download_stream(
+        app,
+        db,
+        proxy,
+        transfers,
+        connection_id,
+        "dir",
+        root_path,
+        path,
+        save_path,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn remote_workspace_download_stream(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    proxy: State<'_, Arc<RemoteProxyState>>,
+    transfers: State<'_, Arc<WorkspaceTransferManager>>,
+    connection_id: i32,
+    kind: &str,
+    root_path: String,
+    path: String,
+    save_path: String,
+) -> Result<RemoteWorkspaceDownloadResult, AppCommandError> {
+    let conn = remote_workspace_connection_service::get(&db.conn, connection_id)
+        .await
+        .map_err(AppCommandError::db)?
+        .ok_or_else(|| {
+            AppCommandError::not_found(format!("Remote connection {connection_id} not found"))
+        })?;
+
+    let (transfer_id, cancel_token) = transfers.register_transfer().await;
+    let result = async {
+        let _permit = transfers
+            .remote_download_semaphore
+            .acquire()
+            .await
+            .map_err(|_| {
+                AppCommandError::task_execution_failed(
+                    "Remote workspace download semaphore is closed",
+                )
+            })?;
+
+        let ticket_url = format!(
+            "{}/api/workspace_download_ticket",
+            conn.base_url.trim_end_matches('/')
+        );
+        let ticket_response = proxy
+            .workspace_http
+            .post(ticket_url)
+            .bearer_auth(conn.token.trim())
+            .json(&serde_json::json!({
+                "rootPath": root_path,
+                "path": path,
+                "kind": kind,
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                AppCommandError::network("Remote workspace download ticket failed")
+                    .with_detail(e.to_string())
+            })?;
+        let status = ticket_response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppCommandError::authentication_failed(
+                "Remote Workspace token is invalid",
+            ));
+        }
+        if !status.is_success() {
+            return remote_error_from_response(status, ticket_response).await;
+        }
+        let ticket = ticket_response
+            .json::<WorkspaceDownloadTicket>()
+            .await
+            .map_err(|e| {
+                AppCommandError::network("Failed to parse remote download ticket")
+                    .with_detail(e.to_string())
+            })?;
+        let download_url = absolute_remote_ticket_url(&conn.base_url, &ticket.url);
+        let response = proxy
+            .workspace_http
+            .get(download_url)
+            .send()
+            .await
+            .map_err(|e| {
+                AppCommandError::network("Remote workspace download failed")
+                    .with_detail(e.to_string())
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return remote_error_from_response(status, response).await;
+        }
+        let total = response.content_length();
+        emit_workspace_transfer_progress(
+            &app,
+            WorkspaceTransferProgress {
+                transfer_id: transfer_id.clone(),
+                direction: TransferDirection::Download,
+                loaded: 0,
+                total,
+                state: TransferState::Running,
+                path: Some(save_path.clone()),
+                error: None,
+            },
+        );
+        let stream = response.bytes_stream().map(|chunk| {
+            chunk.map_err(|e| {
+                AppCommandError::network("Failed to read remote download stream")
+                    .with_detail(e.to_string())
+            })
+        });
+        let bytes = write_response_stream_to_partial(
+            stream,
+            &save_path,
+            &transfer_id,
+            cancel_token.clone(),
+            |loaded| {
+                emit_workspace_transfer_progress(
+                    &app,
+                    WorkspaceTransferProgress {
+                        transfer_id: transfer_id.clone(),
+                        direction: TransferDirection::Download,
+                        loaded,
+                        total,
+                        state: TransferState::Running,
+                        path: Some(save_path.clone()),
+                        error: None,
+                    },
+                );
+            },
+        )
+        .await?;
+
+        emit_workspace_transfer_progress(
+            &app,
+            WorkspaceTransferProgress {
+                transfer_id: transfer_id.clone(),
+                direction: TransferDirection::Download,
+                loaded: bytes,
+                total,
+                state: TransferState::Done,
+                path: Some(save_path.clone()),
+                error: None,
+            },
+        );
+        Ok(RemoteWorkspaceDownloadResult {
+            transfer_id: transfer_id.clone(),
+            bytes,
+        })
+    }
+    .await;
+
+    if let Err(err) = &result {
+        let state = if cancel_token.is_cancelled() {
+            TransferState::Cancelled
+        } else {
+            TransferState::Error
+        };
+        emit_workspace_transfer_progress(
+            &app,
+            WorkspaceTransferProgress {
+                transfer_id: transfer_id.clone(),
+                direction: TransferDirection::Download,
+                loaded: 0,
+                total: None,
+                state,
+                path: Some(save_path),
+                error: Some(err.message.clone()),
+            },
+        );
+    }
+    transfers.finish_transfer(&transfer_id).await;
+    result
+}
+
+async fn remote_error_from_response(
+    status: reqwest::StatusCode,
+    response: reqwest::Response,
+) -> Result<RemoteWorkspaceDownloadResult, AppCommandError> {
+    let raw_body = response.text().await.unwrap_or_default();
+    if let Ok(structured) = serde_json::from_str::<AppCommandError>(&raw_body) {
+        return Err(structured);
+    }
+    Err(
+        AppCommandError::network(format!("Remote returned HTTP {status}")).with_detail(
+            if raw_body.is_empty() {
+                status.canonical_reason().unwrap_or("error").to_string()
+            } else {
+                raw_body
+            },
+        ),
+    )
+}
+
+fn absolute_remote_ticket_url(base_url: &str, ticket_url: &str) -> String {
+    if ticket_url.starts_with("http://") || ticket_url.starts_with("https://") {
+        ticket_url.to_string()
+    } else if ticket_url.starts_with('/') {
+        format!("{}{}", base_url.trim_end_matches('/'), ticket_url)
+    } else {
+        format!("{}/{}", base_url.trim_end_matches('/'), ticket_url)
+    }
+}
+
+fn partial_download_path(save_path: &str, transfer_id: &str) -> String {
+    format!("{save_path}.codeg-download-{transfer_id}.part")
+}
+
+async fn write_response_stream_to_partial<S, F>(
+    mut stream: S,
+    save_path: &str,
+    transfer_id: &str,
+    cancel: CancellationToken,
+    mut on_progress: F,
+) -> Result<u64, AppCommandError>
+where
+    S: Stream<Item = Result<Bytes, AppCommandError>> + Unpin,
+    F: FnMut(u64),
+{
+    use tokio::io::AsyncWriteExt;
+
+    let partial_path = partial_download_path(save_path, transfer_id);
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&partial_path)
+        .await
+        .map_err(|e| {
+            AppCommandError::io_error("Failed to create local download file")
+                .with_detail(format!("{partial_path}: {e}"))
+        })?;
+
+    let result: Result<u64, AppCommandError> = async {
+        let mut total: u64 = 0;
+        loop {
+            let next = tokio::select! {
+                _ = cancel.cancelled() => return Err(workspace_transfer_cancelled()),
+                next = stream.next() => next,
+            };
+            let Some(chunk) = next else {
+                break;
+            };
+            let chunk = chunk?;
+            total = total.saturating_add(chunk.len() as u64);
+            file.write_all(&chunk).await.map_err(|e| {
+                AppCommandError::io_error("Failed to write download to disk")
+                    .with_detail(e.to_string())
+            })?;
+            on_progress(total);
+        }
+        file.flush().await.map_err(|e| {
+            AppCommandError::io_error("Failed to flush downloaded file").with_detail(e.to_string())
+        })?;
+        file.sync_all().await.map_err(|e| {
+            AppCommandError::io_error("Failed to sync downloaded file").with_detail(e.to_string())
+        })?;
+        Ok(total)
+    }
+    .await;
+
+    drop(file);
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&partial_path).await;
+        return result;
+    }
+
+    if tokio::fs::try_exists(save_path).await.unwrap_or(false) {
+        if let Err(e) = tokio::fs::remove_file(save_path).await {
+            let _ = tokio::fs::remove_file(&partial_path).await;
+            return Err(
+                AppCommandError::io_error("Failed to replace existing download")
+                    .with_detail(format!("{save_path}: {e}")),
+            );
+        }
+    }
+    tokio::fs::rename(&partial_path, save_path)
+        .await
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&partial_path);
+            AppCommandError::io_error("Failed to finalize download")
+                .with_detail(format!("{partial_path} -> {save_path}: {e}"))
+        })?;
+
+    result
 }
 
 // ─── WebSocket proxy commands ─────────────────────────────────────────
@@ -1161,6 +1912,37 @@ mod tests {
             http_url_to_ws_url("ftp://example.com"),
             "ftp://example.com/ws/events"
         );
+    }
+
+    #[test]
+    fn partial_download_path_is_unique_sibling() {
+        let path = partial_download_path("/tmp/out.zip", "abc");
+        assert_eq!(path, "/tmp/out.zip.codeg-download-abc.part");
+    }
+
+    #[tokio::test]
+    async fn write_response_stream_to_partial_removes_partial_on_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("out.bin");
+        let stream = futures::stream::iter([
+            Ok(Bytes::from_static(b"partial")),
+            Err(AppCommandError::network("simulated stream failure")),
+        ]);
+
+        let err = write_response_stream_to_partial(
+            stream,
+            &save_path.to_string_lossy(),
+            "test-transfer",
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.message.contains("simulated"));
+        let partial = partial_download_path(&save_path.to_string_lossy(), "test-transfer");
+        assert!(!Path::new(&partial).exists());
+        assert!(!save_path.exists());
     }
 
     #[tokio::test]

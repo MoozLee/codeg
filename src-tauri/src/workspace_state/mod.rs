@@ -1164,18 +1164,30 @@ pub async fn get_workspace_snapshot_core(
         .map(|(_, key)| key)
         .unwrap_or_else(|_| normalize_slash_path(&root));
 
-    let state = {
+    let (state, root_display, root_canonical) = {
         let streams = WORKSPACE_STREAMS.lock().map_err(|_| {
             AppCommandError::task_execution_failed("Failed to lock workspace stream registry")
         })?;
 
-        let by_key = streams.get(&key).map(|entry| Arc::clone(&entry.state));
+        let by_key = streams.get(&key).map(|entry| {
+            (
+                Arc::clone(&entry.state),
+                entry.root_display.clone(),
+                entry.root_canonical.clone(),
+            )
+        });
         if let Some(found) = by_key {
             found
         } else if let Some(found) = streams
             .values()
             .find(|entry| entry.root_display == root_path)
-            .map(|entry| Arc::clone(&entry.state))
+            .map(|entry| {
+                (
+                    Arc::clone(&entry.state),
+                    entry.root_display.clone(),
+                    entry.root_canonical.clone(),
+                )
+            })
         {
             found
         } else {
@@ -1185,11 +1197,81 @@ pub async fn get_workspace_snapshot_core(
         }
     };
 
-    let guard = state.lock().map_err(|_| {
-        AppCommandError::task_execution_failed("Failed to lock workspace state snapshot")
-    })?;
+    // The frontend calls this endpoint after every write (delete / upload /
+    // create / rename) via `fetchTree`. The FS watcher debounces 300ms after
+    // each event, so the cached snapshots are reliably stale the moment we're
+    // polled — and if a notify event is ever missed (macOS FSEvents drops
+    // under load, SSE reconnects, host suspends/resumes), the cache stays stale
+    // until the next unrelated FS change comes in. Re-scan disk here and
+    // append deltas if either tree or git diverges, so the client request
+    // itself catches up the state instead of waiting on the watcher.
+    let is_git = is_git_repo(&root_canonical);
+    let tree_fut = folders::get_file_tree(root_display.clone(), Some(WORKSPACE_TREE_MAX_DEPTH));
+    let git_fut = async {
+        if is_git {
+            collect_git_snapshot(&root_display).await.ok()
+        } else {
+            None
+        }
+    };
+    let (tree_result, refreshed_git) = tokio::join!(tree_fut, git_fut);
+    let refreshed_tree = tree_result.ok();
 
-    Ok(guard.snapshot(since_seq))
+    let guard_snapshot = {
+        let mut guard = state.lock().map_err(|_| {
+            AppCommandError::task_execution_failed("Failed to lock workspace state snapshot")
+        })?;
+
+        let mut payload: Vec<WorkspaceDelta> = Vec::new();
+        if let Some(tree) = refreshed_tree {
+            if tree != guard.tree_snapshot {
+                payload.push(WorkspaceDelta::TreeReplace { nodes: tree });
+            }
+        }
+        if let Some(git) = refreshed_git {
+            if git != guard.git_snapshot {
+                payload.push(WorkspaceDelta::GitReplace { entries: git });
+            }
+        } else if !is_git && !guard.git_snapshot.is_empty() {
+            // .git vanished while we weren't watching — clear the stale entries
+            // so the UI stops showing tracked files that no longer exist from
+            // git's perspective.
+            payload.push(WorkspaceDelta::GitReplace {
+                entries: Vec::new(),
+            });
+        }
+
+        let git_presence_changed = guard.is_git_repo != is_git;
+        if git_presence_changed {
+            guard.is_git_repo = is_git;
+            if payload.is_empty() {
+                payload.push(WorkspaceDelta::Meta {
+                    reason: format!("is_git_repo_changed:{is_git}"),
+                });
+            }
+        }
+
+        if !payload.is_empty() {
+            let kind = if payload
+                .iter()
+                .any(|delta| matches!(delta, WorkspaceDelta::TreeReplace { .. }))
+            {
+                "fs_delta".to_string()
+            } else if payload
+                .iter()
+                .any(|delta| matches!(delta, WorkspaceDelta::GitReplace { .. }))
+            {
+                "git_delta".to_string()
+            } else {
+                "meta".to_string()
+            };
+            guard.append_event(kind, payload, false, Vec::new());
+        }
+
+        guard.snapshot(since_seq)
+    };
+
+    Ok(guard_snapshot)
 }
 
 #[cfg(test)]

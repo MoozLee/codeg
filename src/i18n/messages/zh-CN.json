@@ -1586,6 +1586,9 @@
       "openInBrowser": "在浏览器中打开",
       "openInEditor": "在编辑器中打开",
       "openInTerminal": "在终端打开",
+      "upload": "上传文件/目录",
+      "download": "下载文件",
+      "downloadAsZip": "下载为 ZIP",
       "actions": {
         "select": "选择",
         "unselect": "取消选择",
@@ -1616,7 +1619,9 @@
         "saveCopyFailed": "另存为副本失败",
         "watchStartFailed": "文件监听启动失败",
         "createFailed": "创建失败",
-        "openInBrowserFailed": "在浏览器中打开失败"
+        "openInBrowserFailed": "在浏览器中打开失败",
+        "downloadFailed": "下载 {name} 失败",
+        "downloadSaved": "已下载 {name}"
       },
       "createDialog": {
         "newFile": "新建文件",
@@ -1631,6 +1636,31 @@
         "description": "输入新的名称（仅名称，不含路径）。",
         "placeholderDirectory": "新建文件夹名称",
         "placeholderFile": "新建文件名称.ext"
+      },
+      "uploadDialog": {
+        "title": "上传到工作区",
+        "description": "可以在下方修改上传目录，然后添加文件或文件夹。",
+        "workspaceRoot": "工作区根目录",
+        "targetPathLabel": "上传到",
+        "targetPathHint": "实际目录：{path}",
+        "dropHint": "拖拽文件或文件夹到此处，或使用下方按钮",
+        "dropHintActive": "释放鼠标以加入上传队列",
+        "selectFiles": "选择文件",
+        "selectFolder": "选择文件夹",
+        "startUpload": "开始上传",
+        "clearQueue": "清除已完成",
+        "removeItem": "从队列移除",
+        "retry": "重试",
+        "dropZoneAria": "拖放文件到此处，或按回车键浏览",
+        "folderEmpty": "拖入的文件夹中没有可上传的文件",
+        "summary": "总数：{total} · 成功：{succeeded} · 失败：{failed}",
+        "status": {
+          "pending": "等待中",
+          "uploading": "上传中",
+          "success": "完成",
+          "error": "失败",
+          "cancelled": "已取消"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "选择目录 {path} 下要添加到 VCS 的文件。",

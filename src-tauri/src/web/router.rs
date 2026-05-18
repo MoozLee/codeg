@@ -313,6 +313,33 @@ pub fn build_router(
             post(handlers::files::upload_attachment)
                 .layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES as usize + 64 * 1024)),
         )
+        // ─── Workspace files (web upload/download) ───
+        //
+        // Issue #179: when codeg runs in server mode the user has no
+        // native file dialog, so they need HTTP endpoints to move files
+        // between the browser and the workspace. The upload handler
+        // streams to a same-dir staging file then renames into place;
+        // the download handlers stream files and walk-then-zip whole
+        // directories. Disable axum's default multipart body limit here:
+        // workspace files are user-owned bytes moving between the user's
+        // browser and filesystem, not model-context attachments.
+        .route(
+            "/upload_workspace_file",
+            post(handlers::workspace_files::upload_workspace_file)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/workspace_download_ticket",
+            post(handlers::workspace_files::create_download_ticket),
+        )
+        .route(
+            "/download_workspace_file",
+            post(handlers::workspace_files::download_workspace_file),
+        )
+        .route(
+            "/download_workspace_dir",
+            post(handlers::workspace_files::download_workspace_dir),
+        )
         // ─── Folder commands ───
         .route(
             "/list_folder_commands",
@@ -849,10 +876,15 @@ pub fn build_router(
     // Public endpoints — no token required.
     // The login page needs to read the user's preferred language before
     // authenticating so it can render in their chosen locale.
-    let public_api = Router::new().route(
-        "/get_system_language_settings",
-        post(handlers::system_settings::get_system_language_settings),
-    );
+    let public_api = Router::new()
+        .route(
+            "/get_system_language_settings",
+            post(handlers::system_settings::get_system_language_settings),
+        )
+        .route(
+            "/workspace_download/{ticket}",
+            get(handlers::workspace_files::consume_download_ticket),
+        );
 
     let api = public_api.merge(api);
 

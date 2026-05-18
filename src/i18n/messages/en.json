@@ -1586,6 +1586,9 @@
       "openInBrowser": "Open in browser",
       "openInEditor": "Open in editor",
       "openInTerminal": "Open in terminal",
+      "upload": "Upload files/folder",
+      "download": "Download file",
+      "downloadAsZip": "Download as ZIP",
       "actions": {
         "select": "Select",
         "unselect": "Unselect",
@@ -1616,7 +1619,9 @@
         "saveCopyFailed": "Failed to save as copy",
         "watchStartFailed": "Failed to start file watch",
         "createFailed": "Failed to create",
-        "openInBrowserFailed": "Failed to open in browser"
+        "openInBrowserFailed": "Failed to open in browser",
+        "downloadFailed": "Failed to download {name}",
+        "downloadSaved": "Downloaded {name}"
       },
       "createDialog": {
         "newFile": "New file",
@@ -1631,6 +1636,31 @@
         "description": "Enter a new name (name only, no path).",
         "placeholderDirectory": "new-folder-name",
         "placeholderFile": "new-file-name.ext"
+      },
+      "uploadDialog": {
+        "title": "Upload to workspace",
+        "description": "Adjust the destination if needed, then add files or folders.",
+        "workspaceRoot": "workspace root",
+        "targetPathLabel": "Upload to",
+        "targetPathHint": "Resolved path: {path}",
+        "dropHint": "Drag files or folders here, or use the buttons below",
+        "dropHintActive": "Release to add to the queue",
+        "selectFiles": "Select files",
+        "selectFolder": "Select folder",
+        "startUpload": "Start upload",
+        "clearQueue": "Clear finished",
+        "removeItem": "Remove from queue",
+        "retry": "Retry",
+        "dropZoneAria": "Drop files here or activate to browse",
+        "folderEmpty": "No files found in the dropped folder",
+        "summary": "Total: {total} · Succeeded: {succeeded} · Failed: {failed}",
+        "status": {
+          "pending": "Waiting",
+          "uploading": "Uploading",
+          "success": "Done",
+          "error": "Failed",
+          "cancelled": "Cancelled"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "Select files under directory {path} to add to VCS.",

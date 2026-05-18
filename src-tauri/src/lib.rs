@@ -23,6 +23,7 @@ pub mod process;
 mod terminal;
 pub mod web;
 pub mod workspace_state;
+pub mod workspace_transfer;
 
 /// Sweep stale ACP binary cache trash created by the rename-aside fallback in
 /// `acp::binary_cache::clear_agent_cache`. Safe to call any time; intended to
@@ -42,10 +43,9 @@ mod tauri_app {
         acp as acp_commands, chat_channel as chat_channel_commands, conversations,
         experts as experts_commands, file_io, folder_commands, folders, mcp as mcp_commands,
         model_provider as model_provider_commands, notification, pet as pet_commands, project_boot,
-        provider_usage as provider_usage_commands,
-        quick_messages as quick_messages_commands, remote_proxy as remote_proxy_commands,
-        remote_workspace as remote_workspace_commands, system_settings,
-        terminal as terminal_commands, version_control, windows,
+        provider_usage as provider_usage_commands, quick_messages as quick_messages_commands,
+        remote_proxy as remote_proxy_commands, remote_workspace as remote_workspace_commands,
+        system_settings, terminal as terminal_commands, version_control, windows,
         workspace_state as workspace_state_commands,
     };
     use crate::terminal::manager::TerminalManager;
@@ -205,6 +205,9 @@ mod tauri_app {
             // manage per-window subscriptions.
             .manage(std::sync::Arc::new(
                 crate::commands::remote_proxy::RemoteProxyState::new(),
+            ))
+            .manage(std::sync::Arc::new(
+                crate::workspace_transfer::WorkspaceTransferManager::new_from_env(),
             ))
             .manage(std::sync::Arc::new(
                 web::event_bridge::WebEventBroadcaster::new(),
@@ -797,6 +800,10 @@ mod tauri_app {
                 remote_workspace_commands::open_remote_workspace,
                 remote_proxy_commands::remote_http_call,
                 remote_proxy_commands::remote_upload_attachment,
+                remote_proxy_commands::remote_upload_workspace_paths,
+                remote_proxy_commands::remote_cancel_workspace_transfer,
+                remote_proxy_commands::remote_download_workspace_file,
+                remote_proxy_commands::remote_download_workspace_dir,
                 remote_proxy_commands::read_local_file_for_upload,
                 remote_proxy_commands::remote_ws_subscribe,
                 remote_proxy_commands::remote_ws_unsubscribe,

@@ -171,11 +171,10 @@ pub async fn update_folder_pinned(
     Json(params): Json<UpdateFolderPinnedParams>,
 ) -> Result<Json<FolderDetail>, AppCommandError> {
     let db = &state.db;
-    let folder =
-        folder_service::update_folder_pinned(&db.conn, params.folder_id, params.is_pinned)
-            .await
-            .map_err(AppCommandError::from)?
-            .ok_or_else(|| AppCommandError::not_found("Folder not found"))?;
+    let folder = folder_service::update_folder_pinned(&db.conn, params.folder_id, params.is_pinned)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found("Folder not found"))?;
     Ok(Json(folder))
 }
 

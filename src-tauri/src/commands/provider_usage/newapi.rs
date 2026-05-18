@@ -147,9 +147,7 @@ fn aggregate_result(
         Some(plan_name_parts.join(" + "))
     };
 
-    let subscriptions = subscription
-        .as_ref()
-        .and_then(|a| a.subscriptions.clone());
+    let subscriptions = subscription.as_ref().and_then(|a| a.subscriptions.clone());
 
     let expires_at = successes
         .iter()
@@ -418,26 +416,18 @@ fn extract_amounts(item: &serde_json::Value) -> (f64, f64) {
     let total = item
         .get("amount_total")
         .and_then(number_from_any)
-        .or_else(|| {
-            subscription.and_then(|sub| sub.get("amount_total").and_then(number_from_any))
-        })
+        .or_else(|| subscription.and_then(|sub| sub.get("amount_total").and_then(number_from_any)))
         .or_else(|| item.get("total_amount").and_then(number_from_any))
-        .or_else(|| {
-            subscription.and_then(|sub| sub.get("total_amount").and_then(number_from_any))
-        })
+        .or_else(|| subscription.and_then(|sub| sub.get("total_amount").and_then(number_from_any)))
         .or_else(|| item.get("quota").and_then(number_from_any))
         .or_else(|| subscription.and_then(|sub| sub.get("quota").and_then(number_from_any)))
         .unwrap_or(0.0);
     let used = item
         .get("amount_used")
         .and_then(number_from_any)
-        .or_else(|| {
-            subscription.and_then(|sub| sub.get("amount_used").and_then(number_from_any))
-        })
+        .or_else(|| subscription.and_then(|sub| sub.get("amount_used").and_then(number_from_any)))
         .or_else(|| item.get("used_amount").and_then(number_from_any))
-        .or_else(|| {
-            subscription.and_then(|sub| sub.get("used_amount").and_then(number_from_any))
-        })
+        .or_else(|| subscription.and_then(|sub| sub.get("used_amount").and_then(number_from_any)))
         .or_else(|| item.get("used_quota").and_then(number_from_any))
         .or_else(|| subscription.and_then(|sub| sub.get("used_quota").and_then(number_from_any)))
         .unwrap_or(0.0);
@@ -927,12 +917,7 @@ mod tests {
             expires_at: None,
             message: None,
         };
-        let result = aggregate_result(
-            7,
-            &[QueryKind::NewapiBalance],
-            Some(balance),
-            None,
-        );
+        let result = aggregate_result(7, &[QueryKind::NewapiBalance], Some(balance), None);
         assert!(result.success);
         assert_eq!(result.used, Some(0.5));
         assert_eq!(result.total, Some(1.5));

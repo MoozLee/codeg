@@ -1586,6 +1586,9 @@
       "openInBrowser": "Ouvrir dans le navigateur",
       "openInEditor": "Ouvrir dans l’éditeur",
       "openInTerminal": "Ouvrir dans le terminal",
+      "upload": "Téléverser fichiers/dossier",
+      "download": "Télécharger le fichier",
+      "downloadAsZip": "Télécharger en ZIP",
       "actions": {
         "select": "Sélectionner",
         "unselect": "Désélectionner",
@@ -1616,7 +1619,9 @@
         "saveCopyFailed": "Échec de l'enregistrement en copie",
         "watchStartFailed": "Échec du démarrage de la surveillance de fichiers",
         "createFailed": "Échec de la création",
-        "openInBrowserFailed": "Échec de l’ouverture dans le navigateur"
+        "openInBrowserFailed": "Échec de l’ouverture dans le navigateur",
+        "downloadFailed": "Échec du téléchargement de {name}",
+        "downloadSaved": "{name} téléchargé"
       },
       "createDialog": {
         "newFile": "Nouveau fichier",
@@ -1631,6 +1636,31 @@
         "description": "Saisissez un nouveau nom (nom uniquement, sans chemin).",
         "placeholderDirectory": "nouveau-nom-dossier",
         "placeholderFile": "nouveau-nom-fichier.ext"
+      },
+      "uploadDialog": {
+        "title": "Téléverser vers l'espace de travail",
+        "description": "Ajustez la destination si besoin, puis ajoutez des fichiers ou dossiers.",
+        "workspaceRoot": "racine de l'espace de travail",
+        "targetPathLabel": "Téléverser vers",
+        "targetPathHint": "Chemin résolu : {path}",
+        "dropHint": "Déposez des fichiers ou dossiers ici, ou utilisez les boutons ci-dessous",
+        "dropHintActive": "Relâchez pour ajouter à la file d'attente",
+        "selectFiles": "Sélectionner des fichiers",
+        "selectFolder": "Sélectionner un dossier",
+        "startUpload": "Lancer le téléversement",
+        "clearQueue": "Effacer terminés",
+        "removeItem": "Retirer de la file",
+        "retry": "Réessayer",
+        "dropZoneAria": "Déposez ici ou activez pour parcourir",
+        "folderEmpty": "Aucun fichier trouvé dans le dossier déposé",
+        "summary": "Total : {total} · Réussis : {succeeded} · Échoués : {failed}",
+        "status": {
+          "pending": "En attente",
+          "uploading": "Téléversement",
+          "success": "Terminé",
+          "error": "Échec",
+          "cancelled": "Annulé"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "Sélectionnez des fichiers sous le dossier {path} à ajouter au VCS.",

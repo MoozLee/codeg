@@ -7380,7 +7380,7 @@ supports_websockets = true`}
                                   event.target.value
                                 )
                               }}
-                              placeholder="claude-opus-4.7"
+                              placeholder="claude-opus-4-7"
                             />
                           </div>
                           <div className="space-y-1.5">
@@ -7425,7 +7425,7 @@ supports_websockets = true`}
                                   event.target.value
                                 )
                               }}
-                              placeholder="claude-opus-4.7"
+                              placeholder="claude-opus-4-7"
                             />
                           </div>
                         </div>

@@ -159,6 +159,9 @@ async fn async_main() {
         data_dir,
         web_server_state: WebServerState::new(),
         chat_channel_manager: codeg_lib::app_state::default_chat_channel_manager(),
+        workspace_transfer: Arc::new(
+            codeg_lib::workspace_transfer::WorkspaceTransferManager::new_from_env(),
+        ),
         pet_state: pet_state_handle.clone(),
         provider_usage_cache: codeg_lib::app_state::default_provider_usage_cache(),
     });

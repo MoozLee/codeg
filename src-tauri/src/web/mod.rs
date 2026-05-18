@@ -640,6 +640,12 @@ pub(crate) async fn do_start_web_server_tauri(
         ),
         web_server_state: WebServerState::new(), // placeholder; not used by handlers
         chat_channel_manager: crate::app_state::default_chat_channel_manager(),
+        workspace_transfer: app
+            .try_state::<Arc<crate::workspace_transfer::WorkspaceTransferManager>>()
+            .map(|state| state.inner().clone())
+            .unwrap_or_else(|| {
+                Arc::new(crate::workspace_transfer::WorkspaceTransferManager::new_from_env())
+            }),
         // Reuse the same handle the Tauri-mode subscriber writes to so HTTP
         // and webview readers see the identical snapshot.
         pet_state: app

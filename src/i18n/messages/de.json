@@ -1586,6 +1586,9 @@
       "openInBrowser": "Im Browser öffnen",
       "openInEditor": "Im Editor öffnen",
       "openInTerminal": "Im Terminal öffnen",
+      "upload": "Dateien/Ordner hochladen",
+      "download": "Datei herunterladen",
+      "downloadAsZip": "Als ZIP herunterladen",
       "actions": {
         "select": "Auswählen",
         "unselect": "Auswahl aufheben",
@@ -1616,7 +1619,9 @@
         "saveCopyFailed": "Speichern als Kopie fehlgeschlagen",
         "watchStartFailed": "Dateiwatch konnte nicht gestartet werden",
         "createFailed": "Erstellen fehlgeschlagen",
-        "openInBrowserFailed": "Konnte nicht im Browser geöffnet werden"
+        "openInBrowserFailed": "Konnte nicht im Browser geöffnet werden",
+        "downloadFailed": "Herunterladen von {name} fehlgeschlagen",
+        "downloadSaved": "{name} heruntergeladen"
       },
       "createDialog": {
         "newFile": "Neue Datei",
@@ -1631,6 +1636,31 @@
         "description": "Geben Sie einen neuen Namen ein (nur Name, kein Pfad).",
         "placeholderDirectory": "neuer-ordnername",
         "placeholderFile": "neuer-dateiname.ext"
+      },
+      "uploadDialog": {
+        "title": "In den Arbeitsbereich hochladen",
+        "description": "Passe das Ziel bei Bedarf an und füge Dateien oder Ordner hinzu.",
+        "workspaceRoot": "Arbeitsbereich-Stammverzeichnis",
+        "targetPathLabel": "Hochladen nach",
+        "targetPathHint": "Aufgelöster Pfad: {path}",
+        "dropHint": "Dateien oder Ordner hier ablegen oder die Schaltflächen unten verwenden",
+        "dropHintActive": "Loslassen, um zur Warteschlange hinzuzufügen",
+        "selectFiles": "Dateien auswählen",
+        "selectFolder": "Ordner auswählen",
+        "startUpload": "Upload starten",
+        "clearQueue": "Erledigte entfernen",
+        "removeItem": "Aus der Warteschlange entfernen",
+        "retry": "Wiederholen",
+        "dropZoneAria": "Dateien hier ablegen oder aktivieren zum Durchsuchen",
+        "folderEmpty": "Keine Dateien im abgelegten Ordner gefunden",
+        "summary": "Gesamt: {total} · Erfolgreich: {succeeded} · Fehlgeschlagen: {failed}",
+        "status": {
+          "pending": "Wartet",
+          "uploading": "Wird hochgeladen",
+          "success": "Fertig",
+          "error": "Fehlgeschlagen",
+          "cancelled": "Abgebrochen"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "Wählen Sie Dateien im Verzeichnis {path} aus, um sie zu VCS hinzuzufügen.",

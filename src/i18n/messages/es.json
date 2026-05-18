@@ -1586,6 +1586,9 @@
       "openInBrowser": "Abrir en el navegador",
       "openInEditor": "Abrir en editor",
       "openInTerminal": "Abrir en terminal",
+      "upload": "Subir archivos/carpeta",
+      "download": "Descargar archivo",
+      "downloadAsZip": "Descargar como ZIP",
       "actions": {
         "select": "Seleccionar",
         "unselect": "Deseleccionar",
@@ -1616,7 +1619,9 @@
         "saveCopyFailed": "No se pudo guardar como copia",
         "watchStartFailed": "No se pudo iniciar la vigilancia de archivos",
         "createFailed": "Error al crear",
-        "openInBrowserFailed": "No se pudo abrir en el navegador"
+        "openInBrowserFailed": "No se pudo abrir en el navegador",
+        "downloadFailed": "No se pudo descargar {name}",
+        "downloadSaved": "{name} descargado"
       },
       "createDialog": {
         "newFile": "Nuevo archivo",
@@ -1631,6 +1636,31 @@
         "description": "Introduce un nuevo nombre (solo nombre, sin ruta).",
         "placeholderDirectory": "nuevo-nombre-carpeta",
         "placeholderFile": "nuevo-nombre-archivo.ext"
+      },
+      "uploadDialog": {
+        "title": "Subir al área de trabajo",
+        "description": "Ajusta el destino si es necesario y añade archivos o carpetas.",
+        "workspaceRoot": "raíz del área de trabajo",
+        "targetPathLabel": "Subir a",
+        "targetPathHint": "Ruta resuelta: {path}",
+        "dropHint": "Arrastra archivos o carpetas aquí, o usa los botones de abajo",
+        "dropHintActive": "Suelta para añadir a la cola",
+        "selectFiles": "Seleccionar archivos",
+        "selectFolder": "Seleccionar carpeta",
+        "startUpload": "Iniciar subida",
+        "clearQueue": "Limpiar finalizados",
+        "removeItem": "Quitar de la cola",
+        "retry": "Reintentar",
+        "dropZoneAria": "Suelta archivos aquí o activa para examinar",
+        "folderEmpty": "No se encontraron archivos en la carpeta soltada",
+        "summary": "Total: {total} · Con éxito: {succeeded} · Con error: {failed}",
+        "status": {
+          "pending": "En espera",
+          "uploading": "Subiendo",
+          "success": "Completado",
+          "error": "Falló",
+          "cancelled": "Cancelado"
+        }
       },
       "directoryDialog": {
         "descriptionAdd": "Selecciona archivos del directorio {path} para añadir a VCS.",

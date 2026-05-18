@@ -423,9 +423,10 @@ pub async fn test_provider_usage_config_core(
         let kinds = validate_query_kinds(&input.query_kinds)?;
         url_safety::ensure_https_url(&input.base_url)?;
         validate_user_id(&input.user_id)?;
-        let token = input.token.clone().ok_or_else(|| {
-            AppCommandError::invalid_input("Token is required for draft test")
-        })?;
+        let token = input
+            .token
+            .clone()
+            .ok_or_else(|| AppCommandError::invalid_input("Token is required for draft test"))?;
         validate_token(&token)?;
         (kinds, input.base_url, input.user_id, token, 0)
     };

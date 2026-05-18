@@ -16,9 +16,7 @@ use std::time::Duration;
 use sea_orm::DatabaseConnection;
 
 use crate::db::service::provider_usage_config_service;
-use crate::models::provider_usage::{
-    decode_query_kinds, ProviderUsageResult, QueryKind,
-};
+use crate::models::provider_usage::{decode_query_kinds, ProviderUsageResult, QueryKind};
 use crate::web::event_bridge::{emit_event, EventEmitter};
 
 use super::cache::UsageCache;

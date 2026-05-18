@@ -64,3 +64,23 @@ export function getTransport(): Transport {
 export function isDesktop(): boolean {
   return detectEnvironment() === "tauri"
 }
+
+/// True when the current window is a Tauri client bound to a remote
+/// codeg-server (a remote-desktop window). Distinct from `isDesktop()`,
+/// which is purely a runtime check — a remote-desktop window IS a Tauri
+/// runtime but its API calls and file ops must target the remote host,
+/// not the local filesystem.
+export function isRemoteDesktopMode(): boolean {
+  return _remoteTransport !== null
+}
+
+/// Surface a remote-server 401 to the same UI the transport uses for its
+/// own auth failures. Direct `invoke()` calls (workspace file
+/// upload/download) bypass `RemoteDesktopTransport.call`, so without
+/// this they'd toast "token invalid" but never raise the
+/// `connection-expired` dialog the rest of the app uses. Calling this on
+/// a non-remote-desktop window is a no-op so the helper is safe to use
+/// unconditionally from a 401 catch block.
+export function notifyRemoteDesktopUnauthorized(): void {
+  _remoteConfig?.onUnauthorized?.()
+}

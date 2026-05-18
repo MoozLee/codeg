@@ -4,6 +4,8 @@ import {
   getShellTransport,
   getTransport,
   isDesktop,
+  isRemoteDesktopMode,
+  notifyRemoteDesktopUnauthorized,
 } from "./transport"
 import { getCodegToken, redirectToCodegLogin } from "./transport/web-auth"
 import { getCurrentEffectiveAppLocale } from "./i18n"
@@ -1809,6 +1811,403 @@ export async function uploadLocalPathToRemote(
     sessionId: sessionId ?? null,
     dataBase64: file.dataBase64,
   })
+}
+
+// ─── Workspace file upload / download ───
+//
+// Issue #179: in server mode the user has no native file dialog, so the
+// file-tree context menu offers explicit upload + download actions
+// against these endpoints. The local desktop build (no remote) uses OS
+// dialogs instead, so these helpers throw there. A remote-desktop
+// window is a Tauri runtime but its file ops must target the remote
+// host — it goes through the `remote_*_workspace_*` proxy commands.
+
+export interface UploadWorkspaceFileResult {
+  path: string
+  name: string
+  size: number
+}
+
+/**
+ * Returns true when the current window can drive these helpers. Both
+ * pure-web mode and remote-desktop mode qualify; only a local-desktop
+ * Tauri window (no remote binding) is rejected, because it has its own
+ * native file dialogs and these helpers would just be the wrong tool.
+ */
+function isWorkspaceFileApiAvailable(): boolean {
+  return !isDesktop() || isRemoteDesktopMode()
+}
+
+function assertWorkspaceFileApiAvailable(action: string): void {
+  if (!isWorkspaceFileApiAvailable()) {
+    throw new Error(
+      `${action} is not available in local desktop mode; use the OS file dialogs instead.`
+    )
+  }
+}
+
+async function workspaceFileFetch(
+  endpoint: string,
+  body: BodyInit,
+  isMultipart: boolean
+): Promise<Response> {
+  const token = getCodegToken()
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  }
+  if (!isMultipart) {
+    headers["Content-Type"] = "application/json"
+  }
+  const res = await fetch(`${window.location.origin}/api/${endpoint}`, {
+    method: "POST",
+    headers,
+    body,
+  })
+  if (res.status === 401) {
+    redirectToCodegLogin()
+    throw new Error("Unauthorized")
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({
+      code: "network_error",
+      message: `HTTP ${res.status}`,
+    }))
+    throw err
+  }
+  return res
+}
+
+export interface UploadWorkspaceFileArgs {
+  rootPath: string
+  targetPath: string
+  file: File
+  relativePath?: string | null
+  signal?: AbortSignal
+  /**
+   * Byte-level progress callback fired on the request body as the
+   * browser uploads it. `total` may equal 0 on streams where the size
+   * is not pre-computable (rare for `File` objects but possible for
+   * `Blob` slices) — callers should treat 0 as "unknown" rather than
+   * "complete".
+   */
+  onProgress?: (loaded: number, total: number) => void
+}
+
+/**
+ * Upload one workspace file. Two transports:
+ *
+ *   - **Web** — `XMLHttpRequest` direct to `/api/upload_workspace_file`,
+ *     so we get byte-level upload progress and `AbortSignal` honoring.
+ *   - **Remote desktop** — uses `uploadWorkspaceLocalPathsToRemote` with
+ *     native file paths. Browser `File` objects are intentionally rejected
+ *     there because Tauri IPC is not a streaming binary transport.
+ *
+ * Empty files are allowed: a workspace legitimately contains zero-byte
+ * placeholders (`.gitkeep`, `__init__.py`). The chat-attachment uploader
+ * still rejects them because feeding nothing to an LLM is meaningless,
+ * but here we forward whatever the user picked.
+ */
+export async function uploadWorkspaceFile(
+  args: UploadWorkspaceFileArgs
+): Promise<UploadWorkspaceFileResult> {
+  assertWorkspaceFileApiAvailable("uploadWorkspaceFile")
+
+  if (isRemoteDesktopMode()) {
+    throw new Error(
+      "uploadWorkspaceFile requires browser File input; use uploadWorkspaceLocalPathsToRemote in remote desktop mode"
+    )
+  }
+
+  return new Promise<UploadWorkspaceFileResult>((resolve, reject) => {
+    const token = getCodegToken()
+    const xhr = new XMLHttpRequest()
+    xhr.open("POST", `${window.location.origin}/api/upload_workspace_file`)
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`)
+
+    if (args.onProgress) {
+      const onProgress = args.onProgress
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          onProgress(event.loaded, event.total)
+        }
+      }
+    }
+
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        redirectToCodegLogin()
+        reject(new Error("Unauthorized"))
+        return
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        let err: unknown
+        try {
+          err = JSON.parse(xhr.responseText) as unknown
+        } catch {
+          err = {
+            code: "network_error",
+            message: `HTTP ${xhr.status}`,
+          }
+        }
+        reject(err)
+        return
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as UploadWorkspaceFileResult)
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)))
+      }
+    }
+    xhr.onerror = () => reject(new Error("Network error during upload"))
+    xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"))
+
+    // Wire the AbortSignal. The listener is removed on `loadend` so a
+    // long-lived controller shared across many sequential uploads
+    // doesn't leak listeners (the parent XHR will have been GC'd
+    // anyway, but the listener kept a strong reference until then).
+    if (args.signal) {
+      if (args.signal.aborted) {
+        xhr.abort()
+        return
+      }
+      const signal = args.signal
+      const onAbort = () => xhr.abort()
+      signal.addEventListener("abort", onAbort, { once: true })
+      xhr.addEventListener("loadend", () => {
+        signal.removeEventListener("abort", onAbort)
+      })
+    }
+
+    // Order matters: the backend reads text fields before the `file`
+    // stream so it can resolve the destination before any bytes land.
+    const form = new FormData()
+    form.append("root_path", args.rootPath)
+    form.append("target_path", args.targetPath)
+    if (args.relativePath) {
+      form.append("relative_path", args.relativePath)
+    }
+    form.append("file", args.file, args.file.name)
+    xhr.send(form)
+  })
+}
+
+export interface RemoteWorkspaceUploadPathEntry {
+  localPath: string
+  relativePath?: string | null
+}
+
+export interface RemoteWorkspaceUploadPathsResult {
+  transferId: string
+  files: UploadWorkspaceFileResult[]
+  bytes: number
+}
+
+export async function uploadWorkspaceLocalPathsToRemote(args: {
+  rootPath: string
+  targetPath: string
+  entries: RemoteWorkspaceUploadPathEntry[]
+}): Promise<RemoteWorkspaceUploadPathsResult> {
+  const connectionId = getActiveRemoteConnectionId()
+  if (connectionId === null) {
+    throw new Error(
+      "uploadWorkspaceLocalPathsToRemote: no active remote connection"
+    )
+  }
+  try {
+    return await getShellTransport().call<RemoteWorkspaceUploadPathsResult>(
+      "remote_upload_workspace_paths",
+      {
+        connectionId,
+        rootPath: args.rootPath,
+        targetPath: args.targetPath,
+        entries: args.entries,
+      }
+    )
+  } catch (err) {
+    if (isRemoteAuthenticationFailed(err)) {
+      notifyRemoteDesktopUnauthorized()
+    }
+    throw err
+  }
+}
+
+export interface WorkspaceTransferProgress {
+  transferId: string
+  direction: "upload" | "download"
+  loaded: number
+  total: number | null
+  state: "running" | "done" | "cancelled" | "error"
+  path?: string | null
+  error?: string | null
+}
+
+export async function listenWorkspaceTransferProgress(
+  handler: (event: WorkspaceTransferProgress) => void
+): Promise<() => void> {
+  if (!isDesktop()) return () => {}
+  const { listen } = await import("@tauri-apps/api/event")
+  return listen<WorkspaceTransferProgress>(
+    "workspace://transfer-progress",
+    (event) => handler(event.payload)
+  )
+}
+
+export async function cancelWorkspaceTransfer(
+  transferId: string
+): Promise<boolean> {
+  return getShellTransport().call<boolean>("remote_cancel_workspace_transfer", {
+    transferId,
+  })
+}
+
+function isRemoteAuthenticationFailed(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "authentication_failed"
+  )
+}
+
+export function isUploadAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError"
+}
+
+interface WorkspaceDownloadTicket {
+  ticket: string
+  url: string
+  filename: string
+  expiresAt: number
+}
+
+type WorkspaceDownloadKind = "file" | "dir"
+
+function openBrowserDownloadUrl(url: string, filename: string): void {
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  anchor.rel = "noopener"
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+async function createWorkspaceDownloadTicket(args: {
+  rootPath: string
+  path: string
+  kind: WorkspaceDownloadKind
+}): Promise<WorkspaceDownloadTicket> {
+  const res = await workspaceFileFetch(
+    "workspace_download_ticket",
+    JSON.stringify(args),
+    false
+  )
+  return res.json()
+}
+
+/**
+ * Sentinel return from a remote-desktop download path when the user
+ * cancels the Tauri save dialog. Web mode never returns this — the
+ * browser owns the download manager and there's no per-call cancel.
+ */
+export const WORKSPACE_DOWNLOAD_CANCELLED = "cancelled" as const
+
+export type WorkspaceDownloadResult =
+  | { status: "started" }
+  | { status: "done"; savedPath?: string; bytes?: number; transferId?: string }
+  | { status: typeof WORKSPACE_DOWNLOAD_CANCELLED }
+
+export async function downloadWorkspaceFile(
+  rootPath: string,
+  path: string,
+  fileName: string
+): Promise<WorkspaceDownloadResult> {
+  assertWorkspaceFileApiAvailable("downloadWorkspaceFile")
+
+  if (isRemoteDesktopMode()) {
+    return downloadWorkspaceViaRemoteProxy({
+      endpoint: "remote_download_workspace_file",
+      rootPath,
+      path,
+      suggestedName: fileName,
+    })
+  }
+
+  const ticket = await createWorkspaceDownloadTicket({
+    rootPath,
+    path,
+    kind: "file",
+  })
+  openBrowserDownloadUrl(ticket.url, ticket.filename || fileName)
+  return { status: "started" }
+}
+
+export async function downloadWorkspaceDir(
+  rootPath: string,
+  path: string,
+  dirName: string
+): Promise<WorkspaceDownloadResult> {
+  assertWorkspaceFileApiAvailable("downloadWorkspaceDir")
+
+  if (isRemoteDesktopMode()) {
+    return downloadWorkspaceViaRemoteProxy({
+      endpoint: "remote_download_workspace_dir",
+      rootPath,
+      path,
+      suggestedName: `${dirName}.zip`,
+    })
+  }
+
+  const ticket = await createWorkspaceDownloadTicket({
+    rootPath,
+    path,
+    kind: "dir",
+  })
+  openBrowserDownloadUrl(ticket.url, ticket.filename || `${dirName}.zip`)
+  return { status: "started" }
+}
+
+async function downloadWorkspaceViaRemoteProxy(opts: {
+  endpoint: "remote_download_workspace_file" | "remote_download_workspace_dir"
+  rootPath: string
+  path: string
+  suggestedName: string
+}): Promise<WorkspaceDownloadResult> {
+  const connectionId = getActiveRemoteConnectionId()
+  if (connectionId === null) {
+    throw new Error(
+      "downloadWorkspaceFile (remote): no active remote connection"
+    )
+  }
+  const { save } = await import("@tauri-apps/plugin-dialog")
+  const savePath = await save({ defaultPath: opts.suggestedName })
+  if (!savePath) {
+    return { status: WORKSPACE_DOWNLOAD_CANCELLED }
+  }
+  const { invoke } = await import("@tauri-apps/api/core")
+  let result: { transferId: string; bytes: number }
+  try {
+    result = await invoke<{ transferId: string; bytes: number }>(
+      opts.endpoint,
+      {
+        connectionId,
+        rootPath: opts.rootPath,
+        path: opts.path,
+        savePath,
+      }
+    )
+  } catch (err) {
+    if (isRemoteAuthenticationFailed(err)) {
+      notifyRemoteDesktopUnauthorized()
+    }
+    throw err
+  }
+  return {
+    status: "done",
+    savedPath: savePath,
+    bytes: result.bytes,
+    transferId: result.transferId,
+  }
 }
 
 // File tree and git log commands
