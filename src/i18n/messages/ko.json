@@ -667,7 +667,7 @@
     "authModeCustomEndpointHint": "API URL과 API Key를 수동으로 구성하여 사용자 정의 엔드포인트에 연결합니다.",
     "authModeModelProvider": "모델 공급자",
     "modelProvider": "모델 공급자",
-    "modelProviderHint": "구성된 모델 공급자의 API URL 및 API Key를 사용합니다.",
+    "modelProviderHint": "구성된 모델 공급자의 API URL, API Key 및 모델을 사용합니다.",
     "selectModelProvider": "모델 공급자 선택",
     "noModelProviderAvailable": "이 에이전트에 구성된 모델 공급자가 없습니다. 모델 공급자 설정에서 추가하세요.",
     "claude": {
@@ -1870,6 +1870,28 @@
         "enableAgentFirstPlaceholder": "세션을 시작하기 전에 최소 한 개의 에이전트를 활성화하세요...",
         "askAnythingPlaceholder": "무엇이든 물어보세요..."
       },
+      "welcomePanel": {
+        "title": "Codeg에 오신 것을 환영합니다",
+        "tips": {
+          "tileTabs": "대화 탭을 우클릭하고 '바둑판 표시'를 선택하면 여러 세션을 나란히 비교할 수 있습니다",
+          "pinTab": "대화 탭을 더블클릭하면 고정되어 새로 열린 세션이 자동으로 대체하지 않습니다",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut>로 새 대화를 열고, <shortcut>{searchConversations}</shortcut>로 기록을 검색할 수 있습니다",
+          "slashAtMention": "입력창에서 /를 입력하면 슬래시 명령, @를 입력하면 프로젝트 내 파일을 참조할 수 있습니다",
+          "pasteDropFiles": "스크린샷을 붙여넣거나 파일을 입력창에 드롭하면 바로 첨부됩니다",
+          "queueMessage": "에이전트가 응답 중일 때도 계속 입력하면 다음 메시지가 대기열에 들어가 응답 후 자동 전송됩니다",
+          "draftAutoSave": "보내지 않은 초안은 대화별로 자동 저장되어 돌아왔을 때 복원됩니다",
+          "forkSend": "전송 버튼의 드롭다운에서 '분기 후 전송'을 선택하면 현재 지점에서 새 탭으로 분기할 수 있습니다",
+          "exportConversation": "대화 내용을 우클릭하면 Markdown / HTML / 이미지로 내보낼 수 있습니다",
+          "chatChannels": "'설정 → 채팅 채널'에서 Telegram / Lark / WeChat을 연결하면 휴대폰에서 이어서 사용할 수 있습니다",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut>로 오른쪽 패널을 열어 이번 세션에서 변경된 파일과 Git 변경 사항을 확인할 수 있습니다",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut>로 내장 터미널, <shortcut>{toggleSidebar}</shortcut>로 사이드바를 토글할 수 있습니다",
+          "customShortcuts": "모든 단축키는 '설정 → 단축키'에서 자유롭게 변경할 수 있습니다",
+          "webService": "'설정 → 웹 서비스'를 켜면 팀원이 브라우저로 같은 codeg에 접속할 수 있습니다",
+          "fusionMode": "상단 도구 모음의 'Fusion 모드'로 전환하면 대화와 파일 / Git 패널이 나란히 표시됩니다",
+          "quickMessages": "입력창 옆 + 버튼에서 '빠른 메시지'를 선택하면 저장된 스니펫을 한 번에 삽입할 수 있습니다('설정 → 빠른 메시지'에서 관리)",
+          "experts": "+ 버튼의 '전문가 스킬' 메뉴에서 디버그 / 기획 등 사전 정의된 역할을 한 번에 불러올 수 있습니다"
+        }
+      },
       "agentSelector": {
         "noEnabledAgents": "활성화된 에이전트가 없습니다",
         "openAgentsSettings": "에이전트 설정 열기"
@@ -2361,6 +2383,17 @@
     "apiKeyKeepCurrent": "현재 값을 유지하려면 비워두세요",
     "agentTypes": "에이전트 유형",
     "agentTypesRequired": "최소 하나의 에이전트 유형을 선택하세요.",
+    "agentType": "에이전트 유형",
+    "agentTypeRequired": "에이전트 유형을 선택하세요.",
+    "agentTypeImmutableHint": "에이전트 유형은 생성 후 변경할 수 없습니다.",
+    "model": "모델",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "메인 모델",
+    "claudeReasoningModel": "추론 모델 (사고)",
+    "claudeHaikuDefaultModel": "기본 Haiku 모델",
+    "claudeSonnetDefaultModel": "기본 Sonnet 모델",
+    "claudeOpusDefaultModel": "기본 Opus 모델",
     "nameRequired": "제공업체 이름은 필수입니다.",
     "apiUrlRequired": "API URL은 필수입니다.",
     "apiKeyRequired": "API 키는 필수입니다.",

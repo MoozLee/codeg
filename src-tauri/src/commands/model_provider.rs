@@ -10,16 +10,12 @@ use crate::web::event_bridge::EventEmitter;
 // Shared core functions (used by both Tauri commands and web handlers)
 // ---------------------------------------------------------------------------
 
-fn validate_agent_types(agent_types: &[String]) -> Result<(), AppCommandError> {
-    if agent_types.is_empty() {
-        return Err(AppCommandError::invalid_input(
-            "At least one agent type is required",
-        ));
+fn validate_agent_type(agent_type: &str) -> Result<(), AppCommandError> {
+    if agent_type.trim().is_empty() {
+        return Err(AppCommandError::invalid_input("Agent type is required"));
     }
-    for at in agent_types {
-        let _: AgentType = serde_json::from_value(serde_json::Value::String(at.clone()))
-            .map_err(|_| AppCommandError::invalid_input(format!("Invalid agent type: {at}")))?;
-    }
+    let _: AgentType = serde_json::from_value(serde_json::Value::String(agent_type.to_string()))
+        .map_err(|_| AppCommandError::invalid_input(format!("Invalid agent type: {agent_type}")))?;
     Ok(())
 }
 
@@ -57,6 +53,28 @@ fn validate_fields(
     Ok(())
 }
 
+fn validate_model(agent_type: &str, model: Option<&str>) -> Result<(), AppCommandError> {
+    let Some(raw) = model.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+    if raw.len() > 4096 {
+        return Err(AppCommandError::invalid_input(
+            "Model must be 4096 characters or less",
+        ));
+    }
+    // ClaudeCode requires a JSON object; other agents accept a plain string.
+    if agent_type == "claude_code" {
+        let value: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|e| AppCommandError::invalid_input(format!("Invalid Claude model JSON: {e}")))?;
+        if !value.is_object() {
+            return Err(AppCommandError::invalid_input(
+                "Claude model must be a JSON object",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn list_model_providers_core(
     db: &AppDatabase,
 ) -> Result<Vec<ModelProviderInfo>, AppCommandError> {
@@ -71,72 +89,122 @@ pub async fn create_model_provider_core(
     name: String,
     api_url: String,
     api_key: String,
-    agent_types: Vec<String>,
+    agent_type: String,
+    model: Option<String>,
 ) -> Result<ModelProviderInfo, AppCommandError> {
     validate_fields(Some(&name), Some(&api_url), Some(&api_key))?;
-    validate_agent_types(&agent_types)?;
-    let agent_types_json = serde_json::to_string(&agent_types)
-        .map_err(|e| AppCommandError::invalid_input(e.to_string()))?;
+    validate_agent_type(&agent_type)?;
+    validate_model(&agent_type, model.as_deref())?;
 
-    let model = model_provider_service::create(&db.conn, name, api_url, api_key, agent_types_json)
-        .await
-        .map_err(AppCommandError::from)?;
-    Ok(ModelProviderInfo::from(model))
+    let model_row = model_provider_service::create(
+        &db.conn,
+        name,
+        api_url,
+        api_key,
+        agent_type,
+        model,
+    )
+    .await
+    .map_err(AppCommandError::from)?;
+    Ok(ModelProviderInfo::from(model_row))
 }
 
+/// Update a model provider. For the `model` parameter:
+/// - `None` (omitted) means "don't change"
+/// - `Some("")` means "clear"
+/// - `Some(value)` means "set to value"
+#[allow(clippy::too_many_arguments)]
 pub async fn update_model_provider_core(
     db: &AppDatabase,
     id: i32,
     name: Option<String>,
     api_url: Option<String>,
     api_key: Option<String>,
-    agent_types: Option<Vec<String>>,
+    agent_type: Option<String>,
+    model: Option<String>,
     emitter: &EventEmitter,
 ) -> Result<ModelProviderInfo, AppCommandError> {
     validate_fields(name.as_deref(), api_url.as_deref(), api_key.as_deref())?;
-    let agent_types_json = if let Some(ref ats) = agent_types {
-        validate_agent_types(ats)?;
-        Some(
-            serde_json::to_string(ats)
-                .map_err(|e| AppCommandError::invalid_input(e.to_string()))?,
-        )
-    } else {
-        None
-    };
+    if let Some(ref at) = agent_type {
+        validate_agent_type(at)?;
+    }
 
-    // Fetch old provider to detect credential changes.
+    // Fetch old provider to detect changes and to determine effective agent_type for model validation.
     let old_provider = model_provider_service::get_by_id(&db.conn, id)
         .await
         .map_err(AppCommandError::from)?
         .ok_or_else(|| AppCommandError::not_found(format!("model provider not found: {id}")))?;
 
-    let model = model_provider_service::update(
+    // agent_type is immutable after creation: dependent agents bind to a provider by id
+    // and rely on provider.agent_type matching their own. Changing it would silently
+    // mis-parse provider.model (e.g. Claude JSON written into Codex's config.toml).
+    if let Some(ref new_at) = agent_type {
+        if new_at != &old_provider.agent_type {
+            return Err(AppCommandError::invalid_input(format!(
+                "agent_type is immutable after creation (current: {}, requested: {new_at})",
+                old_provider.agent_type
+            )));
+        }
+    }
+
+    let effective_agent_type = old_provider.agent_type.as_str();
+    if let Some(ref raw) = model {
+        validate_model(effective_agent_type, Some(raw))?;
+    }
+
+    // Translate Some("") to Some(None) (clear), Some(value) to Some(Some(value)), None to None.
+    let model_patch: Option<Option<String>> = model.as_ref().map(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+
+    let model_row = model_provider_service::update(
         &db.conn,
         id,
         name,
         api_url.clone(),
         api_key.clone(),
-        agent_types_json,
+        None, // agent_type is immutable; rejected above if differs
+        model_patch.clone(),
     )
     .await
     .map_err(AppCommandError::from)?;
 
-    // Cascade credential changes to all dependent agent settings and config files.
+    // Cascade credential/model changes to all dependent agent settings and config files.
     let url_changed = api_url
         .as_deref()
         .is_some_and(|u| u != old_provider.api_url);
     let key_changed = api_key
         .as_deref()
         .is_some_and(|k| k != old_provider.api_key);
-    if url_changed || key_changed {
+    let model_changed = model_patch
+        .as_ref()
+        .is_some_and(|new_value| new_value.as_deref() != old_provider.model.as_deref());
+
+    if url_changed || key_changed || model_changed {
         let final_url = api_url.as_deref().unwrap_or(&old_provider.api_url);
         let final_key = api_key.as_deref().unwrap_or(&old_provider.api_key);
-        acp::cascade_update_model_provider(db, id, final_url, final_key, emitter)
-            .await
-            .map_err(|e| AppCommandError::invalid_input(e.to_string()))?;
+        let final_model_owned: Option<String> = match &model_patch {
+            Some(inner) => inner.clone(),
+            None => old_provider.model.clone(),
+        };
+        acp::cascade_update_model_provider(
+            db,
+            id,
+            final_url,
+            final_key,
+            final_model_owned.as_deref(),
+            emitter,
+        )
+        .await
+        .map_err(|e| AppCommandError::invalid_input(e.to_string()))?;
     }
 
-    Ok(ModelProviderInfo::from(model))
+    Ok(ModelProviderInfo::from(model_row))
 }
 
 pub async fn delete_model_provider_core(db: &AppDatabase, id: i32) -> Result<(), AppCommandError> {
@@ -185,24 +253,27 @@ pub async fn create_model_provider(
     name: String,
     api_url: String,
     api_key: String,
-    agent_types: Vec<String>,
+    agent_type: String,
+    model: Option<String>,
 ) -> Result<ModelProviderInfo, AppCommandError> {
-    create_model_provider_core(&db, name, api_url, api_key, agent_types).await
+    create_model_provider_core(&db, name, api_url, api_key, agent_type, model).await
 }
 
 #[cfg(feature = "tauri-runtime")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn update_model_provider(
     db: tauri::State<'_, AppDatabase>,
     id: i32,
     name: Option<String>,
     api_url: Option<String>,
     api_key: Option<String>,
-    agent_types: Option<Vec<String>>,
+    agent_type: Option<String>,
+    model: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<ModelProviderInfo, AppCommandError> {
     let emitter = EventEmitter::Tauri(app);
-    update_model_provider_core(&db, id, name, api_url, api_key, agent_types, &emitter).await
+    update_model_provider_core(&db, id, name, api_url, api_key, agent_type, model, &emitter).await
 }
 
 #[cfg(feature = "tauri-runtime")]

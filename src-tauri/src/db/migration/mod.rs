@@ -19,6 +19,7 @@ mod m20260511_000001_paired_devices;
 mod m20260513_000001_provider_usage_config;
 mod m20260513_000001_remote_workspace_connection;
 mod m20260513_000002_provider_usage_config_query_kinds;
+mod m20260518_000001_model_provider_single_type_and_model;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -44,6 +45,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260513_000001_provider_usage_config::Migration),
             Box::new(m20260513_000001_remote_workspace_connection::Migration),
             Box::new(m20260513_000002_provider_usage_config_query_kinds::Migration),
+            Box::new(m20260518_000001_model_provider_single_type_and_model::Migration),
         ]
     }
 }

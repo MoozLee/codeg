@@ -1978,17 +1978,104 @@ pub(crate) async fn apply_model_provider_env(
     }
 }
 
+/// Claude Code provider-model JSON keys → ANTHROPIC_*_MODEL env var names.
+const CLAUDE_MODEL_KEY_MAP: &[(&str, &str)] = &[
+    ("main", "ANTHROPIC_MODEL"),
+    ("reasoning", "ANTHROPIC_REASONING_MODEL"),
+    ("haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+    ("sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL"),
+    ("opus", "ANTHROPIC_DEFAULT_OPUS_MODEL"),
+];
+
+/// Parse the model field stored on a model_provider into the env-var actions to
+/// apply on the dependent agent's `env_json` / local config file.
+///
+/// The provider's model field is authoritative: every env key relevant to the
+/// agent type is returned, with `Some(value)` meaning "set" and `None` meaning
+/// "clear". This lets the caller overwrite even when the provider's value is
+/// empty.
+///
+/// - Claude: returns 5 entries (one per ANTHROPIC_*_MODEL). Each entry is `None`
+///   when the provider's JSON omits that key or has an empty value.
+/// - Gemini: returns `GEMINI_MODEL`.
+/// - Codex: returns `OPENAI_MODEL` so the provider can override env_json (the
+///   root `model` in `config.toml` is handled separately by
+///   `provider_codex_model_action`).
+/// - Others: returns `OPENAI_MODEL`.
+pub(crate) fn parse_provider_model(
+    agent_type: AgentType,
+    raw: Option<&str>,
+) -> BTreeMap<String, Option<String>> {
+    let mut out: BTreeMap<String, Option<String>> = BTreeMap::new();
+    let trimmed_raw = raw.map(str::trim).filter(|s| !s.is_empty());
+    match agent_type {
+        AgentType::ClaudeCode => {
+            let parsed = trimmed_raw
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .and_then(|v| v.as_object().cloned());
+            for (key, env_name) in CLAUDE_MODEL_KEY_MAP {
+                let value = parsed
+                    .as_ref()
+                    .and_then(|obj| obj.get(*key))
+                    .and_then(|x| x.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                out.insert((*env_name).to_string(), value);
+            }
+        }
+        AgentType::Gemini => {
+            out.insert("GEMINI_MODEL".to_string(), trimmed_raw.map(str::to_string));
+        }
+        _ => {
+            out.insert("OPENAI_MODEL".to_string(), trimmed_raw.map(str::to_string));
+        }
+    }
+    out
+}
+
+/// Action to apply to the Codex `config.toml` root `model` key.
+pub(crate) enum CodexModelAction {
+    /// Not a Codex agent — leave the toml untouched.
+    NoOp,
+    /// Set the `model` key to this value.
+    Set(String),
+    /// Remove the `model` key.
+    Clear,
+}
+
+pub(crate) fn provider_codex_model_action(
+    agent_type: AgentType,
+    raw: Option<&str>,
+) -> CodexModelAction {
+    if agent_type != AgentType::Codex {
+        return CodexModelAction::NoOp;
+    }
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(v) => CodexModelAction::Set(v.to_string()),
+        None => CodexModelAction::Clear,
+    }
+}
+
 /// Update on-disk config files for a single agent when model provider credentials change.
 /// Uses `agent_env_keys` to determine the correct env var names per agent type.
+///
+/// For `model_env`: entries with `Some(value)` are written; entries with `None`
+/// are explicitly cleared (overwritten with empty string in the env-patch, so
+/// `persist_agent_local_config_json` removes them).
 fn cascade_update_agent_config(
     agent_type: AgentType,
     api_url: &str,
     api_key: &str,
+    model_env: &BTreeMap<String, Option<String>>,
+    codex_model: &CodexModelAction,
 ) -> Result<(), AcpError> {
     let (url_key, key_key, _) = agent_env_keys(agent_type);
     match agent_type {
         AgentType::ClaudeCode | AgentType::Gemini => {
-            // Write into config.env (not root-level)
+            // Write into config.env (not root-level). For model entries, use
+            // JSON-null for "clear" — `merge_json_values` interprets null as
+            // "remove this key".
             let mut env = serde_json::Map::new();
             env.insert(
                 url_key.to_string(),
@@ -1998,6 +2085,13 @@ fn cascade_update_agent_config(
                 key_key.to_string(),
                 serde_json::Value::String(api_key.to_string()),
             );
+            for (k, v) in model_env {
+                let value = match v {
+                    Some(s) => serde_json::Value::String(s.clone()),
+                    None => serde_json::Value::Null,
+                };
+                env.insert(k.clone(), value);
+            }
             let patch = serde_json::json!({ "env": env });
             let patch_str =
                 serde_json::to_string(&patch).map_err(|e| AcpError::protocol(e.to_string()))?;
@@ -2087,6 +2181,18 @@ fn cascade_update_agent_config(
                     toml::Value::Boolean(true),
                 );
             }
+            match codex_model {
+                CodexModelAction::Set(model) => {
+                    table.insert(
+                        "model".to_string(),
+                        toml::Value::String(model.to_string()),
+                    );
+                }
+                CodexModelAction::Clear => {
+                    table.remove("model");
+                }
+                CodexModelAction::NoOp => {}
+            }
             let toml_str = toml::to_string_pretty(&toml_value)
                 .map_err(|e| AcpError::protocol(e.to_string()))?;
 
@@ -2120,12 +2226,14 @@ fn cascade_update_agent_config(
     Ok(())
 }
 
-/// Cascade model provider credential changes to all dependent agent settings and config files.
+/// Cascade model provider changes (credentials + model) to all dependent agent settings
+/// and config files.
 pub(crate) async fn cascade_update_model_provider(
     db: &AppDatabase,
     provider_id: i32,
     new_api_url: &str,
     new_api_key: &str,
+    new_model: Option<&str>,
     emitter: &EventEmitter,
 ) -> Result<(), AcpError> {
     let dependents = agent_setting_service::find_by_model_provider_id(&db.conn, provider_id)
@@ -2153,6 +2261,18 @@ pub(crate) async fn cascade_update_model_provider(
             env_map.insert(key_key.to_string(), new_api_key.to_string());
         }
 
+        let model_env = parse_provider_model(agent_type, new_model);
+        for (k, v) in &model_env {
+            match v {
+                Some(value) => {
+                    env_map.insert(k.clone(), value.clone());
+                }
+                None => {
+                    env_map.remove(k);
+                }
+            }
+        }
+
         let patch = agent_setting_service::AgentSettingsUpdate {
             enabled: setting.enabled,
             env_json: serialize_env_map(&env_map)?,
@@ -2163,7 +2283,14 @@ pub(crate) async fn cascade_update_model_provider(
             .map_err(|e| AcpError::protocol(e.to_string()))?;
 
         // 2. Update on-disk config files
-        if let Err(e) = cascade_update_agent_config(agent_type, new_api_url, new_api_key) {
+        let codex_action = provider_codex_model_action(agent_type, new_model);
+        if let Err(e) = cascade_update_agent_config(
+            agent_type,
+            new_api_url,
+            new_api_key,
+            &model_env,
+            &codex_action,
+        ) {
             eprintln!(
                 "[ModelProvider] cascade_update_agent_config({agent_type}) failed: {e}, skipping config update"
             );
@@ -2758,16 +2885,101 @@ pub(crate) async fn acp_update_agent_env_core(
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
+    // If a provider is selected, the provider's model field is authoritative:
+    // each relevant env key is set when the provider has a value and cleared
+    // (removed) when empty. Codex's root `model` in config.toml is handled the
+    // same way.
+    let mut merged_env = env;
+    let mut codex_action = CodexModelAction::NoOp;
+    if let Some(pid) = model_provider_id {
+        let provider = crate::db::service::model_provider_service::get_by_id(&db.conn, pid)
+            .await
+            .map_err(|e| AcpError::protocol(e.to_string()))?
+            .ok_or_else(|| {
+                AcpError::protocol(format!("model provider not found: {pid}"))
+            })?;
+
+        // Reject cross-type binding: provider.model is formatted for its declared
+        // agent_type (Claude = JSON, Codex/Gemini/others = plain string). Binding
+        // a mismatched provider would parse the model under the wrong format and
+        // silently write invalid env / config.toml entries.
+        let provider_agent_type: AgentType = serde_json::from_value(
+            serde_json::Value::String(provider.agent_type.clone()),
+        )
+        .map_err(|_| {
+            AcpError::protocol(format!(
+                "model provider {pid} has invalid agent_type: {}",
+                provider.agent_type
+            ))
+        })?;
+        if provider_agent_type != agent_type {
+            return Err(AcpError::protocol(format!(
+                "model provider {pid} is for {provider_agent_type}, cannot be bound to {agent_type}"
+            )));
+        }
+
+        let model_env = parse_provider_model(agent_type, provider.model.as_deref());
+        for (k, v) in model_env {
+            match v {
+                Some(value) => {
+                    merged_env.insert(k, value);
+                }
+                None => {
+                    merged_env.remove(&k);
+                }
+            }
+        }
+        codex_action = provider_codex_model_action(agent_type, provider.model.as_deref());
+    }
+
     let patch = agent_setting_service::AgentSettingsUpdate {
         enabled,
-        env_json: serialize_env_map(&env)?,
+        env_json: serialize_env_map(&merged_env)?,
         model_provider_id,
     };
     agent_setting_service::update(&db.conn, agent_type, patch)
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
+    if let Err(e) = apply_codex_root_model_action(&codex_action) {
+        eprintln!("[acp_update_agent_env] apply_codex_root_model_action failed: {e}");
+    }
+
     emit_acp_agents_updated(emitter, "env_updated", Some(agent_type));
+    Ok(())
+}
+
+/// Apply a `CodexModelAction` to the `model` field at the root of
+/// `~/.codex/config.toml`, preserving everything else.
+fn apply_codex_root_model_action(action: &CodexModelAction) -> Result<(), AcpError> {
+    if matches!(action, CodexModelAction::NoOp) {
+        return Ok(());
+    }
+    let config_path = codex_config_toml_path();
+    let mut toml_value = if config_path.exists() {
+        fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|raw| raw.parse::<toml::Value>().ok())
+            .filter(|v| v.is_table())
+            .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()))
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+    let table = toml_value
+        .as_table_mut()
+        .ok_or_else(|| AcpError::protocol("codex config root must be a TOML table"))?;
+    match action {
+        CodexModelAction::Set(model) => {
+            table.insert("model".to_string(), toml::Value::String(model.clone()));
+        }
+        CodexModelAction::Clear => {
+            table.remove("model");
+        }
+        CodexModelAction::NoOp => unreachable!(),
+    }
+    let toml_str =
+        toml::to_string_pretty(&toml_value).map_err(|e| AcpError::protocol(e.to_string()))?;
+    persist_codex_native_config_files(None, Some(&toml_str))?;
     Ok(())
 }
 

@@ -667,7 +667,7 @@
     "authModeCustomEndpointHint": "手动配置 API URL 和 API Key 连接自定义接口。",
     "authModeModelProvider": "模型供应商",
     "modelProvider": "模型供应商",
-    "modelProviderHint": "使用已配置的模型供应商的 API URL 和 API Key。",
+    "modelProviderHint": "使用已配置的模型供应商的 API URL、API Key 和模型。",
     "selectModelProvider": "选择模型供应商",
     "noModelProviderAvailable": "该代理未配置模型供应商。请前往模型供应商设置添加。",
     "claude": {
@@ -1870,6 +1870,28 @@
         "enableAgentFirstPlaceholder": "请先启用至少一个 Agent 后开始会话...",
         "askAnythingPlaceholder": "请开始输入..."
       },
+      "welcomePanel": {
+        "title": "欢迎使用 Codeg",
+        "tips": {
+          "tileTabs": "右键点击会话标签选择「平铺显示」，可同屏对比多个会话",
+          "pinTab": "双击会话标签可将其固定，避免被新打开的会话自动替换",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> 快速新建会话，<shortcut>{searchConversations}</shortcut> 搜索历史会话",
+          "slashAtMention": "在输入框输入 / 触发斜杠命令，输入 @ 引用项目内文件",
+          "pasteDropFiles": "直接粘贴截图或把文件拖到输入框，即可作为附件",
+          "queueMessage": "agent 回复中也能继续输入并排队，回答完毕会自动续发",
+          "draftAutoSave": "未发送的草稿会自动保存，重新打开会话仍在",
+          "forkSend": "发送按钮旁的下拉选择「分叉发送」，从当前位置开一条新分支",
+          "exportConversation": "右键会话内容区可导出为 Markdown / HTML / 图片",
+          "chatChannels": "在「设置 → 聊天频道」接入 Telegram / 飞书 / 微信，从手机继续操作",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> 切换右侧面板，查看本次会话改动的文件与 Git 变更",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> 打开内置终端，<shortcut>{toggleSidebar}</shortcut> 切换侧边栏",
+          "customShortcuts": "所有快捷键都可在「设置 → 快捷键」中自定义",
+          "webService": "开启「设置 → Web 服务」后，团队成员可从浏览器接入同一台 codeg",
+          "fusionMode": "切到顶部的「融合模式」，会话和文件 / Git 面板会并排显示",
+          "quickMessages": "点输入框旁的 + 按钮选择「快捷消息」，可一键插入预存片段（在「设置 → 快捷消息」中管理）",
+          "experts": "通过 + 按钮里的「专家技能」可一键加载预设角色（调试 / 规划等）"
+        }
+      },
       "agentSelector": {
         "noEnabledAgents": "暂无已启用的 Agent",
         "openAgentsSettings": "打开 Agents 设置"
@@ -2373,6 +2395,17 @@
     "apiKeyKeepCurrent": "留空则保持不变",
     "agentTypes": "代理类型",
     "agentTypesRequired": "至少选择一个代理类型。",
+    "agentType": "智能体类型",
+    "agentTypeRequired": "请选择智能体类型。",
+    "agentTypeImmutableHint": "智能体类型创建后不可修改。",
+    "model": "模型",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "主模型",
+    "claudeReasoningModel": "推理模型（思考）",
+    "claudeHaikuDefaultModel": "默认 Haiku 模型",
+    "claudeSonnetDefaultModel": "默认 Sonnet 模型",
+    "claudeOpusDefaultModel": "默认 Opus 模型",
     "nameRequired": "供应商名称不能为空。",
     "apiUrlRequired": "API 地址不能为空。",
     "apiKeyRequired": "API 密钥不能为空。",

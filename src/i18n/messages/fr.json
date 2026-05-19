@@ -667,7 +667,7 @@
     "authModeCustomEndpointHint": "Configurer manuellement l'URL API et la clé API pour un endpoint personnalisé.",
     "authModeModelProvider": "Fournisseur de modèle",
     "modelProvider": "Fournisseur de modèle",
-    "modelProviderHint": "Utiliser l'URL API et la clé API d'un fournisseur de modèle configuré.",
+    "modelProviderHint": "Utiliser l'URL API, la clé API et le modèle d'un fournisseur de modèle configuré.",
     "selectModelProvider": "Sélectionner un fournisseur de modèle",
     "noModelProviderAvailable": "Aucun fournisseur de modèle configuré pour cet agent. Allez dans les paramètres des fournisseurs de modèle pour en ajouter un.",
     "claude": {
@@ -1870,6 +1870,28 @@
         "enableAgentFirstPlaceholder": "Activez au moins un agent avant de démarrer une session...",
         "askAnythingPlaceholder": "Posez n'importe quelle question..."
       },
+      "welcomePanel": {
+        "title": "Bienvenue sur Codeg",
+        "tips": {
+          "tileTabs": "Faites un clic droit sur un onglet de conversation et choisissez Affichage en mosaïque pour comparer plusieurs sessions côte à côte.",
+          "pinTab": "Double-cliquez sur un onglet de conversation pour l'épingler : une nouvelle session ne le remplacera plus automatiquement.",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> ouvre une nouvelle conversation, <shortcut>{searchConversations}</shortcut> recherche dans l'historique.",
+          "slashAtMention": "Saisissez / dans la zone de saisie pour les commandes slash, ou @ pour référencer un fichier du projet.",
+          "pasteDropFiles": "Collez une capture d'écran ou déposez un fichier directement dans la zone de saisie pour le joindre.",
+          "queueMessage": "Pendant que l'agent répond, continuez à écrire : votre message suivant est mis en file et envoyé automatiquement à la fin.",
+          "draftAutoSave": "Les brouillons non envoyés sont sauvegardés automatiquement par conversation et restaurés à votre retour.",
+          "forkSend": "Le menu déroulant du bouton d'envoi propose Bifurquer et envoyer pour ouvrir une branche dans un nouvel onglet à partir du point actuel.",
+          "exportConversation": "Faites un clic droit dans la conversation pour l'exporter en Markdown, HTML ou image.",
+          "chatChannels": "Connectez Telegram / Lark / WeChat dans Paramètres → Canaux de discussion pour continuer depuis votre téléphone.",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> bascule le panneau droit pour voir les fichiers modifiés et les changements Git de cette session.",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> ouvre le terminal intégré, <shortcut>{toggleSidebar}</shortcut> bascule la barre latérale.",
+          "customShortcuts": "Tous les raccourcis peuvent être réassignés dans Paramètres → Raccourcis.",
+          "webService": "Activez Paramètres → Service Web pour que votre équipe accède au même codeg depuis un navigateur.",
+          "fusionMode": "Passez au mode Fusion depuis la barre supérieure pour voir la conversation à côté des fichiers / Git.",
+          "quickMessages": "Ouvrez le bouton + à côté de la saisie et choisissez Messages rapides pour insérer un extrait enregistré (à gérer dans Paramètres → Messages rapides).",
+          "experts": "Le bouton + propose un menu Compétences expertes — chargez en un clic des rôles comme Débogage ou Planification."
+        }
+      },
       "agentSelector": {
         "noEnabledAgents": "Aucun agent activé",
         "openAgentsSettings": "Ouvrir les paramètres des agents"
@@ -2361,6 +2383,17 @@
     "apiKeyKeepCurrent": "Laisser vide pour conserver l'actuelle",
     "agentTypes": "Types d'Agent",
     "agentTypesRequired": "Au moins un type d'agent est requis.",
+    "agentType": "Type d'Agent",
+    "agentTypeRequired": "Le type d'agent est requis.",
+    "agentTypeImmutableHint": "Le type d'agent ne peut pas être modifié après la création.",
+    "model": "Modèle",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "Modèle Principal",
+    "claudeReasoningModel": "Modèle de Raisonnement (réflexion)",
+    "claudeHaikuDefaultModel": "Modèle Haiku par Défaut",
+    "claudeSonnetDefaultModel": "Modèle Sonnet par Défaut",
+    "claudeOpusDefaultModel": "Modèle Opus par Défaut",
     "nameRequired": "Le nom du fournisseur est requis.",
     "apiUrlRequired": "L'URL de l'API est requise.",
     "apiKeyRequired": "La clé API est requise.",

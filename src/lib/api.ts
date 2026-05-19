@@ -2603,9 +2603,16 @@ export async function createModelProvider(params: {
   name: string
   apiUrl: string
   apiKey: string
-  agentTypes: string[]
+  agentType: string
+  model?: string | null
 }): Promise<ModelProviderInfo> {
-  return getTransport().call("create_model_provider", params)
+  return getTransport().call("create_model_provider", {
+    name: params.name,
+    apiUrl: params.apiUrl,
+    apiKey: params.apiKey,
+    agentType: params.agentType,
+    model: params.model ?? null,
+  })
 }
 
 export async function updateModelProvider(params: {
@@ -2613,14 +2620,16 @@ export async function updateModelProvider(params: {
   name?: string | null
   apiUrl?: string | null
   apiKey?: string | null
-  agentTypes?: string[] | null
+  agentType?: string | null
+  model?: string | null
 }): Promise<ModelProviderInfo> {
   return getTransport().call("update_model_provider", {
     id: params.id,
     name: params.name ?? null,
     apiUrl: params.apiUrl ?? null,
     apiKey: params.apiKey ?? null,
-    agentTypes: params.agentTypes ?? null,
+    agentType: params.agentType ?? null,
+    model: params.model ?? null,
   })
 }
 

@@ -667,7 +667,7 @@
     "authModeCustomEndpointHint": "Manually configure API URL and API Key for a custom endpoint.",
     "authModeModelProvider": "Model Provider",
     "modelProvider": "Model Provider",
-    "modelProviderHint": "Use API URL and API Key from a configured model provider.",
+    "modelProviderHint": "Use API URL, API Key, and model from a configured model provider.",
     "selectModelProvider": "Select Model Provider",
     "noModelProviderAvailable": "No model provider configured for this agent. Go to Model Provider Settings to add one.",
     "claude": {
@@ -1870,6 +1870,28 @@
         "enableAgentFirstPlaceholder": "Enable at least one agent before starting a session...",
         "askAnythingPlaceholder": "Ask anything..."
       },
+      "welcomePanel": {
+        "title": "Welcome to Codeg",
+        "tips": {
+          "tileTabs": "Right-click any conversation tab and choose Tile Display to see multiple sessions side by side.",
+          "pinTab": "Double-click a conversation tab to pin it, so a newly opened session won't auto-replace it.",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> opens a new conversation, <shortcut>{searchConversations}</shortcut> searches your history.",
+          "slashAtMention": "Type / in the input to trigger slash commands, or @ to reference a file from the project.",
+          "pasteDropFiles": "Paste a screenshot or drop a file directly onto the input to attach it.",
+          "queueMessage": "While the agent is replying, keep typing — your next message gets queued and auto-sent when it finishes.",
+          "draftAutoSave": "Unsent drafts are auto-saved per conversation and restored when you come back.",
+          "forkSend": "The send button's dropdown has Fork and Send — branch from the current turn into a new tab.",
+          "exportConversation": "Right-click inside the conversation to export it as Markdown, HTML, or an image.",
+          "chatChannels": "Connect Telegram / Lark / WeChat under Settings → Chat Channels to continue from your phone.",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> toggles the right panel to view this session's touched files and Git changes.",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> opens the built-in terminal, <shortcut>{toggleSidebar}</shortcut> toggles the sidebar.",
+          "customShortcuts": "Every shortcut is fully remappable under Settings → Shortcuts.",
+          "webService": "Enable Settings → Web Service so teammates can reach the same codeg from a browser.",
+          "fusionMode": "Switch to Fusion Mode from the top toolbar to view the conversation alongside files / Git.",
+          "quickMessages": "Open the + button next to the input and pick Quick Messages to insert a saved snippet (manage them under Settings → Quick Messages).",
+          "experts": "The + button has an Expert Skills menu — preload roles like Debug or Planning with one click."
+        }
+      },
       "agentSelector": {
         "noEnabledAgents": "No enabled agents",
         "openAgentsSettings": "Open Agents settings"
@@ -2373,6 +2395,17 @@
     "apiKeyKeepCurrent": "Leave blank to keep current",
     "agentTypes": "Agent Types",
     "agentTypesRequired": "At least one agent type is required.",
+    "agentType": "Agent Type",
+    "agentTypeRequired": "Agent type is required.",
+    "agentTypeImmutableHint": "Agent type cannot be changed after creation.",
+    "model": "Model",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "Main Model",
+    "claudeReasoningModel": "Reasoning Model (thinking)",
+    "claudeHaikuDefaultModel": "Default Haiku Model",
+    "claudeSonnetDefaultModel": "Default Sonnet Model",
+    "claudeOpusDefaultModel": "Default Opus Model",
     "nameRequired": "Provider name is required.",
     "apiUrlRequired": "API URL is required.",
     "apiKeyRequired": "API Key is required.",

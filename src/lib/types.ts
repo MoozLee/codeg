@@ -1345,7 +1345,13 @@ export interface ModelProviderInfo {
   api_url: string
   api_key: string
   api_key_masked: string
-  agent_types: AgentType[]
+  agent_type: AgentType
+  /**
+   * Model value, interpretation depends on agent_type:
+   * - claude_code: JSON string of {main, reasoning, haiku, sonnet, opus}
+   * - codex / gemini / others: plain model name string
+   */
+  model: string | null
   created_at: string
   updated_at: string
 }
@@ -1416,4 +1422,49 @@ export interface ProviderUsageResult {
   message?: string | null
   balance?: ProviderUsageAmount | null
   subscription?: ProviderUsageAmount | null
+}
+
+export interface ClaudeProviderModel {
+  main?: string
+  reasoning?: string
+  haiku?: string
+  sonnet?: string
+  opus?: string
+}
+
+export function parseClaudeProviderModel(
+  raw: string | null
+): ClaudeProviderModel {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== "object") return {}
+    const out: ClaudeProviderModel = {}
+    const keys: (keyof ClaudeProviderModel)[] = [
+      "main",
+      "reasoning",
+      "haiku",
+      "sonnet",
+      "opus",
+    ]
+    for (const k of keys) {
+      const v = (parsed as Record<string, unknown>)[k]
+      if (typeof v === "string" && v.trim()) out[k] = v.trim()
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+export function serializeClaudeProviderModel(
+  obj: ClaudeProviderModel
+): string | null {
+  const cleaned: ClaudeProviderModel = {}
+  if (obj.main?.trim()) cleaned.main = obj.main.trim()
+  if (obj.reasoning?.trim()) cleaned.reasoning = obj.reasoning.trim()
+  if (obj.haiku?.trim()) cleaned.haiku = obj.haiku.trim()
+  if (obj.sonnet?.trim()) cleaned.sonnet = obj.sonnet.trim()
+  if (obj.opus?.trim()) cleaned.opus = obj.opus.trim()
+  return Object.keys(cleaned).length === 0 ? null : JSON.stringify(cleaned)
 }

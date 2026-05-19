@@ -667,7 +667,7 @@
     "authModeCustomEndpointHint": "API URL と API Key を手動で設定してカスタムエンドポイントに接続します。",
     "authModeModelProvider": "モデルプロバイダー",
     "modelProvider": "モデルプロバイダー",
-    "modelProviderHint": "設定済みモデルプロバイダーの API URL と API Key を使用します。",
+    "modelProviderHint": "設定済みモデルプロバイダーの API URL、API Key、モデルを使用します。",
     "selectModelProvider": "モデルプロバイダーを選択",
     "noModelProviderAvailable": "このエージェントにはモデルプロバイダーが設定されていません。モデルプロバイダー設定で追加してください。",
     "claude": {
@@ -1870,6 +1870,28 @@
         "enableAgentFirstPlaceholder": "セッション開始前に少なくとも1つのエージェントを有効化してください...",
         "askAnythingPlaceholder": "何でも質問してください..."
       },
+      "welcomePanel": {
+        "title": "Codeg へようこそ",
+        "tips": {
+          "tileTabs": "会話タブを右クリックして「タイル表示」を選ぶと、複数のセッションを並べて比較できます",
+          "pinTab": "会話タブをダブルクリックすると固定でき、新しい会話に自動で置き換えられなくなります",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> で新規会話、<shortcut>{searchConversations}</shortcut> で履歴を検索できます",
+          "slashAtMention": "入力欄で / を入力するとスラッシュコマンド、@ を入力するとプロジェクト内のファイルを参照できます",
+          "pasteDropFiles": "スクリーンショットを貼り付けたり、ファイルを入力欄にドロップするだけで添付できます",
+          "queueMessage": "エージェントの応答中も入力を続けられ、次のメッセージはキューに入って完了後に自動送信されます",
+          "draftAutoSave": "未送信の下書きは会話ごとに自動保存され、戻ったときに復元されます",
+          "forkSend": "送信ボタンのドロップダウンで「分岐して送信」を選ぶと、現在の地点から新しいタブに分岐できます",
+          "exportConversation": "会話内容を右クリックすると Markdown / HTML / 画像としてエクスポートできます",
+          "chatChannels": "「設定 → チャットチャネル」で Telegram / Lark / WeChat を連携すれば、スマホから続けて操作できます",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> で右側パネルを開き、このセッションで変更したファイルや Git の差分を確認できます",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> で内蔵ターミナル、<shortcut>{toggleSidebar}</shortcut> でサイドバーを切り替えできます",
+          "customShortcuts": "すべてのショートカットは「設定 → ショートカット」で自由に変更できます",
+          "webService": "「設定 → Web サービス」を有効にすると、チームメンバーが同じ codeg にブラウザでアクセスできます",
+          "fusionMode": "上部ツールバーの「Fusion モード」に切り替えると、会話とファイル / Git パネルが並んで表示されます",
+          "quickMessages": "入力欄横の + ボタンから「クイックメッセージ」を選ぶと、保存済みのスニペットを一発で挿入できます（「設定 → クイックメッセージ」で管理）",
+          "experts": "+ ボタンの「エキスパートスキル」メニューから、デバッグや計画などのプリセットロールをワンクリックで読み込めます"
+        }
+      },
       "agentSelector": {
         "noEnabledAgents": "有効なエージェントがありません",
         "openAgentsSettings": "エージェント設定を開く"
@@ -2361,6 +2383,17 @@
     "apiKeyKeepCurrent": "空欄のまま現在の値を維持",
     "agentTypes": "エージェントタイプ",
     "agentTypesRequired": "少なくとも1つのエージェントタイプを選択してください。",
+    "agentType": "エージェントタイプ",
+    "agentTypeRequired": "エージェントタイプを選択してください。",
+    "agentTypeImmutableHint": "エージェントタイプは作成後に変更できません。",
+    "model": "モデル",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "メインモデル",
+    "claudeReasoningModel": "推論モデル（思考）",
+    "claudeHaikuDefaultModel": "デフォルトの Haiku モデル",
+    "claudeSonnetDefaultModel": "デフォルトの Sonnet モデル",
+    "claudeOpusDefaultModel": "デフォルトの Opus モデル",
     "nameRequired": "プロバイダー名は必須です。",
     "apiUrlRequired": "API URLは必須です。",
     "apiKeyRequired": "APIキーは必須です。",

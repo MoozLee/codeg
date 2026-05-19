@@ -667,7 +667,7 @@
     "authModeCustomEndpointHint": "API-URL und API-Key manuell für einen benutzerdefinierten Endpunkt konfigurieren.",
     "authModeModelProvider": "Modellanbieter",
     "modelProvider": "Modellanbieter",
-    "modelProviderHint": "API-URL und API-Key eines konfigurierten Modellanbieters verwenden.",
+    "modelProviderHint": "API-URL, API-Key und Modell eines konfigurierten Modellanbieters verwenden.",
     "selectModelProvider": "Modellanbieter auswählen",
     "noModelProviderAvailable": "Kein Modellanbieter für diesen Agent konfiguriert. Gehen Sie zu den Modellanbieter-Einstellungen, um einen hinzuzufügen.",
     "claude": {
@@ -1870,6 +1870,28 @@
         "enableAgentFirstPlaceholder": "Aktivieren Sie mindestens einen Agenten, bevor Sie eine Sitzung starten...",
         "askAnythingPlaceholder": "Fragen Sie alles..."
       },
+      "welcomePanel": {
+        "title": "Willkommen bei Codeg",
+        "tips": {
+          "tileTabs": "Klicke mit der rechten Maustaste auf einen Konversations-Tab und wähle Kachelansicht, um mehrere Sitzungen nebeneinander zu sehen.",
+          "pinTab": "Doppelklicke auf einen Konversations-Tab, um ihn anzuheften – so wird er nicht von einer neuen Sitzung automatisch ersetzt.",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> öffnet eine neue Konversation, <shortcut>{searchConversations}</shortcut> durchsucht den Verlauf.",
+          "slashAtMention": "Tippe / im Eingabefeld für Slash-Befehle oder @, um eine Datei aus dem Projekt zu referenzieren.",
+          "pasteDropFiles": "Füge einen Screenshot ein oder ziehe eine Datei direkt ins Eingabefeld, um sie anzuhängen.",
+          "queueMessage": "Während der Agent antwortet, kannst du weitertippen – deine nächste Nachricht wird in die Warteschlange gestellt und automatisch gesendet.",
+          "draftAutoSave": "Nicht gesendete Entwürfe werden pro Konversation automatisch gespeichert und beim Zurückkehren wiederhergestellt.",
+          "forkSend": "Im Dropdown der Senden-Schaltfläche gibt es Verzweigen und senden – verzweige vom aktuellen Punkt in einen neuen Tab.",
+          "exportConversation": "Klicke mit der rechten Maustaste in die Konversation, um sie als Markdown, HTML oder Bild zu exportieren.",
+          "chatChannels": "Verbinde Telegram / Lark / WeChat unter Einstellungen → Chat-Kanäle, um vom Handy aus weiterzuarbeiten.",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> blendet das rechte Panel ein – mit den geänderten Dateien und Git-Änderungen dieser Sitzung.",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> öffnet das eingebaute Terminal, <shortcut>{toggleSidebar}</shortcut> schaltet die Seitenleiste um.",
+          "customShortcuts": "Alle Tastenkürzel lassen sich unter Einstellungen → Tastenkürzel frei belegen.",
+          "webService": "Aktiviere Einstellungen → Webdienst, damit Teammitglieder dasselbe codeg im Browser nutzen können.",
+          "fusionMode": "Wechsle in der oberen Leiste in den Fusion-Modus, um Konversation und Datei- / Git-Panel nebeneinander zu sehen.",
+          "quickMessages": "Klicke auf die +-Schaltfläche neben der Eingabe und wähle Schnellnachrichten, um ein gespeichertes Snippet einzufügen (verwaltbar unter Einstellungen → Schnellnachrichten).",
+          "experts": "Die +-Schaltfläche hat ein Menü Expertenfähigkeiten – lade Rollen wie Debugging oder Planung mit einem Klick."
+        }
+      },
       "agentSelector": {
         "noEnabledAgents": "Keine aktivierten Agenten",
         "openAgentsSettings": "Agenten-Einstellungen öffnen"
@@ -2361,6 +2383,17 @@
     "apiKeyKeepCurrent": "Leer lassen, um aktuellen Wert beizubehalten",
     "agentTypes": "Agententypen",
     "agentTypesRequired": "Mindestens ein Agententyp ist erforderlich.",
+    "agentType": "Agententyp",
+    "agentTypeRequired": "Agententyp ist erforderlich.",
+    "agentTypeImmutableHint": "Der Agententyp kann nach der Erstellung nicht mehr geändert werden.",
+    "model": "Modell",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "Hauptmodell",
+    "claudeReasoningModel": "Reasoning-Modell (Thinking)",
+    "claudeHaikuDefaultModel": "Standard Haiku-Modell",
+    "claudeSonnetDefaultModel": "Standard Sonnet-Modell",
+    "claudeOpusDefaultModel": "Standard Opus-Modell",
     "nameRequired": "Anbietername ist erforderlich.",
     "apiUrlRequired": "API-URL ist erforderlich.",
     "apiKeyRequired": "API-Schlüssel ist erforderlich.",

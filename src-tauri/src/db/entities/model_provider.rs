@@ -9,6 +9,8 @@ pub struct Model {
     pub api_url: String,
     pub api_key: String,
     pub agent_types_json: String,
+    pub agent_type: String,
+    pub model: Option<String>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

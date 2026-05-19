@@ -12,15 +12,20 @@ pub async fn create(
     name: String,
     api_url: String,
     api_key: String,
-    agent_types_json: String,
+    agent_type: String,
+    model: Option<String>,
 ) -> Result<model_provider::Model, DbError> {
     let now = Utc::now();
+    let agent_types_json = serde_json::to_string(&vec![agent_type.clone()])
+        .unwrap_or_else(|_| "[]".to_string());
     let active = model_provider::ActiveModel {
         id: NotSet,
         name: Set(name),
         api_url: Set(api_url),
         api_key: Set(api_key),
         agent_types_json: Set(agent_types_json),
+        agent_type: Set(agent_type),
+        model: Set(model),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -33,14 +38,15 @@ pub async fn update(
     name: Option<String>,
     api_url: Option<String>,
     api_key: Option<String>,
-    agent_types_json: Option<String>,
+    agent_type: Option<String>,
+    model: Option<Option<String>>,
 ) -> Result<model_provider::Model, DbError> {
-    let model = model_provider::Entity::find_by_id(id)
+    let model_row = model_provider::Entity::find_by_id(id)
         .one(conn)
         .await?
         .ok_or_else(|| DbError::Migration(format!("model provider not found: {id}")))?;
 
-    let mut active = model.into_active_model();
+    let mut active = model_row.into_active_model();
     if let Some(v) = name {
         active.name = Set(v);
     }
@@ -50,8 +56,14 @@ pub async fn update(
     if let Some(v) = api_key {
         active.api_key = Set(v);
     }
-    if let Some(v) = agent_types_json {
-        active.agent_types_json = Set(v);
+    if let Some(v) = agent_type {
+        let agent_types_json =
+            serde_json::to_string(&vec![v.clone()]).unwrap_or_else(|_| "[]".to_string());
+        active.agent_types_json = Set(agent_types_json);
+        active.agent_type = Set(v);
+    }
+    if let Some(v) = model {
+        active.model = Set(v);
     }
     active.updated_at = Set(Utc::now());
     Ok(active.update(conn).await?)

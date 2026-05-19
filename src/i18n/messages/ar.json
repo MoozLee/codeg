@@ -667,7 +667,7 @@
     "authModeCustomEndpointHint": "تكوين عنوان API ومفتاح API يدوياً لنقطة نهاية مخصصة.",
     "authModeModelProvider": "مزود النموذج",
     "modelProvider": "مزود النموذج",
-    "modelProviderHint": "استخدم عنوان API ومفتاح API من مزود نموذج مُعدّ.",
+    "modelProviderHint": "استخدم عنوان API ومفتاح API والنموذج من مزود نموذج مُعدّ.",
     "selectModelProvider": "اختر مزود النموذج",
     "noModelProviderAvailable": "لا يوجد مزود نموذج مُعدّ لهذا الوكيل. انتقل إلى إعدادات مزود النموذج لإضافة واحد.",
     "claude": {
@@ -1870,6 +1870,28 @@
         "enableAgentFirstPlaceholder": "فعّل وكيلًا واحدًا على الأقل قبل بدء جلسة...",
         "askAnythingPlaceholder": "اسأل أي شيء..."
       },
+      "welcomePanel": {
+        "title": "مرحبًا بك في Codeg",
+        "tips": {
+          "tileTabs": "انقر بزر الفأرة الأيمن على تبويب محادثة واختر «عرض متجانب» لمقارنة عدة جلسات جنبًا إلى جنب.",
+          "pinTab": "انقر نقرًا مزدوجًا على تبويب محادثة لتثبيته كي لا تستبدله جلسة جديدة تلقائيًا.",
+          "shortcutsNewSearch": "<shortcut>{newConversation}</shortcut> يفتح محادثة جديدة، و<shortcut>{searchConversations}</shortcut> يبحث في السجل.",
+          "slashAtMention": "اكتب / في حقل الإدخال لتشغيل أوامر السلاش، أو @ للإشارة إلى ملف من المشروع.",
+          "pasteDropFiles": "ألصق لقطة شاشة أو اسحب ملفًا مباشرة إلى حقل الإدخال لإرفاقه.",
+          "queueMessage": "أثناء رد الوكيل، تابع الكتابة — ستوضع رسالتك التالية في الطابور وتُرسل تلقائيًا عند انتهائه.",
+          "draftAutoSave": "تُحفظ المسودات غير المُرسلة تلقائيًا لكل محادثة وتُستعاد عند العودة.",
+          "forkSend": "تتضمن قائمة زر الإرسال المنسدلة «تفرّع وأرسل» لإنشاء فرع من النقطة الحالية في تبويب جديد.",
+          "exportConversation": "انقر بزر الفأرة الأيمن داخل المحادثة لتصديرها بصيغة Markdown أو HTML أو صورة.",
+          "chatChannels": "اربط Telegram / Lark / WeChat من «الإعدادات → قنوات الدردشة» للمتابعة من هاتفك.",
+          "shortcutsAuxPanel": "<shortcut>{toggleAuxPanel}</shortcut> يبدّل اللوحة اليمنى لعرض الملفات المعدّلة وتغييرات Git لهذه الجلسة.",
+          "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> يفتح الطرفية المدمجة، و<shortcut>{toggleSidebar}</shortcut> يبدّل الشريط الجانبي.",
+          "customShortcuts": "يمكن إعادة تعيين جميع الاختصارات من «الإعدادات → الاختصارات».",
+          "webService": "فعّل «الإعدادات → خدمة الويب» ليتمكن أعضاء الفريق من الوصول إلى نفس codeg عبر المتصفح.",
+          "fusionMode": "بدّل إلى وضع Fusion من شريط الأدوات العلوي لعرض المحادثة بجوار الملفات / Git.",
+          "quickMessages": "افتح زر + بجانب الإدخال واختر «الرسائل السريعة» لإدراج مقتطف محفوظ (تُدار من «الإعدادات → الرسائل السريعة»).",
+          "experts": "يحتوي زر + على قائمة «مهارات الخبراء» — حمّل أدوارًا مثل التصحيح أو التخطيط بنقرة واحدة."
+        }
+      },
       "agentSelector": {
         "noEnabledAgents": "لا يوجد وكلاء مفعّلون",
         "openAgentsSettings": "فتح إعدادات الوكلاء"
@@ -2361,6 +2383,17 @@
     "apiKeyKeepCurrent": "اتركه فارغاً للإبقاء على الحالي",
     "agentTypes": "أنواع الوكلاء",
     "agentTypesRequired": "يجب اختيار نوع وكيل واحد على الأقل.",
+    "agentType": "نوع الوكيل",
+    "agentTypeRequired": "نوع الوكيل مطلوب.",
+    "agentTypeImmutableHint": "لا يمكن تغيير نوع الوكيل بعد الإنشاء.",
+    "model": "النموذج",
+    "modelPlaceholderCodex": "gpt-5 / gpt-5-mini",
+    "modelPlaceholderGemini": "gemini-3-pro-preview",
+    "claudeMainModel": "النموذج الرئيسي",
+    "claudeReasoningModel": "نموذج الاستدلال (التفكير)",
+    "claudeHaikuDefaultModel": "نموذج Haiku الافتراضي",
+    "claudeSonnetDefaultModel": "نموذج Sonnet الافتراضي",
+    "claudeOpusDefaultModel": "نموذج Opus الافتراضي",
     "nameRequired": "اسم المزود مطلوب.",
     "apiUrlRequired": "عنوان API مطلوب.",
     "apiKeyRequired": "مفتاح API مطلوب.",
