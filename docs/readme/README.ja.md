@@ -85,24 +85,6 @@ Claude Code、Codex CLI、OpenCode、Gemini CLI、OpenClaw、Cline などのロ�
 
 > その他のチャンネル（Discord、Slack、DingTalk など）は今後のリリースで対応予定。
 
-### 主な機能
-
-- **セッション操作** — チャットからフル Agent セッションを実行：`/folder` でプロジェクト選択、`/agent` で Agent 選択、`/task <説明>` でタスク開始、プレーンテキストでフォローアップ送信。`/resume` で前回セッションを継続、`/cancel` で中止、`/sessions` でアクティブセッション一覧を表示
-- **権限制御** — Agent がツール実行権限をチャット内でリクエスト。`/approve`（または `/approve always` で自動承認）と `/deny` で応答
-- **イベント通知** — Agent のターン完了、ツールコール、エラーがリッチフォーマットでリアルタイムにプッシュ
-- **クエリコマンド** — `/search <キーワード>`、`/today`、`/status`、`/help` でクイック検索。コマンドプレフィックスの設定が可能
-- **日次レポート** — 予定された時刻に自動日次サマリーを生成（会話数、Agent タイプ別内訳、プロジェクトアクティビティを含む）
-- **多言語対応** — メッセージテンプレートは 10 言語に対応（英語、簡体字/繁体字中国語、日本語、韓国語、スペイン語、ドイツ語、フランス語、ポルトガル語、アラビア語）
-- **セキュアな認証情報** — トークンは OS キーリングに保存され、設定ファイルやログに公開されません
-- **リッチメッセージ** — Telegram では Markdown フォーマット、Lark ではカードベースレイアウト、iLink ではリッチテキストメッセージ。すべてのプラットフォームでプレーンテキストフォールバックに対応
-
-### セットアップ
-
-1. **設定 → チャットチャンネル** でチャンネルを作成（Telegram、Lark、または iLink を選択）
-2. ボットトークン（Telegram）、アプリ認証情報（Lark）、または QR コードでログイン（iLink）— OS キーリングに安全に保存
-3. イベントフィルターとオプションの日次レポートスケジュールを設定
-4. 接続 — Agent がイベントを発行するとメッセージが流れ始めます
-
 ## 対応エージェント
 
 | Agent | 環境変数パス | macOS / Linux デフォルト | Windows デフォルト |
@@ -258,8 +240,10 @@ CODEG_STATIC_DIR=../out ./target/release/codeg-server
 | `CODEG_PORT` | `3080` | HTTP ポート |
 | `CODEG_HOST` | `0.0.0.0` | バインドアドレス |
 | `CODEG_TOKEN` | *(ランダム)* | 認証トークン（起動時に stderr に出力） |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite データベースディレクトリ |
+| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite データベースディレクトリ（`uploads/`、`pets/` のルートも兼ねる） |
 | `CODEG_STATIC_DIR` | `./web` または `./out` | Next.js 静的エクスポートディレクトリ |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *（未設定）* | `<data dir>/uploads/` 配下に存在するファイルの合計バイト数のハードキャップ。10進数のバイト数（例: `10737418240` で 10 GiB）。未設定、`0`、または解析できない値の場合、キャップは無効になり、起動時に現在の状態が分かるログ行を出力します。このキャップは単一の `codeg-server` プロセス内でのみ強制されます——同じ `uploads/` ボリュームを共有する水平スケール構成では、外部協調（ファイルロック、Redis、リバースプロキシのクォータ）が必要です。 |
+| `CODEG_UPLOAD_QUOTA_STRICT` | *（未設定）* | 真値（`1` / `true` / `yes` / `on`）の場合、`CODEG_UPLOAD_MAX_TOTAL_BYTES` が解析できない値に設定されているときに、WARN を出して fail-open するのではなく、終了コード 2 で起動を中断します。セキュリティポリシーで「設定されたクォータは有効でなければならない」と要求される場合に使用します。 |
 
 ## アーキテクチャ
 
@@ -295,13 +279,6 @@ Next.js 16 (Static Export) + React 19
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
 
-## 制約事項
-
-- フロントエンドは静的エクスポートを使用（`output: "export"`）
-- Next.js の動的ルート（`[param]`）は不可。代わりにクエリパラメータを使用
-- Tauri コマンドパラメータ: フロントエンドは `camelCase`、Rust は `snake_case`
-- TypeScript strict モード
-
 ## プライバシーとセキュリティ
 
 - 解析、ストレージ、プロジェクト操作はデフォルトでローカルファースト
@@ -309,10 +286,18 @@ Next.js 16 (Static Export) + React 19
 - エンタープライズ環境向けのシステムプロキシサポート
 - Web サービスモードではトークンベースの認証を使用
 
+## コミュニティ
+
+- QRコードをスキャンして、ディスカッション、フィードバック、アップデートのための WeChat グループに参加してください
+
+<img src="../images/weixin-light.jpg#gh-light-mode-only" alt="WeChat" width="240" />
+<img src="../images/weixin-dark.jpg#gh-dark-mode-only" alt="WeChat" width="240" />
+
+- [LinuxDO](https://linux.do) コミュニティのサポートに感謝します
+
 ## 謝辞
 
-- [LinuxDO](https://linux.do) — すべての始まりとなったコミュニティ
-- [ACP](https://agentclientprotocol.com) — Agent Client Protocol (ACP) は、codeg が複数のエージェントと接続するための基盤です
+- [ACP](https://agentclientprotocol.com) — Agent Client Protocol (ACP) は、Codeg が複数のエージェントに接続できる基盤です
 
 ## ライセンス
 

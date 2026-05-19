@@ -87,24 +87,6 @@ Connectez vos applications de messagerie préférées — Telegram, Lark (Feishu
 
 > D'autres canaux (Discord, Slack, DingTalk, etc.) sont prévus pour de futures versions.
 
-### Fonctionnalités clés
-
-- **Interaction de session** — exécutez des sessions complètes avec les agents : `/folder` pour choisir le projet, `/agent` pour sélectionner l'agent, `/task <description>` pour lancer une tâche, envoyez des messages de suivi en texte libre. `/resume` pour reprendre une session précédente, `/cancel` pour annuler, `/sessions` pour lister les sessions actives
-- **Contrôle des permissions** — les agents demandent les permissions d'exécution d'outils directement dans le chat ; `/approve` (ou `/approve always` pour l'approbation automatique) et `/deny`
-- **Notifications d'événements** — les complétions de tour, les appels d'outils et les erreurs des agents sont poussés en temps réel avec un formatage enrichi
-- **Commandes de requête** — `/search <mot-clé>`, `/today`, `/status`, `/help` pour des consultations rapides ; préfixe de commande configurable
-- **Rapports quotidiens** — résumé quotidien automatisé à une heure programmée, incluant le nombre de conversations, la répartition par type d'agent et l'activité du projet
-- **Multi-langue** — modèles de messages en 10 langues (anglais, chinois simplifié/traditionnel, japonais, coréen, espagnol, allemand, français, portugais, arabe)
-- **Identifiants sécurisés** — les tokens sont stockés dans le trousseau du système d'exploitation, jamais exposés dans les fichiers de configuration ou les logs
-- **Messages enrichis** — format Markdown pour Telegram, mise en page par cartes pour Lark ; repli en texte brut pour toutes les plateformes
-
-### Configuration
-
-1. Créez un canal dans **Paramètres → Canaux de chat** (choisissez Telegram, Lark ou iLink)
-2. Entrez votre token de bot (Telegram), les identifiants de l'application (Lark) ou scannez le code QR pour vous connecter (iLink) — stockés en toute sécurité dans le trousseau du SO
-3. Configurez les filtres d'événements et la planification optionnelle du rapport quotidien
-4. Connectez — les messages commencent à circuler dès que les agents émettent des événements
-
 ## Agents supportés
 
 | Agent | Chemin via variable d'environnement | Défaut macOS / Linux | Défaut Windows |
@@ -260,8 +242,10 @@ Variables d'environnement :
 | `CODEG_PORT` | `3080` | Port HTTP |
 | `CODEG_HOST` | `0.0.0.0` | Adresse de liaison |
 | `CODEG_TOKEN` | *(aléatoire)* | Jeton d'authentification (affiché sur stderr au démarrage) |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | Répertoire de base de données SQLite |
+| `CODEG_DATA_DIR` | `~/.local/share/codeg` | Répertoire de la base de données SQLite (racine également de `uploads/`, `pets/`) |
 | `CODEG_STATIC_DIR` | `./web` ou `./out` | Répertoire d'export statique Next.js |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *(non défini)* | Limite stricte du nombre total d'octets résidant sous `<data dir>/uploads/`. Nombre d'octets en décimal (p. ex. `10737418240` pour 10 Gio). Non défini, `0` ou une valeur non analysable désactive la limite et imprime une ligne au démarrage pour que la configuration soit visible. La limite est appliquée au sein d'un seul processus `codeg-server` — les déploiements à mise à l'échelle horizontale partageant un même volume `uploads/` nécessitent une coordination externe (verrou de fichier, Redis, quota de proxy inverse). |
+| `CODEG_UPLOAD_QUOTA_STRICT` | *(non défini)* | Lorsque vrai (`1` / `true` / `yes` / `on`), interrompt le démarrage avec le code de sortie 2 si `CODEG_UPLOAD_MAX_TOTAL_BYTES` est défini sur une valeur non analysable, au lieu de continuer avec un WARN. Utilisez ceci lorsque votre politique de sécurité exige que « le quota configuré doit être effectif ». |
 
 ## Architecture
 
@@ -297,13 +281,6 @@ Next.js 16 (Static Export) + React 19
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
 
-## Contraintes
-
-- Le frontend utilise l'export statique (`output: "export"`)
-- Pas de routes dynamiques Next.js (`[param]`) ; utiliser les paramètres de requête à la place
-- Paramètres des commandes Tauri : `camelCase` côté frontend, `snake_case` côté Rust
-- TypeScript en mode strict
-
 ## Confidentialité et sécurité
 
 - Local-first par défaut pour l'analyse, le stockage et les opérations sur le projet
@@ -311,9 +288,17 @@ Next.js 16 (Static Export) + React 19
 - Prise en charge du proxy système pour les environnements d'entreprise
 - Le mode service web utilise l'authentification par jeton
 
+## Communauté
+
+- Scannez le QR code ci-dessous pour rejoindre notre groupe WeChat pour des discussions, des retours et des mises à jour
+
+<img src="../images/weixin-light.jpg#gh-light-mode-only" alt="WeChat" width="240" />
+<img src="../images/weixin-dark.jpg#gh-dark-mode-only" alt="WeChat" width="240" />
+
+- Merci à la communauté [LinuxDO](https://linux.do) pour son soutien
+
 ## Remerciements
 
-- [LinuxDO](https://linux.do) — la communauté à l'origine du projet
 - [ACP](https://agentclientprotocol.com) — l'Agent Client Protocol (ACP) est la base qui permet à Codeg de se connecter à plusieurs agents
 
 ## Licence

@@ -407,7 +407,7 @@
       "gemini": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill Name\n\nInstructions for the agent when this skill is active.\n\n## Workflow\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openCode": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Steps\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openClaw": "---\nname: example-skill\ndescription: Describe when this skill should be used.\nuser-invocable: true\ndisable-model-invocation: false\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n",
-      "default": "# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
+      "default": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
     }
   },
   "McpSettings": {
@@ -640,7 +640,6 @@
       "emptyProvider": "아직 Provider가 없습니다. ID를 입력한 뒤 \"Provider 추가\"를 클릭하세요.",
       "providerEnabledState": "{providerId} 활성 상태",
       "selectProviderNpm": "provider.npm 선택",
-      "notSet": "설정 안 됨",
       "modelManagement": "모델 관리",
       "modelCount": "모델 {count}개",
       "modelDescription": "OpenCode `provider.models`와 정렬됩니다. 빠른 관리는 현재 `name` / `id`를 지원하며, 기타 고급 필드는 유지되고 아래 네이티브 JSON에서 편집할 수 있습니다.",

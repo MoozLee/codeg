@@ -85,24 +85,6 @@ OpenClaw、Cline 等）统一到桌面应用、独立服务器或 Docker 容器�
 
 > 更多渠道（Discord、Slack、钉钉等）计划在未来版本中支持。
 
-### 主要功能
-
-- **会话交互** — 在聊天应用中运行完整代理会话：`/folder` 选择项目、`/agent` 选择代理、`/task <描述>` 启动任务，然后直接发送纯文本作为后续消息。`/resume` 恢复历史会话、`/cancel` 取消任务、`/sessions` 查看活跃会话
-- **权限控制** — 代理可在聊天中请求工具执行权限；使用 `/approve`（或 `/approve always` 自动审批）和 `/deny` 响应，无需切换上下文
-- **事件通知** — 代理回合完成、工具调用和错误事件实时推送到所有已启用渠道，支持富文本格式
-- **查询命令** — `/search <关键词>`、`/today`、`/status`、`/help` 快速查询；支持自定义命令前缀
-- **每日报告** — 在预设时间自动生成每日摘要，包括对话数量、代理类型分布和项目活跃度
-- **多语言** — 消息模板支持 10 种语言（英语、简体中文/繁体中文、日语、韩语、西班牙语、德语、法语、葡萄牙语、阿拉伯语）
-- **安全凭据** — 令牌存储在操作系统密钥环中，不会暴露在配置文件或日志中
-- **富文本消息** — Telegram 使用 Markdown 格式，飞书使用卡片布局，iLink 使用图文消息；所有平台均支持纯文本回退
-
-### 设置
-
-1. 在 **设置 → 消息渠道** 中创建渠道（选择 Telegram、飞书或 iLink）
-2. 输入 Bot Token（Telegram）、应用凭据（飞书）或扫码登录（iLink）——安全存储在操作系统密钥环中
-3. 配置事件过滤器和可选的每日报告计划
-4. 连接——当代理发出事件时，消息将开始流转
-
 ## 支持的Agent
 
 | Agent | 环境变量优先路径 | macOS / Linux 默认路径 | Windows 默认路径 |
@@ -258,8 +240,10 @@ CODEG_STATIC_DIR=../out ./target/release/codeg-server
 | `CODEG_PORT` | `3080` | HTTP 端口 |
 | `CODEG_HOST` | `0.0.0.0` | 绑定地址 |
 | `CODEG_TOKEN` | *（随机）* | 认证令牌（启动时输出到 stderr） |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite 数据库目录 |
+| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite 数据库目录（同时也是 `uploads/`、`pets/` 的根目录） |
 | `CODEG_STATIC_DIR` | `./web` 或 `./out` | Next.js 静态导出目录 |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *（未设置）* | `<data dir>/uploads/` 下所有文件总字节数的硬上限。十进制字节数（例如 `10737418240` 表示 10 GiB）。未设置、`0` 或无法解析的值会禁用上限，并在启动时打印一行日志以便观察当前状态。该上限仅在单个 `codeg-server` 进程内生效——共享一个 `uploads/` 卷的横向扩展部署需要外部协调（文件锁、Redis、反向代理配额）。 |
+| `CODEG_UPLOAD_QUOTA_STRICT` | *（未设置）* | 当值为真（`1` / `true` / `yes` / `on`）时，若 `CODEG_UPLOAD_MAX_TOTAL_BYTES` 设置为无法解析的值，则以退出码 2 中止启动，而不是发出 WARN 后继续运行。当安全策略要求"配置的配额必须生效"时使用此选项。 |
 
 ## 架构
 
@@ -295,13 +279,6 @@ Next.js 16 (Static Export) + React 19
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
 
-## 开发约束
-
-- 前端使用静态导出（`output: "export"`）
-- 不使用 Next.js 动态路由（`[param]`），统一使用查询参数
-- Tauri 命令参数：前端 `camelCase`，Rust `snake_case`
-- TypeScript strict 模式
-
 ## 隐私与安全
 
 - 默认本地优先：解析、存储、项目操作均在本地完成
@@ -309,9 +286,17 @@ Next.js 16 (Static Export) + React 19
 - 支持系统代理，适配企业网络环境
 - Web 服务模式使用基于令牌的身份认证
 
+## 交流
+
+- 扫描下方二维码加入我们的微信群，参与讨论、反馈与更新
+
+<img src="../images/weixin-light.jpg#gh-light-mode-only" alt="WeChat" width="240" />
+<img src="../images/weixin-dark.jpg#gh-dark-mode-only" alt="WeChat" width="240" />
+
+- 感谢 [LinuxDO](https://linux.do) 社区的支持
+
 ## 鸣谢
 
-- [LinuxDO](https://linux.do)：起源社区
 - [ACP](https://agentclientprotocol.com)：智能体客户端协议 (ACP) 是 codeg 实现多智能体连接的基础
 
 ## 许可证

@@ -407,7 +407,7 @@
       "gemini": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill Name\n\nInstructions for the agent when this skill is active.\n\n## Workflow\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openCode": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Steps\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openClaw": "---\nname: example-skill\ndescription: Describe when this skill should be used.\nuser-invocable: true\ndisable-model-invocation: false\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n",
-      "default": "# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
+      "default": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
     }
   },
   "McpSettings": {
@@ -640,7 +640,6 @@
       "emptyProvider": "Ainda não há provedor. Informe um ID e clique em \"Adicionar provedor\".",
       "providerEnabledState": "Estado habilitado de {providerId}",
       "selectProviderNpm": "Selecionar provider.npm",
-      "notSet": "Não definido",
       "modelManagement": "Gerenciamento de modelos",
       "modelCount": "{count} modelos",
       "modelDescription": "Alinhado ao `provider.models` do OpenCode. O gerenciamento rápido atualmente suporta `name` / `id`; outros campos avançados são preservados e podem ser editados no JSON nativo abaixo.",

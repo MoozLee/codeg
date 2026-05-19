@@ -88,24 +88,6 @@ Verbinden Sie Ihre bevorzugten Messaging-Apps — Telegram, Lark (Feishu), iLink
 
 > Weitere Kanäle (Discord, Slack, DingTalk usw.) sind für zukünftige Releases geplant.
 
-### Hauptfunktionen
-
-- **Sitzungs-Interaktion** — vollständige Agenten-Sitzungen ausführen: `/folder` Projekt wählen, `/agent` Agent auswählen, `/task <Beschreibung>` Aufgabe starten, Folgenachrichten als Klartext senden. `/resume` vorherige Sitzung fortsetzen, `/cancel` abbrechen, `/sessions` aktive Sitzungen auflisten
-- **Berechtigungssteuerung** — Agenten fordern Tool-Ausführungsberechtigungen im Chat an; `/approve` (oder `/approve always` für automatische Genehmigung) und `/deny`
-- **Ereignisbenachrichtigungen** — Agenten-Rundenvervollständigungen, Tool-Calls und Fehler werden in Echtzeit mit Rich-Formatierung gepusht
-- **Abfragebefehle** — `/search <Suchbegriff>`, `/today`, `/status`, `/help` für schnelle Abfragen; konfigurierbarer Befehlspräfix
-- **Tagesberichte** — automatisierte tägliche Zusammenfassung zu einer geplanten Zeit, einschließlich Konversationszählung, Aufschlüsselung nach Agent-Typ und Projektaktivität
-- **Mehrsprachig** — Nachrichtenvorlagen in 10 Sprachen (Englisch, vereinfachtes/traditionelles Chinesisch, Japanisch, Koreanisch, Spanisch, Deutsch, Französisch, Portugiesisch, Arabisch)
-- **Sichere Anmeldedaten** — Token werden im OS-Schlüsselbund gespeichert, nie in Konfigurationsdateien oder Logs exponiert
-- **Rich-Nachrichten** — Markdown-Formatierung für Telegram, kartenbasiertes Layout für Lark; Klartext-Fallback für alle Plattformen
-
-### Einrichtung
-
-1. Erstellen Sie einen Kanal unter **Einstellungen → Chat-Kanäle** (wählen Sie Telegram, Lark oder iLink)
-2. Geben Sie Ihren Bot-Token (Telegram), App-Anmeldedaten (Lark) ein oder scannen Sie den QR-Code zum Anmelden (iLink) — sicher im OS-Schlüsselbund gespeichert
-3. Konfigurieren Sie Ereignisfilter und optionalen Tagesberichtsplan
-4. Verbinden — Nachrichten beginnen zu fließen, sobald Agenten Ereignisse aussenden
-
 ## Unterstützte Agenten
 
 | Agent | Umgebungsvariablen-Pfad | macOS / Linux Standard | Windows Standard |
@@ -261,8 +243,10 @@ Umgebungsvariablen:
 | `CODEG_PORT` | `3080` | HTTP-Port |
 | `CODEG_HOST` | `0.0.0.0` | Bind-Adresse |
 | `CODEG_TOKEN` | *(zufällig)* | Authentifizierungstoken (wird beim Start auf stderr ausgegeben) |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite-Datenbankverzeichnis |
+| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite-Datenbankverzeichnis (auch Wurzel für `uploads/`, `pets/`) |
 | `CODEG_STATIC_DIR` | `./web` oder `./out` | Next.js-Statikexport-Verzeichnis |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *(nicht gesetzt)* | Harte Obergrenze für die Gesamtzahl an Bytes unter `<data dir>/uploads/`. Dezimaler Byte-Wert (z. B. `10737418240` für 10 GiB). Nicht gesetzt, `0` oder ein nicht parsbarer Wert deaktiviert das Limit und gibt eine Startzeile aus, damit der Zustand sichtbar ist. Das Limit wird innerhalb eines einzelnen `codeg-server`-Prozesses durchgesetzt — horizontal skalierte Deployments, die sich ein `uploads/`-Volume teilen, benötigen externe Koordination (Datei-Lock, Redis, Reverse-Proxy-Quota). |
+| `CODEG_UPLOAD_QUOTA_STRICT` | *(nicht gesetzt)* | Wenn wahr (`1` / `true` / `yes` / `on`), wird der Start mit Exit-Code 2 abgebrochen, falls `CODEG_UPLOAD_MAX_TOTAL_BYTES` auf einen nicht parsbaren Wert gesetzt ist, statt mit einer WARN fail-open zu starten. Verwenden Sie dies, wenn Ihre Sicherheitsrichtlinie verlangt, dass „die konfigurierte Quota wirksam sein muss". |
 
 ## Architektur
 
@@ -298,13 +282,6 @@ Next.js 16 (Static Export) + React 19
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
 
-## Einschränkungen
-
-- Frontend verwendet statischen Export (`output: "export"`)
-- Keine dynamischen Next.js-Routen (`[param]`); stattdessen Query-Parameter verwenden
-- Tauri-Befehlsparameter: `camelCase` im Frontend, `snake_case` in Rust
-- TypeScript im strikten Modus
-
 ## Datenschutz und Sicherheit
 
 - Standardmäßig lokal für Analyse, Speicherung und Projektoperationen
@@ -312,10 +289,18 @@ Next.js 16 (Static Export) + React 19
 - Systemproxy-Unterstützung für Unternehmensumgebungen
 - Der Webdienst-Modus verwendet tokenbasierte Authentifizierung
 
+## Community
+
+- Scannen Sie den unten stehenden QR-Code, um unserer WeChat-Gruppe für Diskussionen, Feedback und Updates beizutreten
+
+<img src="../images/weixin-light.jpg#gh-light-mode-only" alt="WeChat" width="240" />
+<img src="../images/weixin-dark.jpg#gh-dark-mode-only" alt="WeChat" width="240" />
+
+- Danke an die [LinuxDO](https://linux.do)-Community für ihre Unterstützung
+
 ## Danksagungen
 
-- [LinuxDO](https://linux.do) — die Community, in der alles begann
-- [ACP](https://agentclientprotocol.com) — das Agent Client Protocol (ACP) ist die Grundlage, auf der Codeg die Verbindung zu mehreren Agenten realisiert
+- [ACP](https://agentclientprotocol.com) — das Agent Client Protocol (ACP) ist die Grundlage, die es Codeg ermöglicht, sich mit mehreren Agenten zu verbinden
 
 ## Lizenz
 

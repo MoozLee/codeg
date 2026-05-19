@@ -85,24 +85,6 @@ OpenClaw、Cline 等）整合到桌面應用、獨立伺服器或 Docker 容器�
 
 > 更多渠道（Discord、Slack、釘釘等）計劃在未來版本中支援。
 
-### 主要功能
-
-- **會話交互** — 執行完整的代理會話：`/folder` 選擇專案、`/agent` 選擇代理、`/task <描述>` 啟動任務，直接發送純文字作為後續訊息。`/resume` 繼續上次會話、`/cancel` 中止任務、`/sessions` 列出活躍會話
-- **權限控制** — 代理在聊天中請求工具執行權限；使用 `/approve`（或 `/approve always` 啟用自動審批）和 `/deny` 進行回應
-- **事件通知** — 代理回合完成、工具呼叫和錯誤事件即時推送，支援豐富格式展示
-- **查詢命令** — `/search <關鍵字>`、`/today`、`/status`、`/help` 快速查詢；支援自訂命令前綴
-- **每日報告** — 在預設時間自動產生每日摘要，包括對話數量、代理類型分佈和專案活躍度
-- **多語言** — 訊息範本支援 10 種語言（英語、簡體中文/繁體中文、日語、韓語、西班牙語、德語、法語、葡萄牙語、阿拉伯語）
-- **安全憑據** — 令牌儲存在作業系統密鑰環中，不會暴露在設定檔或日誌中
-- **豐富訊息** — Telegram 使用 Markdown 格式，飛書使用卡片佈局，iLink 使用圖文訊息；所有平台均支援純文字回退
-
-### 設定
-
-1. 在 **設定 → 訊息渠道** 中建立渠道（選擇 Telegram、飛書或 iLink）
-2. 輸入 Bot Token（Telegram）、應用憑據（飛書）或掃碼登入（iLink）——安全儲存在作業系統密鑰環中
-3. 設定事件篩選器和可選的每日報告排程
-4. 連接——當代理發出事件時，訊息將開始流轉
-
 ## 支援的 Agent
 
 | Agent | 環境變數優先路徑 | macOS / Linux 預設路徑 | Windows 預設路徑 |
@@ -258,8 +240,10 @@ CODEG_STATIC_DIR=../out ./target/release/codeg-server
 | `CODEG_PORT` | `3080` | HTTP 連接埠 |
 | `CODEG_HOST` | `0.0.0.0` | 綁定位址 |
 | `CODEG_TOKEN` | *（隨機）* | 認證令牌（啟動時輸出到 stderr） |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite 資料庫目錄 |
+| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite 資料庫目錄（同時也是 `uploads/`、`pets/` 的根目錄） |
 | `CODEG_STATIC_DIR` | `./web` 或 `./out` | Next.js 靜態匯出目錄 |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *（未設定）* | `<data dir>/uploads/` 下所有檔案總位元組數的硬上限。十進位位元組數（例如 `10737418240` 表示 10 GiB）。未設定、`0` 或無法解析的值會停用上限，並在啟動時印出一行日誌以便觀察當前狀態。該上限僅在單一 `codeg-server` 行程內生效——共用同一個 `uploads/` 卷的橫向擴展部署需要外部協調（檔案鎖、Redis、反向代理配額）。 |
+| `CODEG_UPLOAD_QUOTA_STRICT` | *（未設定）* | 當值為真（`1` / `true` / `yes` / `on`）時，若 `CODEG_UPLOAD_MAX_TOTAL_BYTES` 設定為無法解析的值，則以結束代碼 2 中止啟動，而不是發出 WARN 後繼續執行。當安全政策要求「設定的配額必須生效」時使用此選項。 |
 
 ## 架構
 
@@ -295,13 +279,6 @@ Next.js 16 (Static Export) + React 19
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
 
-## 開發約束
-
-- 前端使用靜態匯出（`output: "export"`）
-- 不使用 Next.js 動態路由（`[param]`），改用查詢參數
-- Tauri 命令參數：前端 `camelCase`，Rust `snake_case`
-- TypeScript strict 模式
-
 ## 隱私與安全
 
 - 預設本地優先：解析、儲存、專案操作均在本地完成
@@ -309,10 +286,18 @@ Next.js 16 (Static Export) + React 19
 - 支援系統代理，適配企業網路環境
 - Web 服務模式使用基於令牌的身份認證
 
+## 交流
+
+- 掃描下方 QR Code 加入我們的微信群，參與討論、回饋與更新
+
+<img src="../images/weixin-light.jpg#gh-light-mode-only" alt="WeChat" width="240" />
+<img src="../images/weixin-dark.jpg#gh-dark-mode-only" alt="WeChat" width="240" />
+
+- 感謝 [LinuxDO](https://linux.do) 社群的支持
+
 ## 致謝
 
-- [LinuxDO](https://linux.do)：起源社群
-- [ACP](https://agentclientprotocol.com)：Agent Client Protocol (ACP) 是 codeg 實現多智能體連接的基礎
+- [ACP](https://agentclientprotocol.com)：智能體客戶端協定 (ACP) 是 codeg 實現多智能體連接的基礎
 
 ## 授權
 

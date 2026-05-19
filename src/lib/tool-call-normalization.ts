@@ -273,6 +273,20 @@ export function inferLiveToolName(params: {
   kind?: string | null
   rawInput?: string | null
 }): string {
+  // The backend (e.g. ACP connection layer for OpenCode sub-agent task
+  // calls) may set `title="agent"` as an *authoritative* sentinel after
+  // running agent-specific detection. This must win over `inferFromInput`'s
+  // input-shape heuristics, which otherwise classify sub-agent payloads
+  // as "bash" / "edit" / etc. when their input objects happen to carry a
+  // `command`/`args`/`changes`/... key alongside the real `subagent_type`
+  // marker.
+  //
+  // Match the sentinel by *literal* equality after trimming/lowercasing —
+  // NOT via `normalizeToolName`, whose freeform `\bagent\b` matcher would
+  // misclassify any title containing the word "agent" (e.g. "Inspect agent
+  // config") as an Agent card before raw_input is even consulted.
+  if ((params.title ?? "").trim().toLowerCase() === "agent") return "agent"
+
   const byInput = inferFromInput(params.rawInput, params.kind, params.title)
   if (byInput) return byInput
 

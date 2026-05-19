@@ -407,7 +407,7 @@
       "gemini": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill Name\n\nInstructions for the agent when this skill is active.\n\n## Workflow\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openCode": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Steps\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openClaw": "---\nname: example-skill\ndescription: Describe when this skill should be used.\nuser-invocable: true\ndisable-model-invocation: false\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n",
-      "default": "# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
+      "default": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
     }
   },
   "McpSettings": {
@@ -640,7 +640,6 @@
       "emptyProvider": "まだプロバイダーがありません。ID を入力して「プロバイダーを追加」をクリックしてください。",
       "providerEnabledState": "{providerId} の有効状態",
       "selectProviderNpm": "provider.npm を選択",
-      "notSet": "未設定",
       "modelManagement": "モデル管理",
       "modelCount": "{count} 個のモデル",
       "modelDescription": "OpenCode の `provider.models` に準拠。高速管理では現在 `name` / `id` をサポートし、その他の高度な項目は保持され、下部のネイティブ JSON で編集できます。",

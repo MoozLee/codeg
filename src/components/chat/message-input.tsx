@@ -2541,7 +2541,7 @@ export function MessageInput({
                 key={`cmd-${cmd.name}`}
                 type="button"
                 className={cn(
-                  "flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm",
+                  "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
                   i === slashSelectedIndex
                     ? "bg-accent text-accent-foreground"
                     : "hover:bg-muted"
@@ -2577,14 +2577,14 @@ export function MessageInput({
                   }}
                 >
                   <BookOpenText className="mt-0.5 size-4 shrink-0 text-primary/80" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate font-medium">{skill.name}</span>
-                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                        {expertPrefix}
-                        {skill.id}
-                      </span>
-                    </div>
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <span className="shrink-0 font-medium">{skill.name}</span>
+                    <span
+                      className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+                      title={skill.description ?? undefined}
+                    >
+                      {skill.description ?? `${expertPrefix}${skill.id}`}
+                    </span>
                   </div>
                 </button>
               )

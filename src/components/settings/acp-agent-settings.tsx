@@ -1202,6 +1202,30 @@ function patchOpenCodeConfigText(
   }
 }
 
+// Fill in `provider.<id>.npm` with the first option for any providers that
+// lack it, so the displayed Select value matches what gets persisted to disk.
+function ensureOpenCodeProviderNpm(configText: string): string {
+  if (!configText.trim()) return configText
+  const parseResult = parseConfigJsonText(configText)
+  if (parseResult.error) return configText
+  const config = parseResult.config
+  const providerRoot = asObjectRecord(config.provider)
+  if (!providerRoot) return configText
+  let mutated = false
+  for (const providerId of Object.keys(providerRoot)) {
+    const provider = asObjectRecord(providerRoot[providerId])
+    if (!provider) continue
+    const currentNpm =
+      typeof provider.npm === "string" ? provider.npm.trim() : ""
+    if (!currentNpm) {
+      provider.npm = OPENCODE_PROVIDER_NPM_OPTIONS[0].value
+      mutated = true
+    }
+  }
+  if (!mutated) return configText
+  return JSON.stringify(config, null, 2)
+}
+
 interface CodexTomlImportantValues {
   model: string
   modelProvider: string
@@ -3004,7 +3028,10 @@ export function AcpAgentSettings() {
           throw new Error(authError)
         }
       }
-      const normalizedConfig = normalizeConfigText(configText)
+      let normalizedConfig = normalizeConfigText(configText)
+      if (agentType === "open_code" && normalizedConfig) {
+        normalizedConfig = ensureOpenCodeProviderNpm(normalizedConfig)
+      }
       // For agents using merge strategy, mark removed keys as null
       // so the backend merge_json_values can delete them from disk.
       let configForPersist =
@@ -4281,8 +4308,35 @@ export function AcpAgentSettings() {
         config.provider = providerRoot
       }
       providerRoot[providerId] = {
+        npm: OPENCODE_PROVIDER_NPM_OPTIONS[0].value,
         options: {},
         models: {},
+      }
+
+      if (
+        Array.isArray(config.enabled_providers) &&
+        config.enabled_providers.length > 0
+      ) {
+        const enabledProviders = config.enabled_providers
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean)
+        if (!enabledProviders.includes(providerId)) {
+          enabledProviders.push(providerId)
+        }
+        config.enabled_providers = enabledProviders
+      }
+
+      if (Array.isArray(config.disabled_providers)) {
+        const disabledProviders = config.disabled_providers
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter((item) => item && item !== providerId)
+        if (disabledProviders.length > 0) {
+          config.disabled_providers = disabledProviders
+        } else {
+          delete config.disabled_providers
+        }
       }
     })
     setOpenCodeProviderId(providerId)
@@ -4445,6 +4499,9 @@ export function AcpAgentSettings() {
       const targetId = providerId.trim()
       if (!targetId) return
       handleOpenCodeConfigPatch((config) => {
+        const hadEnabledAllowlist =
+          Array.isArray(config.enabled_providers) &&
+          config.enabled_providers.length > 0
         const enabledProviders = Array.isArray(config.enabled_providers)
           ? config.enabled_providers
               .filter((item): item is string => typeof item === "string")
@@ -4462,11 +4519,15 @@ export function AcpAgentSettings() {
         const nextDisabled = new Set(disabledProviders)
 
         if (enabled) {
-          nextEnabled.add(targetId)
           nextDisabled.delete(targetId)
+          if (hadEnabledAllowlist) {
+            nextEnabled.add(targetId)
+          }
         } else {
           nextDisabled.add(targetId)
-          nextEnabled.delete(targetId)
+          if (hadEnabledAllowlist) {
+            nextEnabled.delete(targetId)
+          }
         }
 
         const enabledArray = Array.from(nextEnabled)
@@ -6372,7 +6433,12 @@ supports_websockets = true`}
                               const isDisabled =
                                 selectedOpenCodeConfig.disabledProviders.includes(
                                   providerId
-                                )
+                                ) ||
+                                (selectedOpenCodeConfig.enabledProviders
+                                  .length > 0 &&
+                                  !selectedOpenCodeConfig.enabledProviders.includes(
+                                    providerId
+                                  ))
                               return (
                                 <Collapsible
                                   key={providerId}
@@ -6478,15 +6544,14 @@ supports_websockets = true`}
                                             value={
                                               provider.npm.trim()
                                                 ? provider.npm
-                                                : "__none__"
+                                                : OPENCODE_PROVIDER_NPM_OPTIONS[0]
+                                                    .value
                                             }
                                             onValueChange={(value) => {
                                               handleOpenCodeProviderFieldChange(
                                                 providerId,
                                                 "npm",
-                                                value === "__none__"
-                                                  ? ""
-                                                  : value
+                                                value
                                               )
                                             }}
                                           >
@@ -6498,9 +6563,6 @@ supports_websockets = true`}
                                               />
                                             </SelectTrigger>
                                             <SelectContent align="start">
-                                              <SelectItem value="__none__">
-                                                {t("openCode.notSet")}
-                                              </SelectItem>
                                               {buildOpenCodeNpmOptions(
                                                 provider.npm
                                               ).map((npmOption) => (

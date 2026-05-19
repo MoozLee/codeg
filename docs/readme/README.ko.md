@@ -85,24 +85,6 @@ Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline 등 로컬 AI 코�
 
 > 추가 채널(Discord, Slack, DingTalk 등)은 향후 릴리스에서 지원 예정입니다.
 
-### 주요 기능
-
-- **세션 상호작용** — 전체 에이전트 세션 실행: `/folder`로 프로젝트 선택, `/agent`로 에이전트 선택, `/task <설명>`으로 작업 시작, 일반 텍스트로 후속 메시지 전송. `/resume`으로 이전 세션 재개, `/cancel`로 중단, `/sessions`로 활성 세션 목록 확인
-- **권한 제어** — 에이전트가 채팅에서 도구 실행 권한을 요청; `/approve`(또는 `/approve always`로 자동 승인) 및 `/deny`로 응답
-- **이벤트 알림** — 에이전트 턴 완료, 도구 호출, 오류가 리치 포맷으로 실시간 푸시
-- **조회 명령어** — `/search <키워드>`, `/today`, `/status`, `/help`로 빠른 조회; 명령 접두사 설정 가능
-- **일일 리포트** — 예약된 시간에 자동 일일 요약 생성(대화 수, 에이전트 유형별 분석, 프로젝트 활동 포함)
-- **다국어 지원** — 10개 언어의 메시지 템플릿(영어, 간체/번체 중국어, 일본어, 한국어, 스페인어, 독일어, 프랑스어, 포르투갈어, 아랍어)
-- **보안 자격증명** — 토큰은 OS 키링에 저장되며 설정 파일이나 로그에 노출되지 않음
-- **리치 메시지** — Telegram은 Markdown 포맷, Lark은 카드 기반 레이아웃, iLink은 리치 텍스트 메시지; 모든 플랫폼에서 일반 텍스트 폴백 지원
-
-### 설정
-
-1. **설정 → 채팅 채널**에서 채널 생성(Telegram, Lark 또는 iLink 선택)
-2. 봇 토큰(Telegram), 앱 자격증명(Lark) 또는 QR 코드로 로그인(iLink) — OS 키링에 안전하게 저장
-3. 이벤트 필터 및 선택적 일일 리포트 일정 설정
-4. 연결 — 에이전트가 이벤트를 발생시키면 메시지가 흐르기 시작
-
 ## 지원 에이전트
 
 | Agent | 환경 변수 경로 | macOS / Linux 기본값 | Windows 기본값 |
@@ -258,8 +240,10 @@ CODEG_STATIC_DIR=../out ./target/release/codeg-server
 | `CODEG_PORT` | `3080` | HTTP 포트 |
 | `CODEG_HOST` | `0.0.0.0` | 바인드 주소 |
 | `CODEG_TOKEN` | *(랜덤)* | 인증 토큰 (시작 시 stderr에 출력) |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite 데이터베이스 디렉토리 |
+| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite 데이터베이스 디렉토리(`uploads/`, `pets/`의 루트 역할도 함) |
 | `CODEG_STATIC_DIR` | `./web` 또는 `./out` | Next.js 정적 내보내기 디렉토리 |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *(설정 안 됨)* | `<data dir>/uploads/` 아래 상주하는 모든 파일의 총 바이트 수에 대한 하드 한도. 10진수 바이트 수(예: 10 GiB의 경우 `10737418240`). 설정하지 않거나 `0`, 또는 파싱할 수 없는 값이면 한도가 비활성화되며, 현재 상태가 보이도록 시작 시 로그 라인을 출력합니다. 이 한도는 단일 `codeg-server` 프로세스 내에서만 적용됩니다 — 하나의 `uploads/` 볼륨을 공유하는 수평 확장 배포에는 외부 조정(파일 잠금, Redis, 리버스 프록시 쿼터)이 필요합니다. |
+| `CODEG_UPLOAD_QUOTA_STRICT` | *(설정 안 됨)* | 참값(`1` / `true` / `yes` / `on`)으로 설정된 경우, `CODEG_UPLOAD_MAX_TOTAL_BYTES`가 파싱할 수 없는 값으로 설정되어 있으면 WARN과 함께 fail-open 하는 대신 종료 코드 2로 시작을 중단합니다. 보안 정책상 "구성된 쿼터가 반드시 적용되어야 한다"는 요구가 있을 때 사용합니다. |
 
 ## 아키텍처
 
@@ -295,13 +279,6 @@ Next.js 16 (Static Export) + React 19
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
 
-## 제약 사항
-
-- 프론트엔드는 정적 내보내기 사용 (`output: "export"`)
-- Next.js 동적 라우트 (`[param]`) 불가; 대신 쿼리 파라미터 사용
-- Tauri 명령 파라미터: 프론트엔드 `camelCase`, Rust `snake_case`
-- TypeScript strict 모드
-
 ## 개인정보 보호 및 보안
 
 - 파싱, 저장, 프로젝트 작업은 기본적으로 로컬 우선
@@ -309,10 +286,18 @@ Next.js 16 (Static Export) + React 19
 - 엔터프라이즈 환경을 위한 시스템 프록시 지원
 - 웹 서비스 모드에서는 토큰 기반 인증 사용
 
+## 커뮤니티
+
+- 아래 QR 코드를 스캔하여 토론, 피드백, 업데이트를 위한 WeChat 그룹에 참여하세요
+
+<img src="../images/weixin-light.jpg#gh-light-mode-only" alt="WeChat" width="240" />
+<img src="../images/weixin-dark.jpg#gh-dark-mode-only" alt="WeChat" width="240" />
+
+- [LinuxDO](https://linux.do) 커뮤니티의 지원에 감사드립니다
+
 ## 감사의 말
 
-- [LinuxDO](https://linux.do) — 모든 것이 시작된 커뮤니티
-- [ACP](https://agentclientprotocol.com) — Agent Client Protocol (ACP)은 codeg가 여러 에이전트와 연결할 수 있는 기반입니다
+- [ACP](https://agentclientprotocol.com) — Agent Client Protocol(ACP)은 Codeg가 여러 에이전트에 연결할 수 있게 해주는 기반입니다
 
 ## 라이선스
 

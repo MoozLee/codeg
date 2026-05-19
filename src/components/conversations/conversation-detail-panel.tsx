@@ -1117,38 +1117,44 @@ const ConversationTabView = memo(function ConversationTabView({
       }
     >
       {isWelcomeMode ? (
-        <div className="flex h-full min-h-0 flex-col overflow-y-auto">
-          <div className="m-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8">
-            <WelcomeHero />
+        <div className="flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto">
+          <div className="m-auto flex w-full max-w-2xl flex-col gap-6 py-8">
+            <div className="px-4">
+              <WelcomeHero />
+            </div>
             <div className="flex flex-col gap-4">
-              <AgentSelector
-                defaultAgentType={
-                  conversationId != null ? selectedAgent : undefined
-                }
-                onSelect={handleAgentSelect}
-                onAgentsLoaded={(agents) => {
-                  setAgentsLoaded(true)
-                  setUsableAgentCount(
-                    agents.filter((agent) => agent.enabled && agent.available)
-                      .length
-                  )
-                }}
-                onOpenAgentsSettings={handleOpenAgentsSettings}
-                disabled={isConnecting || dbConversationId != null}
-              />
+              <div className="flex justify-center px-4">
+                <AgentSelector
+                  defaultAgentType={
+                    conversationId != null ? selectedAgent : undefined
+                  }
+                  onSelect={handleAgentSelect}
+                  onAgentsLoaded={(agents) => {
+                    setAgentsLoaded(true)
+                    setUsableAgentCount(
+                      agents.filter((agent) => agent.enabled && agent.available)
+                        .length
+                    )
+                  }}
+                  onOpenAgentsSettings={handleOpenAgentsSettings}
+                  disabled={isConnecting || dbConversationId != null}
+                />
+              </div>
               {autoConnectError || agentConnectError ? (
-                <button
-                  type="button"
-                  onClick={handleOpenAgentsSettings}
-                  className="w-full cursor-pointer rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive transition-colors hover:bg-destructive/10"
-                >
-                  <div
-                    className="overflow-hidden text-ellipsis whitespace-nowrap text-center"
-                    title={autoConnectError ?? agentConnectError ?? ""}
+                <div className="px-4">
+                  <button
+                    type="button"
+                    onClick={handleOpenAgentsSettings}
+                    className="w-full cursor-pointer rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive transition-colors hover:bg-destructive/10"
                   >
-                    {autoConnectError ?? agentConnectError}
-                  </div>
-                </button>
+                    <div
+                      className="overflow-hidden text-ellipsis whitespace-nowrap text-center"
+                      title={autoConnectError ?? agentConnectError ?? ""}
+                    >
+                      {autoConnectError ?? agentConnectError}
+                    </div>
+                  </button>
+                </div>
               ) : null}
               <ChatInput
                 status={connStatus}

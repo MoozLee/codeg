@@ -87,24 +87,6 @@ Conecte seus aplicativos de mensagens favoritos — Telegram, Lark (Feishu), iLi
 
 > Mais canais (Discord, Slack, DingTalk, etc.) estão planejados para versões futuras.
 
-### Recursos principais
-
-- **Interação de sessão** — execute sessões completas de agente: `/folder` para selecionar o projeto, `/agent` para escolher o agente, `/task <descrição>` para iniciar uma tarefa, envie mensagens de acompanhamento como texto simples. `/resume` para continuar uma sessão anterior, `/cancel` para cancelar, `/sessions` para listar sessões ativas
-- **Controle de permissões** — os agentes solicitam permissões de execução de ferramentas diretamente no chat; `/approve` (ou `/approve always` para aprovação automática) e `/deny`
-- **Notificações de eventos** — conclusões de turno, chamadas de ferramentas e erros dos agentes são enviados em tempo real com formatação rica
-- **Comandos de consulta** — `/search <palavra-chave>`, `/today`, `/status`, `/help` para consultas rápidas; prefixo de comando configurável
-- **Relatórios diários** — resumo diário automatizado em um horário programado, incluindo contagem de conversas, divisão por tipo de agente e atividade do projeto
-- **Multi-idioma** — templates de mensagens em 10 idiomas (inglês, chinês simplificado/tradicional, japonês, coreano, espanhol, alemão, francês, português, árabe)
-- **Credenciais seguras** — tokens armazenados no chaveiro do SO, nunca expostos em arquivos de configuração ou logs
-- **Mensagens ricas** — formatação Markdown para Telegram, layout baseado em cartões para Lark; fallback em texto simples para todas as plataformas
-
-### Configuração
-
-1. Crie um canal em **Configurações → Canais de Chat** (escolha Telegram, Lark ou iLink)
-2. Insira seu token de bot (Telegram), credenciais do app (Lark) ou escaneie o código QR para fazer login (iLink) — armazenados com segurança no chaveiro do SO
-3. Configure filtros de eventos e programação opcional do relatório diário
-4. Conecte — as mensagens começam a fluir assim que os agentes emitem eventos
-
 ## Agentes suportados
 
 | Agente | Caminho por variável de ambiente | Padrão macOS / Linux | Padrão Windows |
@@ -260,8 +242,10 @@ Variáveis de ambiente:
 | `CODEG_PORT` | `3080` | Porta HTTP |
 | `CODEG_HOST` | `0.0.0.0` | Endereço de bind |
 | `CODEG_TOKEN` | *(aleatório)* | Token de autenticação (impresso no stderr ao iniciar) |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | Diretório do banco de dados SQLite |
+| `CODEG_DATA_DIR` | `~/.local/share/codeg` | Diretório do banco de dados SQLite (também raiz de `uploads/`, `pets/`) |
 | `CODEG_STATIC_DIR` | `./web` ou `./out` | Diretório de exportação estática do Next.js |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *(não definido)* | Limite rígido do total de bytes residentes em `<data dir>/uploads/`. Contagem decimal de bytes (ex.: `10737418240` para 10 GiB). Não definido, `0` ou um valor não analisável desativa o limite e imprime uma linha de inicialização para tornar o estado visível. O limite é aplicado dentro de um único processo `codeg-server` — implantações escaladas horizontalmente que compartilham um volume `uploads/` precisam de coordenação externa (lock de arquivo, Redis, cota de proxy reverso). |
+| `CODEG_UPLOAD_QUOTA_STRICT` | *(não definido)* | Quando verdadeiro (`1` / `true` / `yes` / `on`), aborta a inicialização com código de saída 2 se `CODEG_UPLOAD_MAX_TOTAL_BYTES` estiver definido como um valor não analisável, em vez de continuar com um WARN. Use isso quando sua política de segurança exigir que "a cota configurada deve ser efetiva". |
 
 ## Arquitetura
 
@@ -297,13 +281,6 @@ Next.js 16 (Static Export) + React 19
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
 
-## Restrições
-
-- O frontend usa exportação estática (`output: "export"`)
-- Sem rotas dinâmicas do Next.js (`[param]`); use parâmetros de consulta em vez disso
-- Parâmetros de comandos Tauri: `camelCase` no frontend, `snake_case` no Rust
-- TypeScript em modo strict
-
 ## Privacidade e segurança
 
 - Local-first por padrão para análise, armazenamento e operações do projeto
@@ -311,9 +288,17 @@ Next.js 16 (Static Export) + React 19
 - Suporte a proxy do sistema para ambientes corporativos
 - O modo de serviço web usa autenticação baseada em token
 
+## Comunidade
+
+- Escaneie o QR code abaixo para entrar em nosso grupo do WeChat para discussões, feedback e atualizações
+
+<img src="../images/weixin-light.jpg#gh-light-mode-only" alt="WeChat" width="240" />
+<img src="../images/weixin-dark.jpg#gh-dark-mode-only" alt="WeChat" width="240" />
+
+- Obrigado à comunidade [LinuxDO](https://linux.do) pelo apoio
+
 ## Agradecimentos
 
-- [LinuxDO](https://linux.do) — a comunidade onde tudo começou
 - [ACP](https://agentclientprotocol.com) — o Agent Client Protocol (ACP) é a base que permite ao Codeg conectar-se a múltiplos agentes
 
 ## Licença

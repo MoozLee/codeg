@@ -407,7 +407,7 @@
       "gemini": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill Name\n\nInstructions for the agent when this skill is active.\n\n## Workflow\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openCode": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Steps\n\n1. Add actionable step one.\n2. Add actionable step two.\n",
       "openClaw": "---\nname: example-skill\ndescription: Describe when this skill should be used.\nuser-invocable: true\ndisable-model-invocation: false\n---\n\n# Purpose\n\nDescribe what this skill helps with.\n\n# Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n",
-      "default": "# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
+      "default": "---\nname: example-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill: example-skill\n\n## When to use\n\n- Describe trigger conditions.\n\n## Instructions\n\n1. Add actionable instruction one.\n2. Add actionable instruction two.\n"
     }
   },
   "McpSettings": {
@@ -640,7 +640,6 @@
       "emptyProvider": "暫無 Provider，輸入 ID 後點擊「新增 Provider」建立。",
       "providerEnabledState": "{providerId} 啟用狀態",
       "selectProviderNpm": "選擇 provider.npm",
-      "notSet": "未設定",
       "modelManagement": "模型管理",
       "modelCount": "共 {count} 個",
       "modelDescription": "對齊 OpenCode `provider.models` 結構。目前支援 `name` / `id` 快速管理；其它進階欄位會保留，可在下方原生 JSON 中繼續編輯。",

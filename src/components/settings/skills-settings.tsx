@@ -1182,6 +1182,12 @@ export function SkillsSettings() {
                               setSkillDraftId(event.target.value)
                             }}
                             placeholder={t("skillIdPlaceholder")}
+                            // Skill id maps to the on-disk file/directory
+                            // name; renaming would require moving files,
+                            // which the save endpoint doesn't support. Lock
+                            // the field once an existing skill is loaded so
+                            // edits don't silently fork a new skill.
+                            disabled={Boolean(selectedSkill)}
                           />
 
                           {skillsScope === "folder" && !selectedFolderPath ? (

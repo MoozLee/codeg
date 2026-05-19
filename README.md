@@ -92,24 +92,6 @@ Connect your favorite messaging apps — Telegram, Lark (Feishu), iLink (Weixin)
 
 > More channels (Discord, Slack, DingTalk, etc.) are planned for future releases.
 
-### Key Features
-
-- **Session Interaction** — run full agent sessions from your chat app: `/folder` to pick a project, `/agent` to choose an agent, `/task <description>` to start a task, then send follow-up messages as plain text. `/resume` to continue a previous session, `/cancel` to abort, `/sessions` to list active sessions
-- **Permission Control** — agents can request tool-execution permissions in-chat; respond with `/approve` (or `/approve always` for auto-approve) and `/deny` without switching context
-- **Event Notifications** — agent turn completions, tool calls, and errors are pushed to all enabled channels in real time with rich formatting
-- **Query Commands** — `/search <keyword>`, `/today`, `/status`, `/help` for quick lookups; configurable command prefix
-- **Daily Reports** — automated daily summary at a scheduled time, including conversation counts, agent-type breakdown, and project activity
-- **Multi-Language** — message templates in 10 languages (English, Simplified/Traditional Chinese, Japanese, Korean, Spanish, German, French, Portuguese, Arabic)
-- **Secure Credentials** — tokens stored in the OS keyring, never exposed in config files or logs
-- **Rich Messages** — Markdown formatting for Telegram, card-based layout for Lark; plain-text fallback for all platforms
-
-### Setup
-
-1. Create a channel in **Settings → Chat Channels** (choose Telegram, Lark, or iLink)
-2. Enter your bot token (Telegram), app credentials (Lark), or scan QR code to log in (iLink) — stored securely in the OS keyring
-3. Configure event filters and optional daily report schedule
-4. Connect — messages start flowing as agents emit events
-
 ## Supported Agents
 
 | Agent | Environment Variable Path | macOS / Linux Default | Windows Default |
@@ -304,13 +286,6 @@ Next.js 16 (Static Export) + React 19
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
 
-## Constraints
-
-- Frontend uses static export (`output: "export"`)
-- No Next.js dynamic routes (`[param]`); use query params instead
-- Tauri command params: frontend `camelCase`, Rust `snake_case`
-- TypeScript strict mode
-
 ## Privacy & Security
 
 - Local-first by default for parsing, storage, and project operations
@@ -318,9 +293,16 @@ Next.js 16 (Static Export) + React 19
 - System proxy support for enterprise environments
 - Web service mode uses token-based authentication
 
+## Community
+- Scan the QR code below to join our WeChat group for discussions, feedback, and updates
+
+<img src="./docs/images/weixin-light.jpg#gh-light-mode-only" alt="WeChat" width="240" />
+<img src="./docs/images/weixin-dark.jpg#gh-dark-mode-only" alt="WeChat" width="240" />
+
+- Thanks to the [LinuxDO](https://linux.do) community for their support
+
 ## Acknowledgments
 
-- [LinuxDO](https://linux.do) — the community where it all began
 - [ACP](https://agentclientprotocol.com) — the Agent Client Protocol (ACP) is the foundation that enables Codeg to connect with multiple agents
 
 ## License

@@ -3321,6 +3321,39 @@ fn json_value_to_text(val: &Option<serde_json::Value>) -> Option<String> {
     }
 }
 
+/// Mirrors `parsers/opencode.rs:425-429` so streaming and reload-from-DB
+/// render the same Agent card. The SQLite-side condition is
+/// `tool == "task" && state.input.subagent_type IS NOT NULL`, where
+/// `tool` is the OpenCode **internal** tool name. ACP only exposes a
+/// user-facing `title` (e.g. "Explore project structure") rather than
+/// the internal tool name, so we cannot replicate the `tool == "task"`
+/// half of the AND here. We instead anchor on
+/// `agent_type == OpenCode` (avoiding any cross-agent collision a generic
+/// `subagent_type` field could cause) plus the non-empty
+/// `subagent_type` string in `raw_input` — together these uniquely
+/// identify an OpenCode sub-agent invocation in practice.
+fn is_opencode_subagent_invocation(agent_type: AgentType, raw_input: &Option<String>) -> bool {
+    if agent_type != AgentType::OpenCode {
+        return false;
+    }
+    let Some(text) = raw_input.as_deref() else {
+        return false;
+    };
+    // Cheap substring guard avoids parsing large `raw_input` payloads
+    // (e.g. prompts with many KB of context) when the field is absent.
+    if !text.contains("subagent_type") {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return false;
+    };
+    value
+        .get("subagent_type")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+}
+
 fn map_plan_priority(priority: &PlanEntryPriority) -> String {
     match priority {
         PlanEntryPriority::High => "high",
@@ -3477,12 +3510,24 @@ async fn emit_conversation_update(
             let meta = tc.meta.map(serde_json::Value::Object);
             let status = format!("{:?}", tc.status).to_lowercase();
             raw_output_cache.remove_if_final(&tool_call_id, Some(status.as_str()));
+            let title = if is_opencode_subagent_invocation(agent_type, &raw_input) {
+                // Avoid logging `tc.title` — it can be a model-generated user
+                // task description (PII-adjacent) and would create noise in
+                // server-mode log sinks. The opaque tool_call_id is enough
+                // to correlate this event with downstream traces.
+                eprintln!(
+                    "[ACP][{agent_type}] subagent detected, rewrote tool title to 'agent' (tool_call_id={tool_call_id})"
+                );
+                "agent".to_string()
+            } else {
+                tc.title
+            };
             emit_with_state(
                 state,
                 emitter,
                 AcpEvent::ToolCall {
                     tool_call_id,
-                    title: tc.title,
+                    title,
                     kind: format!("{:?}", tc.kind).to_lowercase(),
                     status,
                     content,
@@ -3533,12 +3578,26 @@ async fn emit_conversation_update(
             let meta = tcu.meta.clone().map(serde_json::Value::Object);
             let status = tcu.fields.status.map(|s| format!("{:?}", s).to_lowercase());
             raw_output_cache.remove_if_final(&tool_call_id, status.as_deref());
+            // When this update carries the subagent payload, force-override the
+            // title — regardless of whether the update itself provides a title —
+            // so the frontend reducer replaces any earlier non-agent title set
+            // by the initial ToolCall (whose raw_input may have been empty).
+            // Logging mirrors the ToolCall arm: we deliberately omit the
+            // incoming title (user-generated content) to keep server logs clean.
+            let title = if is_opencode_subagent_invocation(agent_type, &raw_input) {
+                eprintln!(
+                    "[ACP][{agent_type}] subagent detected, rewrote tool title to 'agent' (tool_call_id={tool_call_id}, on update)"
+                );
+                Some("agent".to_string())
+            } else {
+                tcu.fields.title
+            };
             emit_with_state(
                 state,
                 emitter,
                 AcpEvent::ToolCallUpdate {
                     tool_call_id,
-                    title: tcu.fields.title,
+                    title,
                     status,
                     content,
                     raw_input,
@@ -4208,5 +4267,105 @@ mod tests {
         // panicked at slicing time).
         assert!(out.chars().all(|c| c == '中'));
         assert!(out.len() <= 6); // at most 2 chars (6 bytes)
+    }
+
+    // ─── is_opencode_subagent_invocation ─────────────────────────────────
+
+    #[test]
+    fn subagent_detects_opencode_with_subagent_type_regardless_of_title() {
+        // OpenCode's ACP title is the user-facing description (e.g. the
+        // task's `description` field), NOT the internal tool name. The
+        // historical-parser equivalent at parsers/opencode.rs:425-429
+        // anchors on `tool == "task"`, which we can't replicate here
+        // because ACP doesn't expose the internal tool name — so we rely
+        // solely on agent_type + subagent_type. Verify the detection
+        // triggers regardless of the title shape.
+        let input = Some(r#"{"subagent_type":"researcher","prompt":"x"}"#.to_string());
+        assert!(is_opencode_subagent_invocation(
+            AgentType::OpenCode,
+            &input
+        ));
+    }
+
+    #[test]
+    fn subagent_rejects_when_agent_is_not_opencode() {
+        // Cross-agent isolation: even if a Claude/Codex tool happens to
+        // embed `subagent_type` in its input, we never rewrite the title.
+        let input = Some(r#"{"subagent_type":"x"}"#.to_string());
+        assert!(!is_opencode_subagent_invocation(
+            AgentType::ClaudeCode,
+            &input
+        ));
+        assert!(!is_opencode_subagent_invocation(AgentType::Codex, &input));
+    }
+
+    #[test]
+    fn subagent_rejects_empty_or_non_string_subagent_type() {
+        for raw in [
+            r#"{"subagent_type":""}"#,
+            r#"{"subagent_type":null}"#,
+            r#"{"subagent_type":42}"#,
+            r#"{"subagent_type":["a"]}"#,
+        ] {
+            assert!(
+                !is_opencode_subagent_invocation(AgentType::OpenCode, &Some(raw.to_string())),
+                "expected false for raw_input={raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn subagent_rejects_none_malformed_or_non_object_root() {
+        assert!(!is_opencode_subagent_invocation(
+            AgentType::OpenCode,
+            &None
+        ));
+        for raw in [
+            "not json",
+            "{}",
+            r#""string""#,
+            "[1,2,3]",
+            // Substring guard short-circuits this before JSON parsing;
+            // verify both code paths agree on the result.
+            "12345",
+            // Field name present as substring but not as object key — the
+            // substring guard lets this through but JSON parsing rejects
+            // it (the value is a number, not an object with that key).
+            r#"{"note":"contains the word subagent_type as text"}"#,
+        ] {
+            assert!(
+                !is_opencode_subagent_invocation(AgentType::OpenCode, &Some(raw.to_string())),
+                "expected false for raw_input={raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn subagent_rejects_when_subagent_type_appears_only_as_value() {
+        // The cheap substring guard lets this through (the bytes
+        // "subagent_type" appear in the JSON text), but JSON parsing
+        // correctly finds no top-level `subagent_type` key, so the helper
+        // returns false. Regression guard against any future "optimisation"
+        // that conflates the substring check with the field check.
+        let input = Some(r#"{"description":"use subagent_type=foo"}"#.to_string());
+        assert!(!is_opencode_subagent_invocation(
+            AgentType::OpenCode,
+            &input
+        ));
+    }
+
+    #[test]
+    fn subagent_detects_when_raw_input_has_other_fields_ahead_of_subagent_type() {
+        // Mirrors the OpenCode wire shape `{description, prompt, subagent_type}`
+        // — the field order in JSON doesn't matter, but exercise a realistic
+        // payload (with non-trivial sizes) end-to-end.
+        let input = Some(
+            r#"{"description":"Explore project structure","prompt":"Look at the repo layout and summarise the stack.","subagent_type":"general-purpose"}"#
+                .to_string(),
+        );
+        assert!(is_opencode_subagent_invocation(
+            AgentType::OpenCode,
+            &input
+        ));
     }
 }
