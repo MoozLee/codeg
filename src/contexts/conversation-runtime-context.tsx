@@ -1017,7 +1017,10 @@ interface ConversationRuntimeContextValue {
   getConversationIdByExternalId: (externalId: string) => number | null
   getTimelineTurns: (conversationId: number) => ConversationTimelineTurn[]
   fetchDetail: (conversationId: number) => void
-  refetchDetail: (conversationId: number) => void
+  refetchDetail: (
+    conversationId: number,
+    runtimeConversationId?: number
+  ) => void
   completeTurn: (
     conversationId: number,
     liveMessage?: LiveMessage | null
@@ -1163,20 +1166,31 @@ export function ConversationRuntimeProvider({
       })
   }, [])
 
-  const refetchDetail = useCallback((conversationId: number) => {
-    dispatch({ type: "FETCH_DETAIL_START", conversationId })
-    getFolderConversation(conversationId)
-      .then((detail) => {
-        dispatch({ type: "FETCH_DETAIL_SUCCESS", conversationId, detail })
+  const refetchDetail = useCallback(
+    (conversationId: number, runtimeConversationId?: number) => {
+      const targetConversationId = runtimeConversationId ?? conversationId
+      dispatch({
+        type: "FETCH_DETAIL_START",
+        conversationId: targetConversationId,
       })
-      .catch((error: unknown) => {
-        dispatch({
-          type: "FETCH_DETAIL_ERROR",
-          conversationId,
-          error: toErrorMessage(error),
+      getFolderConversation(conversationId)
+        .then((detail) => {
+          dispatch({
+            type: "FETCH_DETAIL_SUCCESS",
+            conversationId: targetConversationId,
+            detail,
+          })
         })
-      })
-  }, [])
+        .catch((error: unknown) => {
+          dispatch({
+            type: "FETCH_DETAIL_ERROR",
+            conversationId: targetConversationId,
+            error: toErrorMessage(error),
+          })
+        })
+    },
+    []
+  )
 
   const syncTurnMetadata = useCallback(
     (

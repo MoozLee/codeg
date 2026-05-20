@@ -2602,9 +2602,9 @@ export function MessageInput({
       <div
         className={cn(
           "@container relative flex flex-col rounded-xl border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+          className,
           inputExpanded && "h-[min(70dvh,720px)] max-h-[min(70dvh,720px)]",
-          showDragActive && "ring-1 ring-primary/40",
-          className
+          showDragActive && "ring-1 ring-primary/40"
         )}
       >
         <Button
@@ -2691,7 +2691,10 @@ export function MessageInput({
           onPaste={handlePaste}
           onFocus={onFocus}
           placeholder={resolvedPlaceholder}
-          className="min-h-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent pr-10 text-base shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-sm"
+          className={cn(
+            "min-h-16 flex-1 basis-0 overflow-y-auto rounded-none border-0 bg-transparent pr-10 text-base shadow-none [field-sizing:fixed] focus-visible:border-0 focus-visible:ring-0 md:text-sm",
+            (hasImageAttachments || hasResourceAttachments) && "mt-2"
+          )}
           autoFocus={autoFocus}
         />
         <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">
