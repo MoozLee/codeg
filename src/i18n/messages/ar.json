@@ -889,7 +889,8 @@
         "removeFolderFailed": "فشل إزالة المجلد: {message}",
         "reorderFoldersFailed": "فشل إعادة ترتيب المجلدات: {message}",
         "changeFolderColorFailed": "فشل تغيير اللون: {message}",
-        "togglePinFailed": "فشل تبديل التثبيت: {message}"
+        "togglePinFailed": "فشل تبديل التثبيت: {message}",
+        "changeFolderDefaultAgentFailed": "فشل تعيين الوكيل الافتراضي: {message}"
       },
       "statsLabel": "{folders} مجلدات · {convos} محادثة",
       "reorderHandle": "اسحب لإعادة الترتيب",
@@ -914,11 +915,14 @@
         "removeFromWorkspace": "إزالة من مساحة العمل",
         "pin": "تثبيت",
         "unpin": "إلغاء التثبيت",
-        "useThemeColor": "استخدام سمة التطبيق"
+        "useThemeColor": "استخدام سمة التطبيق",
+        "setDefaultAgent": "تعيين الوكيل الافتراضي",
+        "defaultAgentNone": "بدون افتراضي (استخدام العام)",
+        "agentUnavailableSuffix": "(غير متاح)"
       },
       "sections": {
-      "pinned": "مثبت",
-      "projects": "المشاريع"
+        "pinned": "مثبت",
+        "projects": "المشاريع"
       },
       "manageConversations": {
         "title": "إدارة المحادثات — {name}",

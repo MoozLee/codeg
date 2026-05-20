@@ -889,7 +889,8 @@
         "removeFolderFailed": "Échec de la suppression du dossier : {message}",
         "reorderFoldersFailed": "Échec du réordonnancement des dossiers : {message}",
         "changeFolderColorFailed": "Échec du changement de couleur : {message}",
-        "togglePinFailed": "Échec du basculement de l'épinglage : {message}"
+        "togglePinFailed": "Échec du basculement de l'épinglage : {message}",
+        "changeFolderDefaultAgentFailed": "Échec de la définition de l'agent par défaut : {message}"
       },
       "statsLabel": "{folders} dossiers · {convos} conversations",
       "reorderHandle": "Glisser pour réorganiser",
@@ -914,11 +915,14 @@
         "removeFromWorkspace": "Retirer de l'espace de travail",
         "pin": "Épingler",
         "unpin": "Désépingler",
-        "useThemeColor": "Utiliser le thème de l'app"
+        "useThemeColor": "Utiliser le thème de l'app",
+        "setDefaultAgent": "Définir l'agent par défaut",
+        "defaultAgentNone": "Aucun (utiliser la valeur globale)",
+        "agentUnavailableSuffix": "(indisponible)"
       },
       "sections": {
-      "pinned": "Épinglés",
-      "projects": "Projets"
+        "pinned": "Épinglés",
+        "projects": "Projets"
       },
       "manageConversations": {
         "title": "Gérer les conversations — {name}",

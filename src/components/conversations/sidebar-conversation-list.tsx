@@ -17,6 +17,7 @@ import { Reorder, useDragControls, type DragControls } from "motion/react"
 import type { OverlayScrollbarsComponentRef } from "overlayscrollbars-react"
 import {
   Folder,
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -41,17 +42,25 @@ import { useTerminalContext } from "@/contexts/terminal-context"
 import { useThemeColor, useZoomLevel } from "@/hooks/use-appearance"
 import { useOpenConversation } from "@/hooks/use-open-conversation"
 import {
+  acpListAgents,
   importLocalConversations,
   openProjectBootWindow,
   openWorkspaceWindow,
   updateConversationTitle,
   updateConversationStatus,
   updateFolderColor,
+  updateFolderDefaultAgent,
   deleteConversation,
 } from "@/lib/api"
+import { disposeTauriListener } from "@/lib/tauri-listener"
 import { isDesktop, openFileDialog, revealItemInDir } from "@/lib/platform"
 import { getActiveRemoteConnectionId } from "@/lib/transport"
-import type { ConversationStatus, DbConversationSummary } from "@/lib/types"
+import type {
+  AgentType,
+  ConversationStatus,
+  DbConversationSummary,
+} from "@/lib/types"
+import { AGENT_LABELS } from "@/lib/types"
 import {
   loadFolderExpanded,
   saveFolderExpanded,
@@ -186,6 +195,8 @@ const FolderHeader = memo(function FolderHeader({
   isPinned,
   themeColor,
   appThemeColor,
+  currentDefaultAgent,
+  availableAgents,
   onToggle,
   onRemoveFromWorkspace,
   onNewConversation,
@@ -194,6 +205,7 @@ const FolderHeader = memo(function FolderHeader({
   onManageConversations,
   onChangeColor,
   onTogglePin,
+  onSetDefaultAgent,
   onOpenInSystemExplorer,
   onOpenInTerminal,
   isDragging,
@@ -209,6 +221,8 @@ const FolderHeader = memo(function FolderHeader({
   isPinned: boolean
   themeColor: FolderThemeColor
   appThemeColor: ThemeColor
+  currentDefaultAgent: AgentType | null
+  availableAgents: AgentType[]
   onToggle: (folderId: number) => void
   onRemoveFromWorkspace: (folderId: number) => void
   onNewConversation: (folderId: number) => void
@@ -217,6 +231,7 @@ const FolderHeader = memo(function FolderHeader({
   onManageConversations: (folderId: number) => void
   onChangeColor: (folderId: number, color: FolderThemeColor) => void
   onTogglePin: (folderId: number) => void
+  onSetDefaultAgent: (folderId: number, agentType: AgentType | null) => void
   onOpenInSystemExplorer: (folderId: number) => void
   onOpenInTerminal: (folderId: number) => void
   isDragging?: boolean
@@ -224,6 +239,9 @@ const FolderHeader = memo(function FolderHeader({
   t: ReturnType<typeof useTranslations>
 }) {
   const tActions = useTranslations("SkillsSettings.actions")
+  const showStaleDefault =
+    currentDefaultAgent !== null &&
+    !availableAgents.includes(currentDefaultAgent)
   const tFileTree = useTranslations("Folder.fileTreeTab")
   const systemExplorerLabel =
     typeof navigator === "undefined"
@@ -374,6 +392,53 @@ const FolderHeader = memo(function FolderHeader({
         </ContextMenuItem>
         <ContextMenuSub>
           <ContextMenuSubTrigger>
+            <Bot className="h-4 w-4" />
+            {t("folderHeaderMenu.setDefaultAgent")}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="min-w-[12rem]">
+            <ContextMenuItem
+              onSelect={() => onSetDefaultAgent(folderId, null)}
+              className="gap-2"
+            >
+              <span className="min-w-0 flex-1 truncate">
+                {t("folderHeaderMenu.defaultAgentNone")}
+              </span>
+              {currentDefaultAgent === null ? (
+                <Check className="h-3.5 w-3.5 shrink-0" />
+              ) : null}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            {availableAgents.map((agent) => {
+              const active = currentDefaultAgent === agent
+              return (
+                <ContextMenuItem
+                  key={agent}
+                  onSelect={() => onSetDefaultAgent(folderId, agent)}
+                  className="gap-2"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {AGENT_LABELS[agent]}
+                  </span>
+                  {active ? <Check className="h-3.5 w-3.5 shrink-0" /> : null}
+                </ContextMenuItem>
+              )
+            })}
+            {showStaleDefault && currentDefaultAgent !== null ? (
+              <ContextMenuItem
+                key={currentDefaultAgent}
+                disabled
+                className="gap-2 opacity-60"
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  {`${AGENT_LABELS[currentDefaultAgent]} ${t("folderHeaderMenu.agentUnavailableSuffix")}`}
+                </span>
+                <Check className="h-3.5 w-3.5 shrink-0" />
+              </ContextMenuItem>
+            ) : null}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>
             <Palette className="h-4 w-4" />
             {t("folderHeaderMenu.changeColor")}
           </ContextMenuSubTrigger>
@@ -449,6 +514,8 @@ interface FolderGroupItemProps {
   isPinned: boolean
   themeColor: FolderThemeColor
   appThemeColor: ThemeColor
+  currentDefaultAgent: AgentType | null
+  availableAgents: AgentType[]
   darkMode: boolean
   onToggle: (folderId: number) => void
   onRemoveFromWorkspace: (folderId: number) => void
@@ -458,6 +525,7 @@ interface FolderGroupItemProps {
   onManageConversations: (folderId: number) => void
   onChangeColor: (folderId: number, color: FolderThemeColor) => void
   onTogglePin: (folderId: number) => void
+  onSetDefaultAgent: (folderId: number, agentType: AgentType | null) => void
   onOpenInSystemExplorer: (folderId: number) => void
   onOpenInTerminal: (folderId: number) => void
   onSelect: (id: number, agentType: string) => void
@@ -491,6 +559,8 @@ function FolderGroupItem({
   isPinned,
   themeColor,
   appThemeColor,
+  currentDefaultAgent,
+  availableAgents,
   darkMode,
   onToggle,
   onRemoveFromWorkspace,
@@ -500,6 +570,7 @@ function FolderGroupItem({
   onManageConversations,
   onChangeColor,
   onTogglePin,
+  onSetDefaultAgent,
   onOpenInSystemExplorer,
   onOpenInTerminal,
   onSelect,
@@ -579,6 +650,8 @@ function FolderGroupItem({
             isPinned={isPinned}
             themeColor={themeColor}
             appThemeColor={appThemeColor}
+            currentDefaultAgent={currentDefaultAgent}
+            availableAgents={availableAgents}
             onToggle={handleToggle}
             onRemoveFromWorkspace={onRemoveFromWorkspace}
             onNewConversation={onNewConversationForFolder}
@@ -587,6 +660,7 @@ function FolderGroupItem({
             onManageConversations={onManageConversations}
             onChangeColor={onChangeColor}
             onTogglePin={onTogglePin}
+            onSetDefaultAgent={onSetDefaultAgent}
             onOpenInSystemExplorer={onOpenInSystemExplorer}
             onOpenInTerminal={onOpenInTerminal}
             isDragging={dragging}
@@ -761,7 +835,13 @@ export function SidebarConversationList({
   const folderIndex = useMemo(() => {
     const map = new Map<
       number,
-      { name: string; path: string; color: string; isPinned: boolean }
+      {
+        name: string
+        path: string
+        color: string
+        isPinned: boolean
+        defaultAgentType: AgentType | null
+      }
     >()
     for (const f of allFolders)
       map.set(f.id, {
@@ -769,6 +849,7 @@ export function SidebarConversationList({
         path: f.path,
         color: f.color,
         isPinned: f.is_pinned,
+        defaultAgentType: f.default_agent_type,
       })
     return map
   }, [allFolders])
@@ -793,6 +874,7 @@ export function SidebarConversationList({
   }, [tabs])
 
   const [importing, setImporting] = useState(false)
+  const [availableAgents, setAvailableAgents] = useState<AgentType[]>([])
   const [folderExpanded, setFolderExpanded] = useState<Record<number, boolean>>(
     {}
   )
@@ -830,6 +912,66 @@ export function SidebarConversationList({
     })
   }, [])
 
+  // Track the live list of enabled+available agents so the per-folder
+  // "Set default agent" submenu only offers agents that the conversation
+  // selector would actually accept. Mirrors AgentSelector's reload triggers
+  // (initial fetch + window focus + `app://acp-agents-updated`).
+  useEffect(() => {
+    let cancelled = false
+    let latestRequestId = 0
+
+    const reload = async () => {
+      const requestId = latestRequestId + 1
+      latestRequestId = requestId
+      try {
+        const list = await acpListAgents()
+        if (cancelled || requestId !== latestRequestId) return
+        const usable = [...list]
+          .filter((a) => a.enabled && a.available)
+          .sort(
+            (a, b) =>
+              a.sort_order - b.sort_order || a.name.localeCompare(b.name)
+          )
+          .map((a) => a.agent_type)
+        setAvailableAgents(usable)
+      } catch {
+        if (!cancelled && requestId === latestRequestId) {
+          setAvailableAgents([])
+        }
+      }
+    }
+
+    void reload()
+    const onWindowFocus = () => {
+      void reload()
+    }
+    window.addEventListener("focus", onWindowFocus)
+
+    let unlisten: (() => void) | null = null
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen("app://acp-agents-updated", () => {
+          void reload()
+        })
+      )
+      .then((dispose) => {
+        if (cancelled) {
+          disposeTauriListener(dispose, "SidebarConversationList.agentsUpdated")
+          return
+        }
+        unlisten = dispose
+      })
+      .catch(() => {
+        // Ignore when non-tauri runtime.
+      })
+
+    return () => {
+      cancelled = true
+      window.removeEventListener("focus", onWindowFocus)
+      disposeTauriListener(unlisten, "SidebarConversationList.agentsUpdated")
+    }
+  }, [])
+
   const handleChangeFolderColor = useCallback(
     async (folderId: number, color: FolderThemeColor) => {
       try {
@@ -838,6 +980,21 @@ export function SidebarConversationList({
       } catch (err) {
         const msg = toErrorMessage(err)
         toast.error(t("toasts.changeFolderColorFailed", { message: msg }))
+      }
+    },
+    [refreshFolder, t]
+  )
+
+  const handleChangeFolderDefaultAgent = useCallback(
+    async (folderId: number, agentType: AgentType | null) => {
+      try {
+        await updateFolderDefaultAgent(folderId, agentType)
+        await refreshFolder(folderId)
+      } catch (err) {
+        const msg = toErrorMessage(err)
+        toast.error(
+          t("toasts.changeFolderDefaultAgentFailed", { message: msg })
+        )
       }
     },
     [refreshFolder, t]
@@ -1430,6 +1587,10 @@ export function SidebarConversationList({
                             isPinned={folderEntry?.isPinned ?? true}
                             themeColor={themeColor}
                             appThemeColor={appThemeColor}
+                            currentDefaultAgent={
+                              folderEntry?.defaultAgentType ?? null
+                            }
+                            availableAgents={availableAgents}
                             darkMode={resolvedTheme === "dark"}
                             onToggle={toggleFolder}
                             onRemoveFromWorkspace={handleRemoveFolder}
@@ -1443,6 +1604,7 @@ export function SidebarConversationList({
                             onManageConversations={handleManageConversations}
                             onChangeColor={handleChangeFolderColor}
                             onTogglePin={handleTogglePin}
+                            onSetDefaultAgent={handleChangeFolderDefaultAgent}
                             onOpenInSystemExplorer={
                               handleOpenFolderInSystemExplorer
                             }
@@ -1504,6 +1666,10 @@ export function SidebarConversationList({
                           isPinned={folderEntry?.isPinned ?? false}
                           themeColor={themeColor}
                           appThemeColor={appThemeColor}
+                          currentDefaultAgent={
+                            folderEntry?.defaultAgentType ?? null
+                          }
+                          availableAgents={availableAgents}
                           darkMode={resolvedTheme === "dark"}
                           onToggle={toggleFolder}
                           onRemoveFromWorkspace={handleRemoveFolder}
@@ -1517,6 +1683,7 @@ export function SidebarConversationList({
                           onManageConversations={handleManageConversations}
                           onChangeColor={handleChangeFolderColor}
                           onTogglePin={handleTogglePin}
+                          onSetDefaultAgent={handleChangeFolderDefaultAgent}
                           onOpenInSystemExplorer={
                             handleOpenFolderInSystemExplorer
                           }

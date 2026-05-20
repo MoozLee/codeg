@@ -889,7 +889,8 @@
         "removeFolderFailed": "フォルダの削除に失敗しました: {message}",
         "reorderFoldersFailed": "フォルダの並べ替えに失敗しました: {message}",
         "changeFolderColorFailed": "色の変更に失敗しました: {message}",
-        "togglePinFailed": "ピン留めの切り替えに失敗しました: {message}"
+        "togglePinFailed": "ピン留めの切り替えに失敗しました: {message}",
+        "changeFolderDefaultAgentFailed": "デフォルトエージェントの設定に失敗しました: {message}"
       },
       "statsLabel": "{folders} フォルダ · {convos} 会話",
       "reorderHandle": "ドラッグして並べ替え",
@@ -914,11 +915,14 @@
         "removeFromWorkspace": "ワークスペースから削除",
         "pin": "ピン留め",
         "unpin": "ピン留めを解除",
-        "useThemeColor": "アプリのテーマを使用"
+        "useThemeColor": "アプリのテーマを使用",
+        "setDefaultAgent": "デフォルトエージェントを設定",
+        "defaultAgentNone": "設定なし（グローバルを使用）",
+        "agentUnavailableSuffix": "（利用不可）"
       },
       "sections": {
-      "pinned": "ピン留め",
-      "projects": "プロジェクト"
+        "pinned": "ピン留め",
+        "projects": "プロジェクト"
       },
       "manageConversations": {
         "title": "会話の管理 — {name}",

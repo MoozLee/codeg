@@ -799,6 +799,16 @@ export async function updateFolderPinned(
   return getTransport().call("update_folder_pinned", { folderId, isPinned })
 }
 
+export async function updateFolderDefaultAgent(
+  folderId: number,
+  defaultAgentType: AgentType | null
+): Promise<FolderDetail> {
+  return getTransport().call("update_folder_default_agent", {
+    folderId,
+    defaultAgentType,
+  })
+}
+
 export async function importLocalConversations(
   folderId: number
 ): Promise<ImportResult> {

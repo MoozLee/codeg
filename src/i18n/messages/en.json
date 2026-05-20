@@ -889,7 +889,8 @@
         "removeFolderFailed": "Failed to remove folder: {message}",
         "reorderFoldersFailed": "Failed to reorder folders: {message}",
         "changeFolderColorFailed": "Failed to change folder color: {message}",
-        "togglePinFailed": "Failed to toggle folder pin: {message}"
+        "togglePinFailed": "Failed to toggle folder pin: {message}",
+        "changeFolderDefaultAgentFailed": "Failed to set default agent: {message}"
       },
       "statsLabel": "{folders} folders · {convos} conversations",
       "reorderHandle": "Drag to reorder",
@@ -914,11 +915,14 @@
         "removeFromWorkspace": "Remove from workspace",
         "pin": "Pin",
         "unpin": "Unpin",
-        "useThemeColor": "Use app theme"
+        "useThemeColor": "Use app theme",
+        "setDefaultAgent": "Set default agent",
+        "defaultAgentNone": "No default (use global)",
+        "agentUnavailableSuffix": "(unavailable)"
       },
       "sections": {
-      "pinned": "Pinned",
-      "projects": "Projects"
+        "pinned": "Pinned",
+        "projects": "Projects"
       },
       "manageConversations": {
         "title": "Manage conversations — {name}",

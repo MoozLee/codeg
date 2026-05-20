@@ -447,12 +447,14 @@ export function TabProvider({
         preferred?.workingDir ??
         foldersRef.current.find((f) => f.id === folderId)?.path ??
         ""
+      const agentType: AgentType =
+        preferred?.agentType ?? AGENT_DISPLAY_ORDER[0]
       return {
         id: makeNewConversationTabId(),
         kind: "conversation",
         folderId,
         conversationId: null,
-        agentType: AGENT_DISPLAY_ORDER[0],
+        agentType,
         title: t("newConversation"),
         isPinned: true,
         workingDir,
@@ -606,6 +608,18 @@ export function TabProvider({
 
   const openNewConversationTab = useCallback(
     (folderId: number, workingDir: string, agentType?: AgentType) => {
+      // Resolve the folder's saved default agent if any; otherwise fall
+      // back to AGENT_DISPLAY_ORDER[0]. AgentSelector will further fall
+      // back to the first *available* agent if this one is disabled or
+      // not installed. Explicit callers can still override the default.
+      const folderDefault = folders.find(
+        (f) => f.id === folderId
+      )?.default_agent_type
+      const targetAgent: AgentType =
+        agentType ?? folderDefault ?? AGENT_DISPLAY_ORDER[0]
+
+      // Singleton: reuse any existing draft tab regardless of folder,
+      // so only one new-conversation tab can exist at a time.
       const existingTab = rawTabsRef.current.find(
         (t) => t.conversationId == null
       )
@@ -613,13 +627,17 @@ export function TabProvider({
       if (existingTab) {
         const folderChanged = existingTab.folderId !== folderId
         const workingDirChanged = existingTab.workingDir !== workingDir
-        const agentChanged =
-          agentType != null && existingTab.agentType !== agentType
+        const agentChanged = existingTab.agentType !== targetAgent
 
         setActiveTabId(existingTab.id)
         activateConversationPane()
 
         if (folderChanged || agentChanged) {
+          // Tear down the old ACP connection (bound to the old
+          // workingDir/agent) before patching tab fields. The
+          // connection-lifecycle effect watches workingDir and
+          // agentType; once status has settled to disconnected and
+          // either flips, it auto-reconnects against the new params.
           void (async () => {
             try {
               await acpDisconnect(existingTab.id)
@@ -633,7 +651,7 @@ export function TabProvider({
                       ...t,
                       folderId,
                       workingDir,
-                      agentType: agentType ?? t.agentType,
+                      agentType: targetAgent,
                     }
                   : t
               )
@@ -649,14 +667,13 @@ export function TabProvider({
         return
       }
 
-      const nextAgentType = agentType ?? AGENT_DISPLAY_ORDER[0]
       const tabId = makeNewConversationTabId()
       const newTab: TabItemInternal = {
         id: tabId,
         kind: "conversation",
         folderId,
         conversationId: null,
-        agentType: nextAgentType,
+        agentType: targetAgent,
         title: t("newConversation"),
         isPinned: true,
         workingDir,
@@ -666,7 +683,7 @@ export function TabProvider({
       setActiveTabId(tabId)
       activateConversationPane()
     },
-    [acpDisconnect, activateConversationPane, t]
+    [acpDisconnect, activateConversationPane, folders, t]
   )
 
   const bindConversationTab = useCallback(

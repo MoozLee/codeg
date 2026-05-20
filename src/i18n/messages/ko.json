@@ -889,7 +889,8 @@
         "removeFolderFailed": "폴더 제거 실패: {message}",
         "reorderFoldersFailed": "폴더 순서 변경 실패: {message}",
         "changeFolderColorFailed": "색상 변경 실패: {message}",
-        "togglePinFailed": "고정 전환 실패: {message}"
+        "togglePinFailed": "고정 전환 실패: {message}",
+        "changeFolderDefaultAgentFailed": "기본 에이전트 설정 실패: {message}"
       },
       "statsLabel": "{folders}개 폴더 · {convos}개 대화",
       "reorderHandle": "드래그하여 순서 변경",
@@ -914,11 +915,14 @@
         "removeFromWorkspace": "워크스페이스에서 제거",
         "pin": "고정",
         "unpin": "고정 해제",
-        "useThemeColor": "앱 테마 사용"
+        "useThemeColor": "앱 테마 사용",
+        "setDefaultAgent": "기본 에이전트 설정",
+        "defaultAgentNone": "설정 없음(전역 사용)",
+        "agentUnavailableSuffix": "(사용 불가)"
       },
       "sections": {
-      "pinned": "고정됨",
-      "projects": "프로젝트"
+        "pinned": "고정됨",
+        "projects": "프로젝트"
       },
       "manageConversations": {
         "title": "대화 관리 — {name}",

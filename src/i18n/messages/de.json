@@ -889,7 +889,8 @@
         "removeFolderFailed": "Ordner konnte nicht entfernt werden: {message}",
         "reorderFoldersFailed": "Ordner konnten nicht neu sortiert werden: {message}",
         "changeFolderColorFailed": "Farbe konnte nicht geändert werden: {message}",
-        "togglePinFailed": "Anheften konnte nicht umgeschaltet werden: {message}"
+        "togglePinFailed": "Anheften konnte nicht umgeschaltet werden: {message}",
+        "changeFolderDefaultAgentFailed": "Standard-Agent konnte nicht gesetzt werden: {message}"
       },
       "statsLabel": "{folders} Ordner · {convos} Konversationen",
       "reorderHandle": "Zum Neuordnen ziehen",
@@ -914,11 +915,14 @@
         "removeFromWorkspace": "Aus Arbeitsbereich entfernen",
         "pin": "Anheften",
         "unpin": "Lösen",
-        "useThemeColor": "App-Design verwenden"
+        "useThemeColor": "App-Design verwenden",
+        "setDefaultAgent": "Standard-Agent festlegen",
+        "defaultAgentNone": "Kein Standard (global verwenden)",
+        "agentUnavailableSuffix": "(nicht verfügbar)"
       },
       "sections": {
-      "pinned": "Angeheftet",
-      "projects": "Projekte"
+        "pinned": "Angeheftet",
+        "projects": "Projekte"
       },
       "manageConversations": {
         "title": "Konversationen verwalten — {name}",
