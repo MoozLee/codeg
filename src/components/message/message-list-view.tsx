@@ -118,7 +118,8 @@ interface ProgrammaticAnchorScrollLock {
 }
 
 const RESTORE_SCROLL_PASSES = 12
-const RESTORE_BOTTOM_SETTLED_FRAMES = 2
+const RESTORE_BOTTOM_SETTLED_FRAMES = 4
+const RESTORE_BOTTOM_MAX_PASSES = 24
 const PROGRAMMATIC_SCROLL_LOCK_TIMEOUT_MS = 900
 const LIVE_TAIL_FOLLOW_THRESHOLD_PX = 96
 
@@ -1009,6 +1010,7 @@ export function MessageListView({
   })
   const lastPersistedAnchorIdRef = useRef<string | null>(null)
   const [activeAnchorId, setActiveAnchorId] = useState<string | null>(null)
+  const [restoreRetryRevision, setRestoreRetryRevision] = useState(0)
   const [anchorRestoreState, setAnchorRestoreState] = useState<{
     conversationId: number | null
     pending: boolean
@@ -1041,12 +1043,6 @@ export function MessageListView({
       setSessionStats(sessionStats)
     }
   }, [isActive, sessionStats, setSessionStats])
-
-  const shouldUseSmoothResize = !(
-    isActive &&
-    !detailLoading &&
-    timelineTurns.length
-  )
 
   const adapterText = useMemo(
     () => ({
@@ -1387,6 +1383,8 @@ export function MessageListView({
       let cancelled = false
       let currentRafId: number | null = null
       let settledFrames = 0
+      let framesRemaining = RESTORE_BOTTOM_MAX_PASSES
+      let previousScrollHeight = -1
 
       const finishBottomRestore = () => {
         restoreAttemptedRef.current = true
@@ -1404,23 +1402,37 @@ export function MessageListView({
 
         const stickToBottom = stickToBottomRef.current
         const viewport = stickToBottom?.scrollRef.current
+        const virtualizer = virtualizerRef.current
         if (!stickToBottom || !viewport) {
           currentRafId = window.requestAnimationFrame(runBottomRestore)
           rafRestoreRef.current = currentRafId
           return
         }
 
+        if (virtualizer && threadItems.length > 0) {
+          virtualizer.scrollToIndex(threadItems.length - 1, {
+            align: "end",
+            smooth: false,
+          })
+        }
         stickToBottom.scrollToBottom()
 
+        const scrollHeightStable =
+          viewport.scrollHeight === previousScrollHeight
+        previousScrollHeight = viewport.scrollHeight
         const distanceFromBottom =
           viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
-        if (distanceFromBottom <= 2) {
+        if (distanceFromBottom <= 2 && scrollHeightStable) {
           settledFrames += 1
         } else {
           settledFrames = 0
         }
 
-        if (settledFrames >= RESTORE_BOTTOM_SETTLED_FRAMES) {
+        framesRemaining -= 1
+        if (
+          settledFrames >= RESTORE_BOTTOM_SETTLED_FRAMES ||
+          framesRemaining <= 0
+        ) {
           finishBottomRestore()
           return
         }
@@ -1529,19 +1541,23 @@ export function MessageListView({
       return
     }
 
-    restoreAttemptedRef.current = true
-    pendingScrollAnchorIdRef.current = null
+    persistAnchorSelection(null)
     clearProgrammaticScrollLock()
+    pendingScrollAnchorIdRef.current = "__bottom__"
+    restoreAttemptedRef.current = false
     setAnchorRestoreState({
       conversationId: storageConversationId,
-      pending: false,
+      pending: true,
     })
+    setRestoreRetryRevision((revision) => revision + 1)
   }, [
     armProgrammaticScrollLock,
     clearProgrammaticScrollLock,
     detailLoading,
     persistAnchorSelection,
+    restoreRetryRevision,
     session?.detail,
+    threadItems.length,
     storageConversationId,
     userAnchorMap,
     userAnchors.length,
@@ -1779,11 +1795,7 @@ export function MessageListView({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <MessageThread
-        className="flex-1 min-h-0"
-        resize={shouldUseSmoothResize ? "smooth" : undefined}
-        contextRef={stickToBottomRef}
-      >
+      <MessageThread className="flex-1 min-h-0" contextRef={stickToBottomRef}>
         <AutoScrollOnSend signal={sendSignal} />
         <AutoScrollOnLiveTail
           isStreaming={showPromptingState}

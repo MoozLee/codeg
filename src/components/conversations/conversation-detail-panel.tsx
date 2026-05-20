@@ -560,12 +560,17 @@ const ConversationTabView = memo(function ConversationTabView({
         persistedId,
         effectiveConversationId
       )
+      if (conn.lastTurnStopReason === "cancelled") {
+        refetchDetail(persistedId, effectiveConversationId)
+      }
     }
   }, [
     completeTurn,
     connStatus,
     conn.liveMessage,
+    conn.lastTurnStopReason,
     effectiveConversationId,
+    refetchDetail,
     syncTurnMetadata,
   ])
 

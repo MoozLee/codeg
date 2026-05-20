@@ -119,7 +119,10 @@ export function VirtualizedMessageThread<T>({
   return (
     <MessageScrollProvider value={scrollContextValue}>
       <MessageThreadContent
-        className={cn("mx-0 max-w-none p-0", contentClassName)}
+        className={cn(
+          "mx-0 flex min-h-full max-w-none justify-end p-0",
+          contentClassName
+        )}
         scrollClassName="scrollbar-thin overscroll-contain [overflow-anchor:none]"
         {...contentProps}
       >

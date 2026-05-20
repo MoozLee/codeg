@@ -76,7 +76,7 @@ export const ConversationContextBar = memo(function ConversationContextBar({
   if (!hasExtraContent) return null
 
   return (
-    <div className="flex shrink-0 items-center gap-1.5 px-2 pt-2 text-xs text-muted-foreground">
+    <div className="flex shrink-0 items-center gap-1.5 pl-2 pr-10 pt-2 text-xs text-muted-foreground">
       <ScrollArea
         x="scroll"
         y="hidden"
