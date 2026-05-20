@@ -1251,6 +1251,7 @@ export function ConversationDetailPanel({
   const {
     tabs,
     activeTabId,
+    tabsHydrated,
     isTileMode,
     openNewConversationTab,
     closeTab,
@@ -1366,7 +1367,7 @@ export function ConversationDetailPanel({
     )
   )
 
-  const hasNoTabs = tabs.length === 0 && !activeTabId
+  const hasNoTabs = tabsHydrated && tabs.length === 0 && !activeTabId
   const activeConversationTab = useMemo(
     () =>
       tabs.find(
