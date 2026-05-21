@@ -5,6 +5,10 @@ const USER_MESSAGE_PREVIEW_MAX_LENGTH = 96
 const CONVERSATION_ANCHOR_SCROLL_REQUEST_EVENT =
   "codeg:conversation-anchor-scroll-request"
 const PREVIEW_WORD_BOUNDARY_MIN_RATIO = 0.6
+const CURRENT_ANCHOR_RESTORE_SESSION_ID =
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
 const activeAnchorByConversation = new Map<number, string | null>()
 const latestScrollRequestByConversation = new Map<
@@ -13,8 +17,29 @@ const latestScrollRequestByConversation = new Map<
 >()
 const activeAnchorSubscribers = new Set<() => void>()
 
+interface StoredConversationUserAnchor {
+  anchorId: string
+  restoreSessionId: string
+}
+
 function buildStorageKey(conversationId: number): string {
   return `${STORAGE_KEY_PREFIX}:${conversationId}`
+}
+
+function isStoredConversationUserAnchor(
+  value: unknown
+): value is StoredConversationUserAnchor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.anchorId === "string" &&
+    record.anchorId.length > 0 &&
+    typeof record.restoreSessionId === "string" &&
+    record.restoreSessionId.length > 0
+  )
 }
 
 function notifyActiveAnchorSubscribers(): void {
@@ -32,8 +57,17 @@ export function loadConversationUserAnchor(
 ): string | null {
   if (typeof window === "undefined") return null
   try {
-    const value = localStorage.getItem(buildStorageKey(conversationId))
-    return value && value.length > 0 ? value : null
+    const rawValue = localStorage.getItem(buildStorageKey(conversationId))
+    if (!rawValue) return null
+
+    const parsed: unknown = JSON.parse(rawValue)
+    if (!isStoredConversationUserAnchor(parsed)) {
+      return null
+    }
+
+    return parsed.restoreSessionId === CURRENT_ANCHOR_RESTORE_SESSION_ID
+      ? parsed.anchorId
+      : null
   } catch {
     return null
   }
@@ -47,7 +81,13 @@ export function saveConversationUserAnchor(
   try {
     const key = buildStorageKey(conversationId)
     if (anchorId && anchorId.length > 0) {
-      localStorage.setItem(key, anchorId)
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          anchorId,
+          restoreSessionId: CURRENT_ANCHOR_RESTORE_SESSION_ID,
+        })
+      )
     } else {
       localStorage.removeItem(key)
     }

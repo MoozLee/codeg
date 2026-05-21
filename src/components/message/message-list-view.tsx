@@ -122,6 +122,7 @@ const RESTORE_BOTTOM_SETTLED_FRAMES = 4
 const RESTORE_BOTTOM_MAX_PASSES = 24
 const PROGRAMMATIC_SCROLL_LOCK_TIMEOUT_MS = 900
 const LIVE_TAIL_FOLLOW_THRESHOLD_PX = 96
+const ACTIVE_ANCHOR_BOTTOM_THRESHOLD_PX = 32
 
 interface ResolvedMessageGroup {
   id: string
@@ -915,6 +916,18 @@ const ActiveUserAnchorTracker = memo(function ActiveUserAnchorTracker({
           }
           return
         }
+      }
+
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
+      if (distanceFromBottom <= ACTIVE_ANCHOR_BOTTOM_THRESHOLD_PX) {
+        const latestAnchorId =
+          userAnchors[userAnchors.length - 1]?.anchorId ?? null
+        onActiveAnchorChange(latestAnchorId)
+        if (latestAnchorId && !suspendPersistence) {
+          persistAnchorSelection(latestAnchorId)
+        }
+        return
       }
 
       const viewportCenter = viewport.scrollTop + viewport.clientHeight / 2
