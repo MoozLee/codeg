@@ -413,6 +413,18 @@ fn resolve_settings_target(section: Option<&str>, agent_type: Option<&str>) -> S
     route.to_string()
 }
 
+pub(crate) fn workspace_app_route(query: Option<&str>) -> String {
+    let base = if cfg!(debug_assertions) {
+        "workspace"
+    } else {
+        "workspace.html"
+    };
+    match query.filter(|value| !value.is_empty()) {
+        Some(query) => format!("{base}?{query}"),
+        None => base.to_string(),
+    }
+}
+
 fn append_query_param(route: String, key: &str, value: &str) -> String {
     if route.contains('?') {
         format!("{route}&{key}={value}")
@@ -734,10 +746,10 @@ pub async fn open_conversation_window(
         .unwrap_or_else(|| format!("Conversation {}", summary.id));
 
     let url = WebviewUrl::App(
-        format!(
-            "workspace.html?tabPersistence=window-local&open=conversation&folderId={}&conversationId={}&agent={}",
+        workspace_app_route(Some(&format!(
+            "tabPersistence=window-local&open=conversation&folderId={}&conversationId={}&agent={}",
             summary.folder_id, summary.id, summary.agent_type
-        )
+        )))
         .into(),
     );
     let builder = WebviewWindowBuilder::new(&app, &label, url)

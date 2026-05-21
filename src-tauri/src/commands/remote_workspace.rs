@@ -180,10 +180,10 @@ pub async fn open_remote_workspace(
     validate_remote_health(&connection.base_url, &connection.token).await?;
 
     let window_instance_id = new_remote_window_instance_id();
-    let url = WebviewUrl::App(
-        format!("workspace.html?remoteConnectionId={id}&remoteWindowId={window_instance_id}")
-            .into(),
-    );
+    let workspace_route = crate::commands::windows::workspace_app_route(Some(&format!(
+        "remoteConnectionId={id}&remoteWindowId={window_instance_id}"
+    )));
+    let url = WebviewUrl::App(workspace_route.into());
     let builder = WebviewWindowBuilder::new(&app, &label, url)
         .title(format!("Codeg - {}", connection.name))
         .inner_size(1400.0, 900.0)
