@@ -476,7 +476,7 @@ mod tauri_app {
                 // restored by the frontend via `list_open_folder_details` /
                 // `list_opened_tabs` inside the main window.
                 if app.get_webview_window("main").is_none() {
-                    let url = tauri::WebviewUrl::App("workspace".into());
+                    let url = tauri::WebviewUrl::App("workspace.html".into());
                     let builder = tauri::WebviewWindowBuilder::new(app, "main", url)
                         .title("Codeg")
                         .inner_size(1260.0, 860.0)

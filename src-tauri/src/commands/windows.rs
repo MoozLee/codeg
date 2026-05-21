@@ -735,7 +735,7 @@ pub async fn open_conversation_window(
 
     let url = WebviewUrl::App(
         format!(
-            "workspace?tabPersistence=window-local&open=conversation&folderId={}&conversationId={}&agent={}",
+            "workspace.html?tabPersistence=window-local&open=conversation&folderId={}&conversationId={}&agent={}",
             summary.folder_id, summary.id, summary.agent_type
         )
         .into(),

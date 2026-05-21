@@ -181,7 +181,8 @@ pub async fn open_remote_workspace(
 
     let window_instance_id = new_remote_window_instance_id();
     let url = WebviewUrl::App(
-        format!("workspace?remoteConnectionId={id}&remoteWindowId={window_instance_id}").into(),
+        format!("workspace.html?remoteConnectionId={id}&remoteWindowId={window_instance_id}")
+            .into(),
     );
     let builder = WebviewWindowBuilder::new(&app, &label, url)
         .title(format!("Codeg - {}", connection.name))
