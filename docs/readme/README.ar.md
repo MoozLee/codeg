@@ -144,10 +144,19 @@ pnpm server:build
 # فحص الأكواد
 pnpm eslint .
 
+# اختبارات الواجهة الأمامية (vitest)
+pnpm test
+pnpm test:watch
+pnpm test:coverage
+
 # فحوصات Rust (تنفيذ في src-tauri/)
 cargo check
-cargo clippy
+cargo clippy --all-targets --features test-utils -- -D warnings
 cargo build
+
+# اختبارات Rust
+cargo test --features test-utils                                # سطح المكتب (يشمل التكامل)
+cargo test --no-default-features --bin codeg-server --lib       # وضع الخادم
 ```
 
 ### نشر الخادم

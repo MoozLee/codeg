@@ -183,6 +183,11 @@ impl RecentEventsBuffer {
     }
 
     #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
+    #[cfg(test)]
     pub fn byte_total(&self) -> usize {
         self.byte_total
     }

@@ -107,17 +107,34 @@ fn ts_to_datetime(ts: i64) -> DateTime<Utc> {
     Utc.timestamp_millis_opt(ts).single().unwrap_or_default()
 }
 
-pub struct ClineParser;
+pub struct ClineParser {
+    base_dir: PathBuf,
+}
+
+impl Default for ClineParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ClineParser {
     pub fn new() -> Self {
-        Self
+        Self {
+            base_dir: cline_data_dir(),
+        }
+    }
+
+    /// Test-only constructor that lets callers point the parser at a fixture
+    /// directory instead of `~/.cline/data`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
+        Self { base_dir }
     }
 }
 
 impl AgentParser for ClineParser {
     fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ParseError> {
-        let history_path = cline_data_dir().join("state").join("taskHistory.json");
+        let history_path = self.base_dir.join("state").join("taskHistory.json");
         if !history_path.exists() {
             return Ok(vec![]);
         }
@@ -127,7 +144,7 @@ impl AgentParser for ClineParser {
 
         let mut summaries = Vec::new();
         for entry in entries {
-            let tasks_dir = cline_data_dir().join("tasks").join(&entry.id);
+            let tasks_dir = self.base_dir.join("tasks").join(&entry.id);
             if !tasks_dir.exists() {
                 continue;
             }
@@ -180,7 +197,7 @@ impl AgentParser for ClineParser {
     }
 
     fn get_conversation(&self, conversation_id: &str) -> Result<ConversationDetail, ParseError> {
-        let tasks_dir = cline_data_dir().join("tasks").join(conversation_id);
+        let tasks_dir = self.base_dir.join("tasks").join(conversation_id);
         if !tasks_dir.exists() {
             return Err(ParseError::ConversationNotFound(
                 conversation_id.to_string(),
@@ -209,7 +226,7 @@ impl AgentParser for ClineParser {
             .and_then(|u| u.model_id.clone());
 
         // Read taskHistory for cwd and title
-        let history_path = cline_data_dir().join("state").join("taskHistory.json");
+        let history_path = self.base_dir.join("state").join("taskHistory.json");
         let history_entry = fs::read_to_string(&history_path)
             .ok()
             .and_then(|raw| serde_json::from_str::<Vec<TaskHistoryEntry>>(&raw).ok())

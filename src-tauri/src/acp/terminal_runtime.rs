@@ -644,7 +644,7 @@ mod tests {
 
         // Drop terminal handle so the runtime drops its writer ends.
         runtime
-            .release_all_for_session(&session_id.0.to_string())
+            .release_all_for_session(session_id.0.as_ref())
             .await;
     }
 }

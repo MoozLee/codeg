@@ -226,9 +226,22 @@ pub struct ClaudeParser {
     base_dir: PathBuf,
 }
 
+impl Default for ClaudeParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeParser {
     pub fn new() -> Self {
         let base_dir = resolve_claude_config_dir().join("projects");
+        Self { base_dir }
+    }
+
+    /// Test-only constructor that lets callers point the parser at a fixture
+    /// directory instead of `~/.claude/projects`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }
 
@@ -428,7 +441,7 @@ impl AgentParser for ClaudeParser {
             }
         }
 
-        conversations.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        conversations.sort_by_key(|b| std::cmp::Reverse(b.started_at));
         Ok(conversations)
     }
 

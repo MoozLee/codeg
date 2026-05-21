@@ -918,7 +918,9 @@
         "useThemeColor": "Utiliser le thème de l'app",
         "setDefaultAgent": "Définir l'agent par défaut",
         "defaultAgentNone": "Aucun (utiliser la valeur globale)",
-        "agentUnavailableSuffix": "(indisponible)"
+        "agentUnavailableSuffix": "(indisponible)",
+        "loadingAgents": "Chargement des agents…",
+        "removeFromWorkspace": "Retirer de l'espace de travail"
       },
       "sections": {
         "pinned": "Épinglés",
@@ -1874,7 +1876,7 @@
         "askAnythingPlaceholder": "Posez n'importe quelle question..."
       },
       "welcomePanel": {
-        "title": "Bienvenue sur Codeg",
+        "greeting": "Que souhaites-tu <highlight>faire aujourd'hui</highlight> ?",
         "tips": {
           "tileTabs": "Faites un clic droit sur un onglet de conversation et choisissez Affichage en mosaïque pour comparer plusieurs sessions côte à côte.",
           "pinTab": "Double-cliquez sur un onglet de conversation pour l'épingler : une nouvelle session ne le remplacera plus automatiquement.",

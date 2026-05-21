@@ -144,10 +144,19 @@ pnpm server:build
 # Lint
 pnpm eslint .
 
+# 前端測試（vitest）
+pnpm test
+pnpm test:watch
+pnpm test:coverage
+
 # Rust 檢查（在 src-tauri/ 下執行）
 cargo check
-cargo clippy
+cargo clippy --all-targets --features test-utils -- -D warnings
 cargo build
+
+# Rust 測試
+cargo test --features test-utils                                # 桌面（含整合）
+cargo test --no-default-features --bin codeg-server --lib       # 伺服器模式
 ```
 
 ### 伺服器部署

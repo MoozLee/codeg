@@ -32,6 +32,11 @@ tauri-runtime = [
     "dep:keyring",
     "dep:fontdb",
 ]
+# Exposes test scaffolding (`AppState::new_for_test`, `EventEmitter::test_web_only`,
+# `ConnectionManager::insert_test_connection`, parser `with_base_dir`, the
+# `db::test_helpers` module) for integration tests in `tests/*.rs`. Without
+# this feature the items are physically uncompiled in release builds.
+test-utils = []
 
 [[bin]]
 name = "codeg"
@@ -118,6 +123,8 @@ libc = "0.2"
 tempfile = "3"
 temp-env = "0.3"
 tokio = { version = "1", features = ["test-util", "macros", "rt", "sync", "time"] }
+insta = { version = "1", features = ["json", "redactions"] }
+axum-test = { version = "17", features = ["ws"] }
 
 [patch.crates-io]
 sacp-tokio = { path = "vendor/sacp-tokio" }

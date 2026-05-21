@@ -84,3 +84,22 @@ export function isRemoteDesktopMode(): boolean {
 export function notifyRemoteDesktopUnauthorized(): void {
   _remoteConfig?.onUnauthorized?.()
 }
+
+/**
+ * Test-only: clear the cached shell + remote transports so a subsequent
+ * `getTransport()` / `getShellTransport()` call re-runs environment detection
+ * against the current `window` mock. The module-level singletons would
+ * otherwise stick across test cases. Not intended for production use.
+ * @internal
+ */
+export function __resetTransportForTests(): void {
+  // Hard guard: collapses to a no-op outside vitest. Turbopack/webpack DCE
+  // the dead branch in `next build` so the function ships as a single
+  // `return` in the prod bundle instead of reaching into module state.
+  if (process.env.NODE_ENV !== "test") return
+  _shellTransport?.destroy?.()
+  _remoteTransport?.destroy?.()
+  _shellTransport = null
+  _remoteTransport = null
+  _remoteConfig = null
+}

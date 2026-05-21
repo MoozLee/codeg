@@ -144,10 +144,19 @@ pnpm server:build
 # Lint
 pnpm eslint .
 
+# 프론트엔드 테스트 (vitest)
+pnpm test
+pnpm test:watch
+pnpm test:coverage
+
 # Rust 검사 (src-tauri/에서 실행)
 cargo check
-cargo clippy
+cargo clippy --all-targets --features test-utils -- -D warnings
 cargo build
+
+# Rust 테스트
+cargo test --features test-utils                                # 데스크톱 (통합 포함)
+cargo test --no-default-features --bin codeg-server --lib       # 서버 모드
 ```
 
 ### 서버 배포

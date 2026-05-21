@@ -918,7 +918,9 @@
         "useThemeColor": "استخدام سمة التطبيق",
         "setDefaultAgent": "تعيين الوكيل الافتراضي",
         "defaultAgentNone": "بدون افتراضي (استخدام العام)",
-        "agentUnavailableSuffix": "(غير متاح)"
+        "agentUnavailableSuffix": "(غير متاح)",
+        "loadingAgents": "جارٍ تحميل الوكلاء…",
+        "removeFromWorkspace": "إزالة من مساحة العمل"
       },
       "sections": {
         "pinned": "مثبت",
@@ -1874,7 +1876,7 @@
         "askAnythingPlaceholder": "اسأل أي شيء..."
       },
       "welcomePanel": {
-        "title": "مرحبًا بك في Codeg",
+        "greeting": "ماذا تودّ أن <highlight>تفعل اليوم</highlight>؟",
         "tips": {
           "tileTabs": "انقر بزر الفأرة الأيمن على تبويب محادثة واختر «عرض متجانب» لمقارنة عدة جلسات جنبًا إلى جنب.",
           "pinTab": "انقر نقرًا مزدوجًا على تبويب محادثة لتثبيته كي لا تستبدله جلسة جديدة تلقائيًا.",

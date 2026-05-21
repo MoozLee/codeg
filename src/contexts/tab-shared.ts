@@ -17,6 +17,7 @@ export interface TabItemInternal {
   conversationId: number | null
   runtimeConversationId?: number
   agentType: AgentType
+  agentTypeProvisional?: boolean
   title: string
   isPinned: boolean
   workingDir?: string
@@ -54,8 +55,10 @@ export interface TabContextValue {
   openNewConversationTab: (
     folderId: number,
     workingDir: string,
-    agentType?: AgentType
+    options?: AgentType | { inheritFromActive?: boolean }
   ) => void
+  confirmDraftAgent: (tabId: string, agentType: AgentType) => void
+  setDraftAgentFromFallback: (tabId: string, agentType: AgentType) => void
   bindConversationTab: (
     tabId: string,
     conversationId: number,

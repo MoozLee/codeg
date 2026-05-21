@@ -16,14 +16,22 @@ pub struct GeminiParser {
     base_dir: PathBuf,
 }
 
+impl Default for GeminiParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GeminiParser {
     pub fn new() -> Self {
         let base_dir = resolve_gemini_base_dir();
         Self { base_dir }
     }
 
-    #[cfg(test)]
-    fn with_base_dir(base_dir: PathBuf) -> Self {
+    /// Test-only constructor that lets callers point the parser at a fixture
+    /// directory instead of `~/.gemini`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }
 
@@ -732,7 +740,7 @@ impl AgentParser for GeminiParser {
             }
         }
 
-        conversations.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        conversations.sort_by_key(|b| std::cmp::Reverse(b.started_at));
         Ok(conversations)
     }
 

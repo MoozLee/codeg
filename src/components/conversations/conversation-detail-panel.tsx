@@ -13,7 +13,6 @@ import {
   Copy,
   Download,
   FileCode,
-  FileSearch,
   FileImage,
   FileText,
   Focus,
@@ -33,17 +32,18 @@ import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { useTaskContext } from "@/contexts/task-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
-import { toErrorMessage } from "@/lib/app-error"
-import { findFirstWorkspaceFileTarget } from "@/lib/local-file-target"
-import { cn, copyTextToClipboard } from "@/lib/utils"
+import { cn, copyTextToClipboard, randomUUID } from "@/lib/utils"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
 import { MessageListView } from "@/components/message/message-list-view"
 import { ConversationShell } from "@/components/chat/conversation-shell"
 import { AgentSelector } from "@/components/chat/agent-selector"
 import { ChatInput } from "@/components/chat/chat-input"
-import { WelcomeHero } from "@/components/chat/welcome-hero"
+import {
+  WelcomeBackdrop,
+  WelcomeHero,
+  WelcomeTip,
+} from "@/components/chat/welcome-hero"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   acpFork,
@@ -54,13 +54,14 @@ import {
 import { useConversationRuntime } from "@/contexts/conversation-runtime-context"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import {
-  buildUserTurnFromDraft,
-  createOptimisticUserIdentity,
+  extractUserImagesFromDraft,
+  extractUserResourcesFromDraft,
   getPromptDraftDisplayText,
 } from "@/lib/prompt-draft"
 import {
   AGENT_LABELS,
   type AgentType,
+  type ContentBlock,
   type EventEnvelope,
   type MessageTurn,
   type PromptDraft,
@@ -74,10 +75,6 @@ import {
   buildNewConversationDraftStorageKey,
   clearMessageInputDraft,
 } from "@/lib/message-input-draft"
-import {
-  isStableRetryEditAnchorId,
-  saveConversationRetryEditReplacement,
-} from "@/lib/conversation-retry-edit-storage"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -105,15 +102,40 @@ interface ConversationTabViewProps {
   reloadSignal: number
 }
 
-function extractTextFromMessageTurn(turn: MessageTurn): string | null {
-  const textBlocks: string[] = []
-  for (const block of turn.blocks) {
-    if (block.type !== "text") {
-      return null
-    }
-    textBlocks.push(block.text)
+function buildOptimisticUserTurnFromDraft(
+  draft: PromptDraft,
+  attachedResourcesFallback: string
+): MessageTurn {
+  const displayText = getPromptDraftDisplayText(
+    draft,
+    attachedResourcesFallback
+  )
+  const resources = extractUserResourcesFromDraft(draft)
+  const resourceLines = resources.map((resource) => {
+    const label = resource.uri.toLowerCase().startsWith("file://")
+      ? resource.name
+      : `@${resource.name}`
+    return `[${label}](${resource.uri})`
+  })
+  const text = [displayText, ...resourceLines].join("\n").trim()
+
+  const blocks: ContentBlock[] = []
+  for (const image of extractUserImagesFromDraft(draft)) {
+    blocks.push({
+      type: "image",
+      data: image.data,
+      mime_type: image.mime_type,
+      uri: image.uri ?? null,
+    })
   }
-  return textBlocks.join("\n")
+  blocks.push({ type: "text", text })
+
+  return {
+    id: `optimistic-${randomUUID()}`,
+    role: "user",
+    blocks,
+    timestamp: new Date().toISOString(),
+  }
 }
 
 function buildVirtualConversationId(seed: string): number {
@@ -165,7 +187,7 @@ const ConversationTabView = memo(function ConversationTabView({
   const tWelcome = useTranslations("Folder.chat.welcomeInputPanel")
   const sharedT = useTranslations("Folder.chat.shared")
   const { activeFolder: folder, activeFolderId } = useActiveFolder()
-  const { refreshConversations, updateConversationLocal } = useAppWorkspace()
+  const { refreshConversations } = useAppWorkspace()
   const folderId = activeFolderId ?? 0
   const {
     tabs,
@@ -174,6 +196,8 @@ const ConversationTabView = memo(function ConversationTabView({
     pinTab,
     openNewConversationTab,
     closeTab,
+    confirmDraftAgent,
+    setDraftAgentFromFallback,
   } = useTabContext()
   const { setSessionStats } = useSessionStats()
   const {
@@ -223,10 +247,6 @@ const ConversationTabView = memo(function ConversationTabView({
     null
   )
   const [hasSentMessage, setHasSentMessage] = useState(false)
-  const [retryEditingTurn, setRetryEditingTurn] = useState<MessageTurn | null>(
-    null
-  )
-  const pendingRetryReplacementOldAnchorRef = useRef<string | null>(null)
 
   const hasPersistedConversation = dbConversationId != null
 
@@ -560,17 +580,12 @@ const ConversationTabView = memo(function ConversationTabView({
         persistedId,
         effectiveConversationId
       )
-      if (conn.lastTurnStopReason === "cancelled") {
-        refetchDetail(persistedId, effectiveConversationId)
-      }
     }
   }, [
     completeTurn,
     connStatus,
     conn.liveMessage,
-    conn.lastTurnStopReason,
     effectiveConversationId,
-    refetchDetail,
     syncTurnMetadata,
   ])
 
@@ -694,7 +709,7 @@ const ConversationTabView = memo(function ConversationTabView({
       }
       if (connStatus !== "connected") return
 
-      const optimisticTurn = buildUserTurnFromDraft(
+      const optimisticTurn = buildOptimisticUserTurnFromDraft(
         draft,
         sharedT("attachedResources")
       )
@@ -707,28 +722,13 @@ const ConversationTabView = memo(function ConversationTabView({
       setSyncState(effectiveConversationId, "awaiting_persist")
       setHasSentMessage(true)
 
-      const oldRetryAnchorId = pendingRetryReplacementOldAnchorRef.current
-      if (oldRetryAnchorId && dbConvIdRef.current != null) {
-        saveConversationRetryEditReplacement(dbConvIdRef.current, {
-          old_anchor_id: oldRetryAnchorId,
-          created_at: new Date().toISOString(),
-        })
-        pendingRetryReplacementOldAnchorRef.current = null
-      }
-
-      const persistedId = dbConvIdRef.current
-      if (persistedId != null) {
-        updateConversationLocal(persistedId, { status: "in_progress" })
-      } else {
-        void refreshConversations()
-      }
-
       // Pin the tab if it was a temporary preview (single-click opened)
       const currentTab = tabs.find((tab) => tab.id === tabId)
       if (currentTab && !currentTab.isPinned) {
         pinTab(tabId)
       }
 
+      const persistedId = dbConvIdRef.current
       if (persistedId) {
         // Existing-tab path: row already exists, send immediately with the
         // conversation_id pinned so the backend reuses our row instead of
@@ -809,7 +809,6 @@ const ConversationTabView = memo(function ConversationTabView({
       pinTab,
       refreshConversations,
       selectedAgent,
-      updateConversationLocal,
       setExternalId,
       setPendingCleanup,
       setSyncState,
@@ -838,10 +837,6 @@ const ConversationTabView = memo(function ConversationTabView({
         sessionIdRef.current = forkedSessionId
         setExternalId(effectiveConversationId, forkedSessionId)
 
-        const persistedId = dbConvIdRef.current
-        if (persistedId != null) {
-          updateConversationLocal(persistedId, { status: "in_progress" })
-        }
         refreshConversations()
         // Send the message on the forked session (S2)
         handleSend(draft, selectedModeIdArg)
@@ -865,7 +860,6 @@ const ConversationTabView = memo(function ConversationTabView({
       handleSend,
       refreshConversations,
       setExternalId,
-      updateConversationLocal,
       t,
     ]
   )
@@ -888,14 +882,39 @@ const ConversationTabView = memo(function ConversationTabView({
   // a late-returning disconnect would dispatch CONNECTION_REMOVED by
   // contextKey and wipe the new connection's frontend state, leaving a
   // backend orphan.
-  const handleAgentSelect = useCallback((nextAgentType: AgentType) => {
-    if (nextAgentType === selectedAgentRef.current) return
-    if (dbConvIdRef.current) return
+  const handleAgentSelect = useCallback(
+    (nextAgentType: AgentType) => {
+      if (nextAgentType === selectedAgentRef.current) return
+      if (dbConvIdRef.current) return
 
-    setDraftAgentType(nextAgentType)
-    setModeId(getSavedModeId(nextAgentType))
-    setAgentConnectError(null)
-  }, [])
+      setDraftAgentType(nextAgentType)
+      setModeId(getSavedModeId(nextAgentType))
+      setAgentConnectError(null)
+      // Real user click — clear the provisional flag so TabProvider's
+      // correction effect leaves this tab alone.
+      confirmDraftAgent(tabId, nextAgentType)
+    },
+    [confirmDraftAgent, tabId]
+  )
+
+  // AgentSelector auto-fallback: the requested default agent was missing
+  // or unavailable, so it picked a substitute on its own. Sync local UI
+  // state (so the connection points at the right agent immediately) but
+  // mark the tab as still provisional — TabProvider's correction effect
+  // will re-resolve against the folder's saved default once all three
+  // hydration gates are open, and overwrite this substitute if needed.
+  const handleAgentFallback = useCallback(
+    (nextAgentType: AgentType) => {
+      if (nextAgentType === selectedAgentRef.current) return
+      if (dbConvIdRef.current) return
+
+      setDraftAgentType(nextAgentType)
+      setModeId(getSavedModeId(nextAgentType))
+      setAgentConnectError(null)
+      setDraftAgentFromFallback(tabId, nextAgentType)
+    },
+    [setDraftAgentFromFallback, tabId]
+  )
 
   const handleModeChange = useCallback(
     (newModeId: string) => {
@@ -914,10 +933,8 @@ const ConversationTabView = memo(function ConversationTabView({
   const handleAnswerQuestion = useCallback(
     (answer: string) => {
       if (connStatus !== "connected") return
-      const optimisticIdentity = createOptimisticUserIdentity()
       const optimisticTurn: MessageTurn = {
-        id: optimisticIdentity.id,
-        anchor_id: optimisticIdentity.anchorId,
+        id: `optimistic-${randomUUID()}`,
         role: "user",
         blocks: [{ type: "text", text: answer }],
         timestamp: new Date().toISOString(),
@@ -929,10 +946,6 @@ const ConversationTabView = memo(function ConversationTabView({
       )
       setSendSignal((prev) => prev + 1)
       setSyncState(effectiveConversationId, "awaiting_persist")
-      const persistedId = dbConvIdRef.current
-      if (persistedId != null) {
-        updateConversationLocal(persistedId, { status: "in_progress" })
-      }
       lifecycleSend(
         { blocks: [{ type: "text", text: answer }], displayText: answer },
         null
@@ -944,7 +957,6 @@ const ConversationTabView = memo(function ConversationTabView({
       effectiveConversationId,
       lifecycleSend,
       setSyncState,
-      updateConversationLocal,
     ]
   )
 
@@ -955,33 +967,16 @@ const ConversationTabView = memo(function ConversationTabView({
     return item?.draft.displayText ?? null
   }, [mqEditingItemId, msgQueue])
 
-  const handleCancelRetryEdit = useCallback(() => {
-    pendingRetryReplacementOldAnchorRef.current = null
-    setRetryEditingTurn(null)
-  }, [])
-
   const handleQueueEdit = useCallback(
     (id: string) => {
-      handleCancelRetryEdit()
       mqStartEditing(id)
     },
-    [handleCancelRetryEdit, mqStartEditing]
+    [mqStartEditing]
   )
 
   const handleQueueCancelEdit = useCallback(() => {
     mqCancelEditing()
   }, [mqCancelEditing])
-
-  const handleRetryEditTurn = useCallback(
-    (turn: MessageTurn) => {
-      if (!isStableRetryEditAnchorId(turn.anchor_id)) return
-      if (extractTextFromMessageTurn(turn) == null) return
-      mqCancelEditing()
-      pendingRetryReplacementOldAnchorRef.current = turn.anchor_id
-      setRetryEditingTurn(turn)
-    },
-    [mqCancelEditing]
-  )
 
   const handleSaveQueueEdit = useCallback(
     (draft: PromptDraft) => {
@@ -991,14 +986,6 @@ const ConversationTabView = memo(function ConversationTabView({
     },
     [mqEditingItemId, mqUpdateItem]
   )
-
-  const retryEditingDraftText = useMemo(() => {
-    return retryEditingTurn
-      ? extractTextFromMessageTurn(retryEditingTurn)
-      : null
-  }, [retryEditingTurn])
-  const effectiveEditingDraftText =
-    retryEditingDraftText ?? editingQueueDraftText
 
   const showDraftHeader = !hasPersistedConversation && !hasSentMessage
   const isWelcomeMode = showDraftHeader
@@ -1024,7 +1011,12 @@ const ConversationTabView = memo(function ConversationTabView({
   // runs against the result of the first.
   const handleOpenNewSession = useCallback(() => {
     if (!folder) return
-    openNewConversationTab(folder.id, workingDirForConnection ?? folder.path)
+    // Retry-from-error: user wants a fresh draft in the same conversation
+    // context, so inherit the active tab's agent when the folder has no
+    // pinned default.
+    openNewConversationTab(folder.id, workingDirForConnection ?? folder.path, {
+      inheritFromActive: true,
+    })
     closeTab(tabId)
   }, [closeTab, folder, openNewConversationTab, tabId, workingDirForConnection])
 
@@ -1033,7 +1025,6 @@ const ConversationTabView = memo(function ConversationTabView({
       conversationId={effectiveConversationId}
       agentType={selectedAgent}
       connStatus={connStatus}
-      showPromptingState={showPromptingUi}
       isActive={isActive}
       sendSignal={sendSignal}
       sessionStats={effectiveSessionStats}
@@ -1041,19 +1032,16 @@ const ConversationTabView = memo(function ConversationTabView({
       detailError={detailError}
       acpLoadError={acpLoadError}
       hideEmptyState={!hasPersistedConversation || hasSentMessage}
-      lastTurnStopReason={conn.lastTurnStopReason}
       onReload={canShowDetailErrorActions ? handleReloadDetail : undefined}
       onNewSession={
         canShowDetailErrorActions ? handleOpenNewSession : undefined
       }
-      onRetryEditTurn={handleRetryEditTurn}
     />
   )
 
   return (
     <ConversationShell
       status={connStatus}
-      showPromptingState={showPromptingUi}
       promptCapabilities={conn.promptCapabilities}
       defaultPath={workingDirForConnection}
       agentName={AGENT_LABELS[selectedAgent]}
@@ -1086,12 +1074,10 @@ const ConversationTabView = memo(function ConversationTabView({
       onQueueEdit={handleQueueEdit}
       onQueueDelete={mqRemove}
       editingItemId={mqEditingItemId}
-      editingDraftText={effectiveEditingDraftText}
+      editingDraftText={editingQueueDraftText}
       isEditingQueueItem={mqEditingItemId != null}
-      isRetryEditingMessage={retryEditingTurn != null}
       onSaveQueueEdit={handleSaveQueueEdit}
       onCancelQueueEdit={handleQueueCancelEdit}
-      onCancelRetryEdit={handleCancelRetryEdit}
       onForkSend={
         connStatus === "connected" &&
         hasPersistedConversation &&
@@ -1101,67 +1087,68 @@ const ConversationTabView = memo(function ConversationTabView({
       }
     >
       {isWelcomeMode ? (
-        <div className="flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto">
-          <div className="m-auto flex w-full max-w-2xl flex-col gap-6 py-8">
-            <div className="px-4">
-              <WelcomeHero />
-            </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-center px-4">
-                <AgentSelector
-                  defaultAgentType={selectedAgent}
-                  onSelect={handleAgentSelect}
-                  onAgentsLoaded={(agents) => {
-                    setAgentsLoaded(true)
-                    setUsableAgentCount(
-                      agents.filter((agent) => agent.enabled && agent.available)
-                        .length
-                    )
-                  }}
-                  onOpenAgentsSettings={handleOpenAgentsSettings}
-                  disabled={isConnecting || dbConversationId != null}
-                />
-              </div>
-              {autoConnectError || agentConnectError ? (
-                <div className="px-4">
-                  <button
-                    type="button"
-                    onClick={handleOpenAgentsSettings}
-                    className="w-full cursor-pointer rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive transition-colors hover:bg-destructive/10"
-                  >
-                    <div
-                      className="overflow-hidden text-ellipsis whitespace-nowrap text-center"
-                      title={autoConnectError ?? agentConnectError ?? ""}
-                    >
-                      {autoConnectError ?? agentConnectError}
-                    </div>
-                  </button>
-                </div>
-              ) : null}
-              <ChatInput
-                status={connStatus}
-                showPromptingState={showPromptingUi}
-                promptCapabilities={conn.promptCapabilities}
-                defaultPath={workingDirForConnection}
-                agentName={AGENT_LABELS[selectedAgent]}
-                onFocus={handleFocus}
-                onSend={handleSend}
-                onCancel={handleCancel}
-                modes={connectionModes}
-                configOptions={connectionConfigOptions}
-                modeLoading={modeLoading}
-                configOptionsLoading={configOptionsLoading}
-                selectorsLoading={selectorsLoading}
-                selectedModeId={selectedModeId}
-                onModeChange={handleModeChange}
-                onConfigOptionChange={handleSetConfigOption}
-                agentType={selectedAgent}
-                availableCommands={connectionCommands}
-                attachmentTabId={tabId}
-                draftStorageKey={draftStorageKey}
-                isActive={isActive}
+        <div className="relative isolate flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto">
+          <WelcomeBackdrop />
+          <div className="flex-1" />
+          <div className="mx-auto flex w-full max-w-2xl shrink-0 flex-col gap-6 px-4 py-4">
+            <WelcomeHero />
+            <div className="flex justify-center">
+              <AgentSelector
+                defaultAgentType={selectedAgent}
+                onSelect={handleAgentSelect}
+                onFallback={handleAgentFallback}
+                onAgentsLoaded={(agents) => {
+                  setAgentsLoaded(true)
+                  setUsableAgentCount(
+                    agents.filter((agent) => agent.enabled && agent.available)
+                      .length
+                  )
+                }}
+                onOpenAgentsSettings={handleOpenAgentsSettings}
+                disabled={isConnecting || dbConversationId != null}
               />
             </div>
+            {autoConnectError || agentConnectError ? (
+              <button
+                type="button"
+                onClick={handleOpenAgentsSettings}
+                className="w-full cursor-pointer rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive transition-colors hover:bg-destructive/10"
+              >
+                <div
+                  className="overflow-hidden text-ellipsis whitespace-nowrap text-center"
+                  title={autoConnectError ?? agentConnectError ?? ""}
+                >
+                  {autoConnectError ?? agentConnectError}
+                </div>
+              </button>
+            ) : null}
+            <ChatInput
+              status={connStatus}
+              showPromptingState={showPromptingUi}
+              promptCapabilities={conn.promptCapabilities}
+              defaultPath={workingDirForConnection}
+              agentName={AGENT_LABELS[selectedAgent]}
+              onFocus={handleFocus}
+              onSend={handleSend}
+              onCancel={handleCancel}
+              modes={connectionModes}
+              configOptions={connectionConfigOptions}
+              modeLoading={modeLoading}
+              configOptionsLoading={configOptionsLoading}
+              selectorsLoading={selectorsLoading}
+              selectedModeId={selectedModeId}
+              onModeChange={handleModeChange}
+              onConfigOptionChange={handleSetConfigOption}
+              agentType={selectedAgent}
+              availableCommands={connectionCommands}
+              attachmentTabId={tabId}
+              draftStorageKey={draftStorageKey}
+              isActive={isActive}
+            />
+          </div>
+          <div className="flex-1" />
+          <div className="mx-auto w-full max-w-2xl shrink-0 px-4 pb-6">
+            <WelcomeTip />
           </div>
         </div>
       ) : showDraftHeader ? (
@@ -1170,6 +1157,7 @@ const ConversationTabView = memo(function ConversationTabView({
             <AgentSelector
               defaultAgentType={selectedAgent}
               onSelect={handleAgentSelect}
+              onFallback={handleAgentFallback}
               onAgentsLoaded={(agents) => {
                 setAgentsLoaded(true)
                 setUsableAgentCount(
@@ -1222,7 +1210,6 @@ export function ConversationDetailPanel({
   } = useConversationRuntime()
   const { activeFolder: folder } = useActiveFolder()
   const { conversations, getFolder } = useAppWorkspace()
-  const { openFilePreview } = useWorkspaceContext()
   const {
     tabs,
     activeTabId,
@@ -1411,11 +1398,6 @@ export function ConversationDetailPanel({
     return () => document.removeEventListener("selectionchange", handler)
   }, [])
 
-  const selectedFileTarget = useMemo(
-    () => findFirstWorkspaceFileTarget(contextMenuSelectedText, folder?.path),
-    [contextMenuSelectedText, folder?.path]
-  )
-
   const handleCopySelectedText = useCallback(async () => {
     if (!contextMenuSelectedText) return
     const ok = await copyTextToClipboard(contextMenuSelectedText)
@@ -1426,20 +1408,11 @@ export function ConversationDetailPanel({
     }
   }, [contextMenuSelectedText, t])
 
-  const handleOpenSelectedFile = useCallback(() => {
-    if (!selectedFileTarget) return
-    void openFilePreview(selectedFileTarget.relativePath, {
-      line: selectedFileTarget.line ?? undefined,
-    }).catch((error) => {
-      toast.error(t("openSelectedFileFailed"), {
-        description: toErrorMessage(error),
-      })
-    })
-  }, [openFilePreview, selectedFileTarget, t])
-
   const handleNewConversation = useCallback(() => {
     if (!allowNewConversation || !folder) return
-    openNewConversationTab(folder.id, folder.path)
+    // Right-click "new conversation" inside a conversation tab: keep the
+    // active agent when the target folder has no pinned default.
+    openNewConversationTab(folder.id, folder.path, { inheritFromActive: true })
   }, [allowNewConversation, folder, openNewConversationTab])
 
   const handleNewConversationInWindow = useCallback(() => {
@@ -1630,13 +1603,6 @@ export function ConversationDetailPanel({
         >
           <Copy className="h-4 w-4" />
           {t("copyText")}
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!selectedFileTarget}
-          onSelect={handleOpenSelectedFile}
-        >
-          <FileSearch className="h-4 w-4" />
-          {t("openSelectedFile")}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem

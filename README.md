@@ -151,10 +151,19 @@ pnpm server:build
 # Lint
 pnpm eslint .
 
+# Frontend tests (vitest)
+pnpm test
+pnpm test:watch
+pnpm test:coverage
+
 # Rust checks (run in src-tauri/)
 cargo check
-cargo clippy
+cargo clippy --all-targets --features test-utils -- -D warnings
 cargo build
+
+# Rust tests
+cargo test --features test-utils                                # desktop (incl. integration)
+cargo test --no-default-features --bin codeg-server --lib       # server mode
 ```
 
 ### Server Deployment

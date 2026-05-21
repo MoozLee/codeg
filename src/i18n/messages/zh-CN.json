@@ -918,7 +918,9 @@
         "useThemeColor": "使用设置主题",
         "setDefaultAgent": "设置默认智能体",
         "defaultAgentNone": "不设置（使用全局默认）",
-        "agentUnavailableSuffix": "（不可用）"
+        "agentUnavailableSuffix": "（不可用）",
+        "loadingAgents": "正在加载代理…",
+        "removeFromWorkspace": "从工作区移除"
       },
       "sections": {
         "pinned": "置顶",
@@ -1874,7 +1876,7 @@
         "askAnythingPlaceholder": "请开始输入..."
       },
       "welcomePanel": {
-        "title": "欢迎使用 Codeg",
+        "greeting": "今天准备<highlight>做些什么</highlight>呢？",
         "tips": {
           "tileTabs": "右键点击会话标签选择「平铺显示」，可同屏对比多个会话",
           "pinTab": "双击会话标签可将其固定，避免被新打开的会话自动替换",

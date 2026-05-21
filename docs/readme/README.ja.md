@@ -144,10 +144,19 @@ pnpm server:build
 # Lint
 pnpm eslint .
 
+# フロントエンドテスト (vitest)
+pnpm test
+pnpm test:watch
+pnpm test:coverage
+
 # Rust チェック（src-tauri/ で実行）
 cargo check
-cargo clippy
+cargo clippy --all-targets --features test-utils -- -D warnings
 cargo build
+
+# Rust テスト
+cargo test --features test-utils                                # デスクトップ（統合テスト含む）
+cargo test --no-default-features --bin codeg-server --lib       # サーバーモード
 ```
 
 ### サーバーデプロイ

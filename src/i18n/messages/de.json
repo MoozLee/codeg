@@ -918,7 +918,9 @@
         "useThemeColor": "App-Design verwenden",
         "setDefaultAgent": "Standard-Agent festlegen",
         "defaultAgentNone": "Kein Standard (global verwenden)",
-        "agentUnavailableSuffix": "(nicht verfügbar)"
+        "agentUnavailableSuffix": "(nicht verfügbar)",
+        "loadingAgents": "Agenten werden geladen…",
+        "removeFromWorkspace": "Aus Arbeitsbereich entfernen"
       },
       "sections": {
         "pinned": "Angeheftet",
@@ -1874,7 +1876,7 @@
         "askAnythingPlaceholder": "Fragen Sie alles..."
       },
       "welcomePanel": {
-        "title": "Willkommen bei Codeg",
+        "greeting": "Was möchtest du heute <highlight>machen</highlight>?",
         "tips": {
           "tileTabs": "Klicke mit der rechten Maustaste auf einen Konversations-Tab und wähle Kachelansicht, um mehrere Sitzungen nebeneinander zu sehen.",
           "pinTab": "Doppelklicke auf einen Konversations-Tab, um ihn anzuheften – so wird er nicht von einer neuen Sitzung automatisch ersetzt.",

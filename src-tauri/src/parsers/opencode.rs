@@ -19,9 +19,22 @@ pub struct OpenCodeParser {
     base_dir: PathBuf,
 }
 
+impl Default for OpenCodeParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OpenCodeParser {
     pub fn new() -> Self {
         let base_dir = resolve_opencode_base_dir();
+        Self { base_dir }
+    }
+
+    /// Test-only constructor that lets callers point the parser at a fixture
+    /// directory containing an `opencode.db` SQLite file.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }
 
@@ -571,12 +584,10 @@ impl OpenCodeParser {
                         });
                     }
                 }
-                "step-finish" => {
-                    if usage_from_step_finish.is_none() {
-                        usage_from_step_finish = value
-                            .get("tokens")
-                            .and_then(extract_opencode_usage_from_tokens);
-                    }
+                "step-finish" if usage_from_step_finish.is_none() => {
+                    usage_from_step_finish = value
+                        .get("tokens")
+                        .and_then(extract_opencode_usage_from_tokens);
                 }
                 _ => {}
             }
