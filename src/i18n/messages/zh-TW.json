@@ -948,6 +948,7 @@
       "reload": "重新載入",
       "activeConversationIndicator": "目前啟用的會話",
       "newConversation": "新增會話",
+      "newConversationInWindow": "在新視窗中新建會話",
       "closeConversation": "關閉會話",
       "copyText": "複製文字",
       "openSelectedFile": "跳轉到檔案",

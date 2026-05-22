@@ -14,6 +14,7 @@ import {
   Download,
   FileCode,
   FileImage,
+  FileSearch,
   FileText,
   Focus,
   Plus,
@@ -32,6 +33,9 @@ import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { useTaskContext } from "@/contexts/task-context"
+import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { toErrorMessage } from "@/lib/app-error"
+import { findFirstWorkspaceFileTarget } from "@/lib/local-file-target"
 import { cn, copyTextToClipboard, randomUUID } from "@/lib/utils"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
@@ -1293,6 +1297,7 @@ export function ConversationDetailPanel({
   } = useConversationRuntime()
   const { activeFolder: folder } = useActiveFolder()
   const { conversations, getFolder } = useAppWorkspace()
+  const { openFilePreview } = useWorkspaceContext()
   const {
     tabs,
     activeTabId,
@@ -1303,13 +1308,20 @@ export function ConversationDetailPanel({
     switchTab,
     onPreviewTabReplaced,
   } = useTabContext()
+  const activeTab = useMemo(
+    () => tabs.find((tab) => tab.id === activeTabId) ?? null,
+    [tabs, activeTabId]
+  )
+  const activeTabFolder = useMemo(
+    () => (activeTab ? (getFolder(activeTab.folderId) ?? null) : null),
+    [activeTab, getFolder]
+  )
+  const activeTabWorkspacePath = activeTab?.workingDir ?? activeTabFolder?.path
   const newConversation = useMemo(() => {
-    const activeTab = tabs.find((tab) => tab.id === activeTabId)
     if (!activeTab || activeTab.conversationId != null) return null
-    const workingDir = activeTab.workingDir ?? folder?.path
-    if (!workingDir) return null
-    return { workingDir, folderId: activeTab.folderId }
-  }, [tabs, activeTabId, folder?.path])
+    if (!activeTabWorkspacePath) return null
+    return { workingDir: activeTabWorkspacePath, folderId: activeTab.folderId }
+  }, [activeTab, activeTabWorkspacePath])
   const { disconnect: disconnectByKey } = useAcpActions()
   const { addTask, updateTask } = useTaskContext()
   const [reloadByTabId, setReloadByTabId] = useState<Record<string, number>>({})
@@ -1481,6 +1493,15 @@ export function ConversationDetailPanel({
     return () => document.removeEventListener("selectionchange", handler)
   }, [])
 
+  const selectedFileTarget = useMemo(
+    () =>
+      findFirstWorkspaceFileTarget(
+        contextMenuSelectedText,
+        activeTabWorkspacePath
+      ),
+    [contextMenuSelectedText, activeTabWorkspacePath]
+  )
+
   const handleCopySelectedText = useCallback(async () => {
     if (!contextMenuSelectedText) return
     const ok = await copyTextToClipboard(contextMenuSelectedText)
@@ -1490,6 +1511,17 @@ export function ConversationDetailPanel({
       toast.error(t("copyTextFailed"))
     }
   }, [contextMenuSelectedText, t])
+
+  const handleOpenSelectedFile = useCallback(() => {
+    if (!selectedFileTarget) return
+    void openFilePreview(selectedFileTarget.relativePath, {
+      line: selectedFileTarget.line ?? undefined,
+    }).catch((error) => {
+      toast.error(t("openSelectedFileFailed"), {
+        description: toErrorMessage(error),
+      })
+    })
+  }, [openFilePreview, selectedFileTarget, t])
 
   const handleNewConversation = useCallback(() => {
     if (!allowNewConversation || !folder) return
@@ -1687,6 +1719,13 @@ export function ConversationDetailPanel({
           <Copy className="h-4 w-4" />
           {t("copyText")}
         </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!selectedFileTarget}
+          onSelect={handleOpenSelectedFile}
+        >
+          <FileSearch className="h-4 w-4" />
+          {t("openSelectedFile")}
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           disabled={!canReloadActiveConversation}
@@ -1707,7 +1746,7 @@ export function ConversationDetailPanel({
           onSelect={handleNewConversationInWindow}
         >
           <Plus className="h-4 w-4" />
-          {t("newConversation")}
+          {t("newConversationInWindow")}
         </ContextMenuItem>
         <ContextMenuSub>
           <ContextMenuSubTrigger disabled={!canExport}>

@@ -948,6 +948,7 @@
       "reload": "Recharger",
       "activeConversationIndicator": "Conversation active",
       "newConversation": "Nouvelle conversation",
+      "newConversationInWindow": "Nouvelle conversation dans une fenêtre",
       "closeConversation": "Fermer la conversation",
       "copyText": "Copier le texte",
       "openSelectedFile": "Aller au fichier",

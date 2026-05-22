@@ -948,6 +948,7 @@
       "reload": "再読み込み",
       "activeConversationIndicator": "アクティブな会話",
       "newConversation": "新しい会話",
+      "newConversationInWindow": "新しいウィンドウで新規会話",
       "closeConversation": "会話を閉じる",
       "copyText": "テキストをコピー",
       "openSelectedFile": "ファイルへジャンプ",
