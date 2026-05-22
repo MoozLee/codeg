@@ -234,6 +234,7 @@ const ConversationTabView = memo(function ConversationTabView({
     completeTurn,
     getSession,
     refetchDetail,
+    removeOptimisticTurn,
     syncTurnMetadata,
     removeConversation,
     setAcpLoadError,
@@ -1030,13 +1031,22 @@ const ConversationTabView = memo(function ConversationTabView({
 
   const handleRetryEditTurn = useCallback(
     (turn: MessageTurn) => {
-      if (!isStableRetryEditAnchorId(turn.anchor_id)) return
-      if (extractTextFromMessageTurn(turn) == null) return
+      const draftText = extractTextFromMessageTurn(turn)
+      if (draftText == null) return
+      const anchorId = turn.anchor_id ?? null
+      if (!anchorId) return
+
       mqCancelEditing()
-      pendingRetryReplacementOldAnchorRef.current = turn.anchor_id
+      if (isStableRetryEditAnchorId(anchorId)) {
+        pendingRetryReplacementOldAnchorRef.current = anchorId
+      } else {
+        pendingRetryReplacementOldAnchorRef.current = null
+        syncCancelRef.current?.()
+        removeOptimisticTurn(effectiveConversationId, anchorId)
+      }
       setRetryEditingTurn(turn)
     },
-    [mqCancelEditing]
+    [effectiveConversationId, mqCancelEditing, removeOptimisticTurn]
   )
 
   const handleSaveQueueEdit = useCallback(

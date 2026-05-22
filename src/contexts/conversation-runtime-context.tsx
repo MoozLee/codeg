@@ -126,6 +126,11 @@ type Action =
       syncState?: ConversationSyncState
     }
   | {
+      type: "REMOVE_OPTIMISTIC_TURN"
+      conversationId: number
+      anchorId: string
+    }
+  | {
       type: "SET_LIVE_MESSAGE"
       conversationId: number
       liveMessage: LiveMessage | null
@@ -830,6 +835,16 @@ function reducer(
         activeTurnToken: action.turnToken,
       }))
 
+    case "REMOVE_OPTIMISTIC_TURN":
+      return updateSessionInState(state, action.conversationId, (current) => ({
+        ...current,
+        optimisticTurns: current.optimisticTurns.filter(
+          (turn) => turn.anchor_id !== action.anchorId
+        ),
+        syncState: "idle",
+        activeTurnToken: null,
+      }))
+
     case "SET_LIVE_MESSAGE": {
       const current = state.byConversationId.get(action.conversationId)
 
@@ -1032,6 +1047,7 @@ interface ConversationRuntimeContextValue {
     turnToken: string,
     syncState?: ConversationSyncState
   ) => void
+  removeOptimisticTurn: (conversationId: number, anchorId: string) => void
   setLiveMessage: (
     conversationId: number,
     liveMessage: LiveMessage | null,
@@ -1368,6 +1384,13 @@ export function ConversationRuntimeProvider({
     []
   )
 
+  const removeOptimisticTurn = useCallback(
+    (conversationId: number, anchorId: string) => {
+      dispatch({ type: "REMOVE_OPTIMISTIC_TURN", conversationId, anchorId })
+    },
+    []
+  )
+
   const setLiveMessage = useCallback(
     (
       conversationId: number,
@@ -1489,6 +1512,7 @@ export function ConversationRuntimeProvider({
       syncTurnMetadata,
       completeTurn,
       appendOptimisticTurn,
+      removeOptimisticTurn,
       setLiveMessage,
       setExternalId,
       setSyncState,
@@ -1507,6 +1531,7 @@ export function ConversationRuntimeProvider({
       syncTurnMetadata,
       completeTurn,
       appendOptimisticTurn,
+      removeOptimisticTurn,
       setLiveMessage,
       setExternalId,
       setSyncState,

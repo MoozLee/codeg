@@ -335,41 +335,33 @@ function findRetryEditableUserAnchorId(
   turns: MessageTurn[],
   lastTurnStopReason: string | null | undefined
 ): string | null {
-  let userTurnCountAfterCandidate = 0
-  let skippedInterruptedAssistant = false
-
+  const hasInterruptedTail = isInterruptedStopReason(lastTurnStopReason)
+  let latestUserTurnIndex = -1
   for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index]
-    if (turn.role === "assistant" && isAssistantTextTurn(turn)) {
-      if (
-        !skippedInterruptedAssistant &&
-        isInterruptedStopReason(lastTurnStopReason)
-      ) {
-        skippedInterruptedAssistant = true
-        continue
-      }
-      return null
+    if (turns[index].role === "user") {
+      latestUserTurnIndex = index
+      break
     }
-    if (turn.role !== "user") {
+  }
+  if (latestUserTurnIndex < 0) return null
+
+  const latestUserTurn = turns[latestUserTurnIndex]
+  const anchorId = latestUserTurn.anchor_id ?? null
+  if (!anchorId || !isTextOnlyUserTurn(latestUserTurn)) {
+    return null
+  }
+
+  for (let index = latestUserTurnIndex + 1; index < turns.length; index += 1) {
+    const turn = turns[index]
+    if (turn.role !== "assistant" || !isAssistantTextTurn(turn)) {
       continue
     }
-
-    userTurnCountAfterCandidate += 1
-    if (userTurnCountAfterCandidate > 1) {
+    if (!hasInterruptedTail) {
       return null
     }
-
-    const anchorId = turn.anchor_id ?? null
-    if (
-      !anchorId ||
-      isOptimisticAnchorId(anchorId) ||
-      !isTextOnlyUserTurn(turn)
-    ) {
-      return null
-    }
-    return anchorId
   }
-  return null
+
+  return anchorId
 }
 
 /**
@@ -1097,13 +1089,17 @@ export function MessageListView({
       storageConversationId,
       rawTurns
     )
+    const retryEditableCandidate = onRetryEditTurn
+      ? findRetryEditableUserAnchorId(rawTurns, lastTurnStopReason)
+      : null
     const retryEditableAnchorId =
-      connStatus === "connected" &&
-      onRetryEditTurn &&
-      sessionSyncState !== "awaiting_persist" &&
-      !showPromptingState
-        ? findRetryEditableUserAnchorId(rawTurns, lastTurnStopReason)
-        : null
+      connStatus === "connected" && !showPromptingState
+        ? retryEditableCandidate
+        : connStatus === "prompting" &&
+            retryEditableCandidate !== null &&
+            isOptimisticAnchorId(retryEditableCandidate)
+          ? retryEditableCandidate
+          : null
     const visibleTimelineTurns = timelineTurns.filter((item) => {
       const anchorId = item.turn.anchor_id ?? null
       return !anchorId || !hiddenAnchorIds.has(anchorId)
