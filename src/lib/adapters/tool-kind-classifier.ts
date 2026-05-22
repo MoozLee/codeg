@@ -2,6 +2,7 @@ export type ToolKindLabel =
   | "search"
   | "command"
   | "read"
+  | "memory"
   | "edit"
   | "fetch"
   | "think"
@@ -12,6 +13,7 @@ export type ToolKindLabel =
 export const TOOL_KIND_ORDER: ToolKindLabel[] = [
   "search",
   "read",
+  "memory",
   "edit",
   "command",
   "fetch",
@@ -62,6 +64,10 @@ export function classifyToolKind(toolName: string): ToolKindLabel {
     name === "view"
   ) {
     return "read"
+  }
+
+  if (name === "memory_recall") {
+    return "memory"
   }
 
   if (

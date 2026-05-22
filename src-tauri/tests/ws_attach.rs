@@ -154,12 +154,7 @@ async fn ws_cold_attach_receives_snapshot_then_live_events() {
     let conn_id = "test-conn-1";
     state
         .connection_manager
-        .insert_test_connection(
-            conn_id,
-            AgentType::ClaudeCode,
-            None,
-            state.emitter.clone(),
-        )
+        .insert_test_connection(conn_id, AgentType::ClaudeCode, None, state.emitter.clone())
         .await;
 
     let mut ws = server
@@ -224,12 +219,7 @@ async fn ws_hot_attach_with_cursor_receives_replay() {
     let conn_id = "test-conn-replay";
     state
         .connection_manager
-        .insert_test_connection(
-            conn_id,
-            AgentType::ClaudeCode,
-            None,
-            state.emitter.clone(),
-        )
+        .insert_test_connection(conn_id, AgentType::ClaudeCode, None, state.emitter.clone())
         .await;
 
     // Emit three events BEFORE the WS even connects. The recent_events
@@ -272,7 +262,12 @@ async fn ws_hot_attach_with_cursor_receives_replay() {
     assert_eq!(frame["subscription_id"], "sub-replay");
     assert_eq!(frame["connection_id"], conn_id);
     let events = frame["events"].as_array().expect("events array");
-    assert_eq!(events.len(), 2, "expected 2 missed events, got {:?}", events);
+    assert_eq!(
+        events.len(),
+        2,
+        "expected 2 missed events, got {:?}",
+        events
+    );
     assert_eq!(events[0]["seq"], 2);
     assert_eq!(events[1]["seq"], 3);
     assert_eq!(frame["high_water_seq"], 3);
@@ -288,9 +283,7 @@ fn content_delta_envelope_serializes_to_expected_shape() {
     let env = EventEnvelope {
         seq: 7,
         connection_id: "c".into(),
-        payload: AcpEvent::ContentDelta {
-            text: "x".into(),
-        },
+        payload: AcpEvent::ContentDelta { text: "x".into() },
     };
     let v = serde_json::to_value(&env).unwrap();
     assert_eq!(v["seq"], 7);

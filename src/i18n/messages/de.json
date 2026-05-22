@@ -325,7 +325,7 @@
       },
       "close_all_file_tabs": {
         "title": "Alle Dateitabs schließen",
-        "description": "Schließt alle Dateitabs nur im Dateimodus"
+        "description": "Schließt alle geöffneten Dateitabs, wenn der Dateibereich aktiv ist"
       },
       "send_message": {
         "title": "Nachricht senden",
@@ -849,12 +849,6 @@
       "openFile": "Datei öffnen",
       "viewDiff": "Diff anzeigen",
       "push": "Pushen..."
-    },
-    "modes": {
-      "conversation": "Konversationsmodus",
-      "fusion": "Fusionsmodus",
-      "files": "Dateimodus",
-      "workspaceModesAria": "Workspace-Modi"
     },
     "statusLabels": {
       "in_progress": "In Bearbeitung",
@@ -1892,7 +1886,7 @@
           "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> öffnet das eingebaute Terminal, <shortcut>{toggleSidebar}</shortcut> schaltet die Seitenleiste um.",
           "customShortcuts": "Alle Tastenkürzel lassen sich unter Einstellungen → Tastenkürzel frei belegen.",
           "webService": "Aktiviere Einstellungen → Webdienst, damit Teammitglieder dasselbe codeg im Browser nutzen können.",
-          "fusionMode": "Wechsle in der oberen Leiste in den Fusion-Modus, um Konversation und Datei- / Git-Panel nebeneinander zu sehen.",
+          "fusionMode": "Öffne eine Datei oder ein Diff, um es automatisch neben der Konversation zu sehen.",
           "quickMessages": "Klicke auf die +-Schaltfläche neben der Eingabe und wähle Schnellnachrichten, um ein gespeichertes Snippet einzufügen (verwaltbar unter Einstellungen → Schnellnachrichten).",
           "experts": "Die +-Schaltfläche hat ein Menü Expertenfähigkeiten – lade Rollen wie Debugging oder Planung mit einem Klick."
         }
@@ -1949,19 +1943,12 @@
         "thoughtForSeconds": "Nachgedacht"
       },
       "linkSafety": {
-        "localFileTitle": "Lokale Datei öffnen?",
-        "externalLinkTitle": "Externen Link öffnen?",
-        "localFileDescription": "Sie sind dabei, eine lokale Datei im Dateipanel zu öffnen.",
-        "externalLinkDescription": "Sie sind dabei, eine externe Website zu besuchen.",
-        "cancel": "Abbrechen",
-        "opening": "Wird geöffnet…",
-        "openFile": "Datei öffnen",
-        "openLink": "Link öffnen",
         "errorCannotOpen": "Lokale Datei kann nicht geöffnet werden",
         "errorNoWorkspace": "Es ist kein Arbeitsbereichsordner aktiv.",
         "errorOutsideWorkspace": "Die Datei befindet sich außerhalb des aktuellen Arbeitsbereichsordners.",
         "errorFailedOpen": "Lokale Datei konnte nicht geöffnet werden",
-        "errorFailedLink": "Link konnte nicht geöffnet werden"
+        "errorFailedLink": "Link konnte nicht geöffnet werden",
+        "errorUnsupportedLinkProtocol": "Dieses Linkprotokoll wird nicht unterstützt."
       },
       "messageList": {
         "attachedResources": "Angehängte Ressourcen",
@@ -2110,6 +2097,7 @@
           "search": "{count, plural, one {# Suche durchgeführt} other {# Suchen durchgeführt}}",
           "command": "{count, plural, one {# Befehl ausgeführt} other {# Befehle ausgeführt}}",
           "read": "{count, plural, one {Dateien # Mal gelesen} other {Dateien # Mal gelesen}}",
+          "memory": "{count, plural, one {# Erinnerung abgerufen} other {# Erinnerungen abgerufen}}",
           "edit": "{count, plural, one {Dateien # Mal bearbeitet} other {Dateien # Mal bearbeitet}}",
           "fetch": "{count, plural, one {# Ressource abgerufen} other {# Ressourcen abgerufen}}",
           "think": "{count, plural, one {# Mal nachgedacht} other {# Mal nachgedacht}}",

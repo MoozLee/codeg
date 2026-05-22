@@ -605,8 +605,7 @@ mod tests {
         let db = fresh_in_memory_db().await;
         // Use a tempdir that's guaranteed not a git repo (no .git).
         let temp = tempfile::tempdir().expect("tempdir");
-        let folder_id =
-            seed_folder(&db, &temp.path().to_string_lossy()).await;
+        let folder_id = seed_folder(&db, &temp.path().to_string_lossy()).await;
         let id = create_conversation_core(&db.conn, folder_id, AgentType::Codex, None)
             .await
             .expect("create succeeds even without git");
@@ -626,8 +625,7 @@ mod tests {
         // so creating a conversation against an unknown folder_id should not
         // panic. detect_git_branch is skipped because folder lookup returns None.
         let db = fresh_in_memory_db().await;
-        let result =
-            create_conversation_core(&db.conn, 999_999, AgentType::Gemini, None).await;
+        let result = create_conversation_core(&db.conn, 999_999, AgentType::Gemini, None).await;
         // Behavior contract: either success (current FK-loose behavior) or a
         // database error — never panic. Accept both.
         match result {
@@ -652,8 +650,7 @@ mod tests {
             .expect_err("missing conversation must error, not panic");
         let msg = format!("{err:?}");
         assert!(
-            msg.to_lowercase().contains("not found")
-                || msg.to_lowercase().contains("999999"),
+            msg.to_lowercase().contains("not found") || msg.to_lowercase().contains("999999"),
             "expected not-found-shaped error, got: {msg}"
         );
     }
@@ -707,7 +704,12 @@ mod tests {
         ];
         save_opened_tabs_core(&db.conn, items).await.expect("save");
         let tabs = list_opened_tabs_core(&db.conn).await.expect("list");
-        assert_eq!(tabs.len(), 2, "expected 2 tabs roundtrip, got {}", tabs.len());
+        assert_eq!(
+            tabs.len(),
+            2,
+            "expected 2 tabs roundtrip, got {}",
+            tabs.len()
+        );
     }
 
     #[tokio::test]
@@ -718,8 +720,7 @@ mod tests {
             .expect_err("missing folder must surface as error");
         let msg = format!("{err:?}");
         assert!(
-            msg.to_lowercase().contains("not found")
-                || msg.to_lowercase().contains("999999"),
+            msg.to_lowercase().contains("not found") || msg.to_lowercase().contains("999999"),
             "expected not-found-shaped error, got: {msg}"
         );
     }
@@ -728,17 +729,13 @@ mod tests {
     async fn update_conversation_status_core_invalid_string_errors() {
         let db = fresh_in_memory_db().await;
         let folder_id = seed_folder(&db, "/tmp/codeg-status-test").await;
-        let conv_id =
-            create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
+        let conv_id = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
+            .await
+            .expect("create");
+        let err =
+            update_conversation_status_core(&db.conn, conv_id, "not-a-real-status".to_string())
                 .await
-                .expect("create");
-        let err = update_conversation_status_core(
-            &db.conn,
-            conv_id,
-            "not-a-real-status".to_string(),
-        )
-        .await
-        .expect_err("garbage status must error before touching the DB");
+                .expect_err("garbage status must error before touching the DB");
         let msg = format!("{err:?}");
         assert!(
             msg.to_lowercase().contains("invalid"),
@@ -750,10 +747,9 @@ mod tests {
     async fn update_conversation_title_core_roundtrip() {
         let db = fresh_in_memory_db().await;
         let folder_id = seed_folder(&db, "/tmp/codeg-title-test").await;
-        let conv_id =
-            create_conversation_core(&db.conn, folder_id, AgentType::Gemini, None)
-                .await
-                .expect("create");
+        let conv_id = create_conversation_core(&db.conn, folder_id, AgentType::Gemini, None)
+            .await
+            .expect("create");
         update_conversation_title_core(&db.conn, conv_id, "Renamed".into())
             .await
             .expect("update");
@@ -767,10 +763,9 @@ mod tests {
     async fn delete_conversation_core_soft_deletes() {
         let db = fresh_in_memory_db().await;
         let folder_id = seed_folder(&db, "/tmp/codeg-delete-test").await;
-        let conv_id =
-            create_conversation_core(&db.conn, folder_id, AgentType::Codex, None)
-                .await
-                .expect("create");
+        let conv_id = create_conversation_core(&db.conn, folder_id, AgentType::Codex, None)
+            .await
+            .expect("create");
         delete_conversation_core(&db.conn, conv_id)
             .await
             .expect("delete");

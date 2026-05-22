@@ -519,6 +519,10 @@ export type AcpEvent =
       blocks: PromptInputBlock[]
     }
   | {
+      type: "permission_resolved"
+      request_id: string
+    }
+  | {
       type: "turn_complete"
       session_id: string
       stop_reason: string

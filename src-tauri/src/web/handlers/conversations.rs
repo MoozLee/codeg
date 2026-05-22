@@ -38,7 +38,9 @@ pub async fn list_all_conversations(
 pub async fn list_opened_tabs(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<Vec<OpenedTab>>, AppCommandError> {
-    Ok(Json(conv_commands::list_opened_tabs_core(&state.db.conn).await?))
+    Ok(Json(
+        conv_commands::list_opened_tabs_core(&state.db.conn).await?,
+    ))
 }
 
 #[derive(Deserialize)]

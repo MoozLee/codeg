@@ -29,6 +29,8 @@ describe("classifyToolKind", () => {
     ["task", "task"],
     ["new_task", "task"],
     ["skill", "task"],
+    ["memory_recall", "memory"],
+    ["MEMORY_RECALL", "memory"],
     ["my_custom_tool", "other"],
     ["", "other"],
   ] as const)("classifies %s as %s", (name, expected) => {
@@ -61,6 +63,7 @@ describe("TOOL_KIND_ORDER", () => {
       "search",
       "command",
       "read",
+      "memory",
       "edit",
       "fetch",
       "think",

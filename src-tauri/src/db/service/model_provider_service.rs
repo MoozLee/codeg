@@ -16,8 +16,8 @@ pub async fn create(
     model: Option<String>,
 ) -> Result<model_provider::Model, DbError> {
     let now = Utc::now();
-    let agent_types_json = serde_json::to_string(&vec![agent_type.clone()])
-        .unwrap_or_else(|_| "[]".to_string());
+    let agent_types_json =
+        serde_json::to_string(&vec![agent_type.clone()]).unwrap_or_else(|_| "[]".to_string());
     let active = model_provider::ActiveModel {
         id: NotSet,
         name: Set(name),

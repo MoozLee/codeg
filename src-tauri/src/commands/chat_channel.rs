@@ -649,22 +649,32 @@ mod tests {
     #[tokio::test]
     async fn chat_command_prefix_default_and_roundtrip() {
         let db = fresh_in_memory_db().await;
-        let default_prefix = get_chat_command_prefix_core(&db).await.expect("get default");
+        let default_prefix = get_chat_command_prefix_core(&db)
+            .await
+            .expect("get default");
         assert_eq!(default_prefix, DEFAULT_COMMAND_PREFIX);
 
         set_chat_command_prefix_core(&db, "$".to_string())
             .await
             .expect("set");
-        let updated = get_chat_command_prefix_core(&db).await.expect("get after set");
+        let updated = get_chat_command_prefix_core(&db)
+            .await
+            .expect("get after set");
         assert_eq!(updated, "$");
     }
 
     #[tokio::test]
     async fn chat_command_prefix_rejects_alphanumeric() {
         let db = fresh_in_memory_db().await;
-        assert!(set_chat_command_prefix_core(&db, "a".to_string()).await.is_err());
-        assert!(set_chat_command_prefix_core(&db, "".to_string()).await.is_err());
-        assert!(set_chat_command_prefix_core(&db, "$$$$".to_string()).await.is_err());
+        assert!(set_chat_command_prefix_core(&db, "a".to_string())
+            .await
+            .is_err());
+        assert!(set_chat_command_prefix_core(&db, "".to_string())
+            .await
+            .is_err());
+        assert!(set_chat_command_prefix_core(&db, "$$$$".to_string())
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -677,12 +687,16 @@ mod tests {
     #[tokio::test]
     async fn chat_message_language_validates_supported_codes() {
         let db = fresh_in_memory_db().await;
-        assert!(set_chat_message_language_core(&db, "zh-CN".to_string()).await.is_ok());
+        assert!(set_chat_message_language_core(&db, "zh-CN".to_string())
+            .await
+            .is_ok());
         let stored = get_chat_message_language_core(&db).await.expect("get");
         // Implementation lowercases before storing.
         assert_eq!(stored, "zh-cn");
 
-        assert!(set_chat_message_language_core(&db, "klingon".to_string()).await.is_err());
+        assert!(set_chat_message_language_core(&db, "klingon".to_string())
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -695,13 +709,21 @@ mod tests {
     #[tokio::test]
     async fn chat_event_filter_roundtrip_some_and_none() {
         let db = fresh_in_memory_db().await;
-        set_chat_event_filter_core(&db, Some(vec!["session_started".into(), "turn_complete".into()]))
-            .await
-            .expect("set some");
+        set_chat_event_filter_core(
+            &db,
+            Some(vec!["session_started".into(), "turn_complete".into()]),
+        )
+        .await
+        .expect("set some");
         let got = get_chat_event_filter_core(&db).await.expect("get some");
-        assert_eq!(got.as_deref(), Some(["session_started".to_string(), "turn_complete".to_string()].as_slice()));
+        assert_eq!(
+            got.as_deref(),
+            Some(["session_started".to_string(), "turn_complete".to_string()].as_slice())
+        );
 
-        set_chat_event_filter_core(&db, None).await.expect("set none");
+        set_chat_event_filter_core(&db, None)
+            .await
+            .expect("set none");
         let got_none = get_chat_event_filter_core(&db).await.expect("get none");
         assert!(got_none.is_none());
     }

@@ -18,13 +18,17 @@ pub struct FolderIdParams {
 pub async fn load_folder_history(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<Vec<FolderHistoryEntry>>, AppCommandError> {
-    Ok(Json(folder_commands::load_folder_history_core(&state.db).await?))
+    Ok(Json(
+        folder_commands::load_folder_history_core(&state.db).await?,
+    ))
 }
 
 pub async fn list_open_folders(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<Vec<FolderHistoryEntry>>, AppCommandError> {
-    Ok(Json(folder_commands::list_open_folders_core(&state.db).await?))
+    Ok(Json(
+        folder_commands::list_open_folders_core(&state.db).await?,
+    ))
 }
 
 pub async fn get_folder(

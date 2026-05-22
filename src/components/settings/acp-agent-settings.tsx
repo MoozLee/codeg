@@ -268,6 +268,10 @@ const CLAUDE_EFFORT_LEVEL_VALUES: ReadonlyArray<
 function normalizeClaudeEffortLevel(value: unknown): ClaudeEffortLevel {
   if (typeof value !== "string") return ""
   const normalized = value.trim().toLowerCase()
+  // Upstream claude-agent-acp >=0.37 exposes the sentinel string "default";
+  // collapse it to "" so our UI's "默认/Default" placeholder stays
+  // canonical regardless of which side wrote the config.
+  if (normalized === "" || normalized === "default") return ""
   if (
     normalized === "low" ||
     normalized === "medium" ||

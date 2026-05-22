@@ -325,7 +325,7 @@
       },
       "close_all_file_tabs": {
         "title": "すべてのファイルタブを閉じる",
-        "description": "ファイルモードでのみすべてのファイルタブを閉じます"
+        "description": "ファイルペインがアクティブなときに開いているすべてのファイルタブを閉じます"
       },
       "send_message": {
         "title": "メッセージを送信",
@@ -849,12 +849,6 @@
       "openFile": "ファイルを開く",
       "viewDiff": "差分を見る",
       "push": "プッシュ..."
-    },
-    "modes": {
-      "conversation": "会話モード",
-      "fusion": "フュージョンモード",
-      "files": "ファイルモード",
-      "workspaceModesAria": "ワークスペースモード"
     },
     "statusLabels": {
       "in_progress": "進行中",
@@ -1892,7 +1886,7 @@
           "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> で内蔵ターミナル、<shortcut>{toggleSidebar}</shortcut> でサイドバーを切り替えできます",
           "customShortcuts": "すべてのショートカットは「設定 → ショートカット」で自由に変更できます",
           "webService": "「設定 → Web サービス」を有効にすると、チームメンバーが同じ codeg にブラウザでアクセスできます",
-          "fusionMode": "上部ツールバーの「Fusion モード」に切り替えると、会話とファイル / Git パネルが並んで表示されます",
+          "fusionMode": "ファイルや差分を開くと、会話の横に自動で表示されます。",
           "quickMessages": "入力欄横の + ボタンから「クイックメッセージ」を選ぶと、保存済みのスニペットを一発で挿入できます（「設定 → クイックメッセージ」で管理）",
           "experts": "+ ボタンの「エキスパートスキル」メニューから、デバッグや計画などのプリセットロールをワンクリックで読み込めます"
         }
@@ -1949,19 +1943,12 @@
         "thoughtForSeconds": "考えた"
       },
       "linkSafety": {
-        "localFileTitle": "ローカルファイルを開きますか？",
-        "externalLinkTitle": "外部リンクを開きますか？",
-        "localFileDescription": "ファイルパネルでローカルファイルを開こうとしています。",
-        "externalLinkDescription": "外部ウェブサイトにアクセスしようとしています。",
-        "cancel": "キャンセル",
-        "opening": "開いています…",
-        "openFile": "ファイルを開く",
-        "openLink": "リンクを開く",
         "errorCannotOpen": "ローカルファイルを開けません",
         "errorNoWorkspace": "現在アクティブなワークスペースフォルダがありません。",
         "errorOutsideWorkspace": "ファイルが現在のワークスペースフォルダの外にあります。",
         "errorFailedOpen": "ローカルファイルを開けませんでした",
-        "errorFailedLink": "リンクを開けませんでした"
+        "errorFailedLink": "リンクを開けませんでした",
+        "errorUnsupportedLinkProtocol": "このリンクプロトコルはサポートされていません。"
       },
       "messageList": {
         "attachedResources": "添付リソース",
@@ -2110,6 +2097,7 @@
           "search": "{count} 件を検索",
           "command": "{count} 件のコマンドを実行",
           "read": "ファイルを {count} 回読み取り",
+          "memory": "{count} 件の記憶を呼び出し",
           "edit": "ファイルを {count} 回編集",
           "fetch": "{count} 件のリソースを取得",
           "think": "{count} 回思考",

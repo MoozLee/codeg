@@ -2254,10 +2254,7 @@ fn cascade_update_agent_config(
             }
             match codex_model {
                 CodexModelAction::Set(model) => {
-                    table.insert(
-                        "model".to_string(),
-                        toml::Value::String(model.to_string()),
-                    );
+                    table.insert("model".to_string(), toml::Value::String(model.to_string()));
                 }
                 CodexModelAction::Clear => {
                     table.remove("model");
@@ -2966,23 +2963,20 @@ pub(crate) async fn acp_update_agent_env_core(
         let provider = crate::db::service::model_provider_service::get_by_id(&db.conn, pid)
             .await
             .map_err(|e| AcpError::protocol(e.to_string()))?
-            .ok_or_else(|| {
-                AcpError::protocol(format!("model provider not found: {pid}"))
-            })?;
+            .ok_or_else(|| AcpError::protocol(format!("model provider not found: {pid}")))?;
 
         // Reject cross-type binding: provider.model is formatted for its declared
         // agent_type (Claude = JSON, Codex/Gemini/others = plain string). Binding
         // a mismatched provider would parse the model under the wrong format and
         // silently write invalid env / config.toml entries.
-        let provider_agent_type: AgentType = serde_json::from_value(
-            serde_json::Value::String(provider.agent_type.clone()),
-        )
-        .map_err(|_| {
-            AcpError::protocol(format!(
-                "model provider {pid} has invalid agent_type: {}",
-                provider.agent_type
-            ))
-        })?;
+        let provider_agent_type: AgentType =
+            serde_json::from_value(serde_json::Value::String(provider.agent_type.clone()))
+                .map_err(|_| {
+                    AcpError::protocol(format!(
+                        "model provider {pid} has invalid agent_type: {}",
+                        provider.agent_type
+                    ))
+                })?;
         if provider_agent_type != agent_type {
             return Err(AcpError::protocol(format!(
                 "model provider {pid} is for {provider_agent_type}, cannot be bound to {agent_type}"

@@ -117,8 +117,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "Claude Code",
             description: "ACP wrapper for Anthropic's Claude",
             distribution: AgentDistribution::Npx {
-                version: "0.36.1",
-                package: "@agentclientprotocol/claude-agent-acp@0.36.1",
+                version: "0.37.0",
+                package: "@agentclientprotocol/claude-agent-acp@0.37.0",
                 cmd: "claude-agent-acp",
                 args: &[],
                 env: &[],
@@ -167,12 +167,12 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "Gemini CLI",
             description: "Google's official CLI for Gemini",
             distribution: AgentDistribution::Npx {
-                version: "0.42.0",
-                package: "@google/gemini-cli@0.42.0",
+                version: "0.43.0",
+                package: "@google/gemini-cli@0.43.0",
                 cmd: "gemini",
                 args: &["--acp", "--skip-trust"],
                 env: &[],
-                node_required: None,
+                node_required: Some("20.0.0"),
             },
         },
         AgentType::OpenClaw => AcpAgentMeta {
@@ -180,12 +180,12 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "OpenClaw",
             description: "OpenClaw is a personal AI assistant you run on your own devices.",
             distribution: AgentDistribution::Npx {
-                version: "2026.5.6",
-                package: "openclaw@2026.5.6",
+                version: "2026.5.20",
+                package: "openclaw@2026.5.20",
                 cmd: "openclaw",
                 args: &["acp"],
                 env: &[],
-                node_required: Some("22.12.0"),
+                node_required: Some("22.19.0"),
             },
         },
         AgentType::Cline => AcpAgentMeta {
@@ -193,8 +193,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "Cline",
             description: "Autonomous coding agent CLI",
             distribution: AgentDistribution::Npx {
-                version: "2.18.0",
-                package: "cline@2.18.0",
+                version: "3.0.9",
+                package: "cline@3.0.9",
                 cmd: "cline",
                 args: &["--acp"],
                 env: &[],
@@ -206,37 +206,105 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "OpenCode",
             description: "The open source coding agent",
             distribution: AgentDistribution::Binary {
-                version: "1.15.5",
+                version: "1.15.7",
                 cmd: "opencode",
                 args: &["acp"],
                 env: &[],
                 platforms: &[
                     PlatformBinary {
                         platform: "darwin-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.5/opencode-darwin-arm64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.7/opencode-darwin-arm64.zip",
                     },
                     PlatformBinary {
                         platform: "darwin-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.5/opencode-darwin-x64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.7/opencode-darwin-x64.zip",
                     },
                     PlatformBinary {
                         platform: "linux-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.5/opencode-linux-arm64.tar.gz",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.7/opencode-linux-arm64.tar.gz",
                     },
                     PlatformBinary {
                         platform: "linux-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.5/opencode-linux-x64.tar.gz",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.7/opencode-linux-x64.tar.gz",
                     },
                     PlatformBinary {
                         platform: "windows-aarch64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.5/opencode-windows-arm64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.7/opencode-windows-arm64.zip",
                     },
                     PlatformBinary {
                         platform: "windows-x86_64",
-                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.5/opencode-windows-x64.zip",
+                        url: "https://github.com/anomalyco/opencode/releases/download/v1.15.7/opencode-windows-x64.zip",
                     },
                 ],
             },
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_npx_version(
+        agent_type: AgentType,
+        expected_version: &str,
+        expected_package: &str,
+        expected_node_required: Option<&str>,
+    ) {
+        let meta = get_agent_meta(agent_type);
+        match meta.distribution {
+            AgentDistribution::Npx {
+                version,
+                package,
+                node_required,
+                ..
+            } => {
+                assert_eq!(version, expected_version);
+                assert_eq!(package, expected_package);
+                assert_eq!(node_required, expected_node_required);
+                assert_eq!(meta.registry_version(), Some(expected_version));
+            }
+            AgentDistribution::Binary { .. } => {
+                panic!("expected npx distribution for {agent_type:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn registry_pins_current_acp_agent_versions() {
+        assert_npx_version(
+            AgentType::Gemini,
+            "0.43.0",
+            "@google/gemini-cli@0.43.0",
+            Some("20.0.0"),
+        );
+        assert_npx_version(
+            AgentType::OpenClaw,
+            "2026.5.20",
+            "openclaw@2026.5.20",
+            Some("22.19.0"),
+        );
+        assert_npx_version(AgentType::Cline, "3.0.9", "cline@3.0.9", None);
+
+        let meta = get_agent_meta(AgentType::OpenCode);
+        match meta.distribution {
+            AgentDistribution::Binary {
+                version, platforms, ..
+            } => {
+                assert_eq!(version, "1.15.7");
+                assert_eq!(meta.registry_version(), Some("1.15.7"));
+                for platform in platforms {
+                    assert!(
+                        platform.url.contains("/releases/download/v1.15.7/"),
+                        "{} URL did not use v1.15.7: {}",
+                        platform.platform,
+                        platform.url
+                    );
+                }
+            }
+            AgentDistribution::Npx { .. } => {
+                panic!("expected binary distribution for OpenCode");
+            }
+        }
     }
 }

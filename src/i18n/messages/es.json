@@ -325,7 +325,7 @@
       },
       "close_all_file_tabs": {
         "title": "Cerrar todas las pestañas de archivos",
-        "description": "Cierra todas las pestañas de archivos solo en modo de archivos"
+        "description": "Cierra todas las pestañas de archivos abiertas cuando el panel de archivos está activo"
       },
       "send_message": {
         "title": "Enviar mensaje",
@@ -849,12 +849,6 @@
       "openFile": "Abrir archivo",
       "viewDiff": "Ver Diff",
       "push": "Enviar..."
-    },
-    "modes": {
-      "conversation": "Modo conversación",
-      "fusion": "Modo fusión",
-      "files": "Modo archivos",
-      "workspaceModesAria": "Modos del espacio de trabajo"
     },
     "statusLabels": {
       "in_progress": "En progreso",
@@ -1892,7 +1886,7 @@
           "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> abre la terminal integrada, <shortcut>{toggleSidebar}</shortcut> alterna la barra lateral.",
           "customShortcuts": "Todos los atajos se pueden reasignar en Ajustes → Atajos.",
           "webService": "Activa Ajustes → Servicio web para que tu equipo acceda al mismo codeg desde un navegador.",
-          "fusionMode": "Cambia al modo Fusión desde la barra superior para ver la conversación junto a los archivos / Git.",
+          "fusionMode": "Abre un archivo o diff para mostrarlo automáticamente junto a la conversación.",
           "quickMessages": "Abre el botón + junto a la entrada y elige Mensajes rápidos para insertar un fragmento guardado (gestiónalos en Ajustes → Mensajes rápidos).",
           "experts": "El botón + tiene un menú Habilidades expertas: carga roles como Depuración o Planificación con un clic."
         }
@@ -1949,19 +1943,12 @@
         "thoughtForSeconds": "Pensamiento"
       },
       "linkSafety": {
-        "localFileTitle": "¿Abrir archivo local?",
-        "externalLinkTitle": "¿Abrir enlace externo?",
-        "localFileDescription": "Está a punto de abrir un archivo local en el panel de archivos.",
-        "externalLinkDescription": "Está a punto de visitar un sitio web externo.",
-        "cancel": "Cancelar",
-        "opening": "Abriendo…",
-        "openFile": "Abrir archivo",
-        "openLink": "Abrir enlace",
         "errorCannotOpen": "No se puede abrir el archivo local",
         "errorNoWorkspace": "No hay ninguna carpeta de espacio de trabajo activa.",
         "errorOutsideWorkspace": "El archivo está fuera de la carpeta del espacio de trabajo actual.",
         "errorFailedOpen": "Error al abrir el archivo local",
-        "errorFailedLink": "Error al abrir el enlace"
+        "errorFailedLink": "Error al abrir el enlace",
+        "errorUnsupportedLinkProtocol": "Este protocolo de enlace no es compatible."
       },
       "messageList": {
         "attachedResources": "Recursos adjuntos",
@@ -2110,6 +2097,7 @@
           "search": "{count, plural, one {Exploró # búsqueda} other {Exploró # búsquedas}}",
           "command": "{count, plural, one {Ejecutó # comando} other {Ejecutó # comandos}}",
           "read": "{count, plural, one {Leyó archivos # vez} other {Leyó archivos # veces}}",
+          "memory": "{count, plural, one {Recordó # memoria} other {Recordó # memorias}}",
           "edit": "{count, plural, one {Editó archivos # vez} other {Editó archivos # veces}}",
           "fetch": "{count, plural, one {Recuperó # recurso} other {Recuperó # recursos}}",
           "think": "{count, plural, one {Pensó # vez} other {Pensó # veces}}",

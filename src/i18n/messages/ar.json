@@ -325,7 +325,7 @@
       },
       "close_all_file_tabs": {
         "title": "إغلاق جميع تبويبات الملفات",
-        "description": "إغلاق جميع تبويبات الملفات في وضع الملفات فقط"
+        "description": "إغلاق جميع تبويبات الملفات المفتوحة عندما تكون لوحة الملفات نشطة"
       },
       "send_message": {
         "title": "إرسال الرسالة",
@@ -849,12 +849,6 @@
       "openFile": "فتح الملف",
       "viewDiff": "عرض Diff",
       "push": "دفع..."
-    },
-    "modes": {
-      "conversation": "وضع المحادثة",
-      "fusion": "وضع الدمج",
-      "files": "وضع الملفات",
-      "workspaceModesAria": "أوضاع مساحة العمل"
     },
     "statusLabels": {
       "in_progress": "قيد التنفيذ",
@@ -1892,7 +1886,7 @@
           "shortcutsTerminalSidebar": "<shortcut>{toggleTerminal}</shortcut> يفتح الطرفية المدمجة، و<shortcut>{toggleSidebar}</shortcut> يبدّل الشريط الجانبي.",
           "customShortcuts": "يمكن إعادة تعيين جميع الاختصارات من «الإعدادات → الاختصارات».",
           "webService": "فعّل «الإعدادات → خدمة الويب» ليتمكن أعضاء الفريق من الوصول إلى نفس codeg عبر المتصفح.",
-          "fusionMode": "بدّل إلى وضع Fusion من شريط الأدوات العلوي لعرض المحادثة بجوار الملفات / Git.",
+          "fusionMode": "افتح ملفًا أو فرقًا لعرضه تلقائيًا بجوار المحادثة.",
           "quickMessages": "افتح زر + بجانب الإدخال واختر «الرسائل السريعة» لإدراج مقتطف محفوظ (تُدار من «الإعدادات → الرسائل السريعة»).",
           "experts": "يحتوي زر + على قائمة «مهارات الخبراء» — حمّل أدوارًا مثل التصحيح أو التخطيط بنقرة واحدة."
         }
@@ -1949,19 +1943,12 @@
         "thoughtForSeconds": "تفكير"
       },
       "linkSafety": {
-        "localFileTitle": "فتح ملف محلي؟",
-        "externalLinkTitle": "فتح رابط خارجي؟",
-        "localFileDescription": "أنت على وشك فتح ملف محلي في لوحة الملفات.",
-        "externalLinkDescription": "أنت على وشك زيارة موقع ويب خارجي.",
-        "cancel": "إلغاء",
-        "opening": "جارٍ الفتح…",
-        "openFile": "فتح الملف",
-        "openLink": "فتح الرابط",
         "errorCannotOpen": "تعذر فتح الملف المحلي",
         "errorNoWorkspace": "لا يوجد مجلد مساحة عمل نشط حالياً.",
         "errorOutsideWorkspace": "الملف خارج مجلد مساحة العمل الحالي.",
         "errorFailedOpen": "فشل فتح الملف المحلي",
-        "errorFailedLink": "فشل فتح الرابط"
+        "errorFailedLink": "فشل فتح الرابط",
+        "errorUnsupportedLinkProtocol": "بروتوكول الرابط هذا غير مدعوم."
       },
       "messageList": {
         "attachedResources": "الموارد المرفقة",
@@ -2110,6 +2097,7 @@
           "search": "{count, plural, zero {بحث صفر مرة} one {بحث مرة واحدة} two {بحث مرتين} few {بحث # مرات} many {بحث # مرة} other {بحث # مرة}}",
           "command": "{count, plural, zero {تنفيذ صفر أمر} one {تنفيذ أمر واحد} two {تنفيذ أمرين} few {تنفيذ # أوامر} many {تنفيذ # أمراً} other {تنفيذ # أمر}}",
           "read": "{count, plural, zero {قراءة ملفات صفر مرة} one {قراءة ملفات مرة واحدة} two {قراءة ملفات مرتين} few {قراءة ملفات # مرات} many {قراءة ملفات # مرة} other {قراءة ملفات # مرة}}",
+          "memory": "{count, plural, zero {استرجاع صفر ذاكرة} one {استرجاع ذاكرة واحدة} two {استرجاع ذاكرتين} few {استرجاع # ذكريات} many {استرجاع # ذكرى} other {استرجاع # ذكرى}}",
           "edit": "{count, plural, zero {تعديل ملفات صفر مرة} one {تعديل ملفات مرة واحدة} two {تعديل ملفات مرتين} few {تعديل ملفات # مرات} many {تعديل ملفات # مرة} other {تعديل ملفات # مرة}}",
           "fetch": "{count, plural, zero {جلب صفر مورد} one {جلب مورد واحد} two {جلب موردين} few {جلب # موارد} many {جلب # مورداً} other {جلب # مورد}}",
           "think": "{count, plural, zero {تفكير صفر مرة} one {تفكير مرة واحدة} two {تفكير مرتين} few {تفكير # مرات} many {تفكير # مرة} other {تفكير # مرة}}",

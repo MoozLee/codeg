@@ -103,8 +103,7 @@ export function FileWorkspaceTabBar() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const shouldHandleShortcut =
-        mode === "files" || (mode === "fusion" && activePane === "files")
+      const shouldHandleShortcut = mode === "fusion" && activePane === "files"
       if (!shouldHandleShortcut) return
       if (matchShortcutEvent(event, shortcuts.close_all_file_tabs)) {
         event.preventDefault()

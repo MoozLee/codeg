@@ -64,8 +64,9 @@ fn validate_model(agent_type: &str, model: Option<&str>) -> Result<(), AppComman
     }
     // ClaudeCode requires a JSON object; other agents accept a plain string.
     if agent_type == "claude_code" {
-        let value: serde_json::Value = serde_json::from_str(raw)
-            .map_err(|e| AppCommandError::invalid_input(format!("Invalid Claude model JSON: {e}")))?;
+        let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| {
+            AppCommandError::invalid_input(format!("Invalid Claude model JSON: {e}"))
+        })?;
         if !value.is_object() {
             return Err(AppCommandError::invalid_input(
                 "Claude model must be a JSON object",
@@ -96,16 +97,10 @@ pub async fn create_model_provider_core(
     validate_agent_type(&agent_type)?;
     validate_model(&agent_type, model.as_deref())?;
 
-    let model_row = model_provider_service::create(
-        &db.conn,
-        name,
-        api_url,
-        api_key,
-        agent_type,
-        model,
-    )
-    .await
-    .map_err(AppCommandError::from)?;
+    let model_row =
+        model_provider_service::create(&db.conn, name, api_url, api_key, agent_type, model)
+            .await
+            .map_err(AppCommandError::from)?;
     Ok(ModelProviderInfo::from(model_row))
 }
 

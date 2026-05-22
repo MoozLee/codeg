@@ -56,6 +56,7 @@ import {
   PlusIcon,
   WrenchIcon,
   ChevronRightIcon,
+  BrainIcon,
 } from "lucide-react"
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -825,6 +826,7 @@ function getToolIcon(
   if (name === "apply_patch") return <FilePenLineIcon className={ICON_CLASS} />
   if (name === "glob" || name === "grep")
     return <SearchIcon className={ICON_CLASS} />
+  if (name === "memory_recall") return <BrainIcon className={ICON_CLASS} />
   if (name === "webfetch" || name === "websearch")
     return <GlobeIcon className={ICON_CLASS} />
   if (name === "todowrite") return <ListTodoIcon className={ICON_CLASS} />

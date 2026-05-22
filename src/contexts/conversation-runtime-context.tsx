@@ -411,6 +411,7 @@ function buildStreamingTurnsFromLiveMessage(
       title: info.title,
       kind: info.kind,
       rawInput: info.raw_input,
+      meta: info.meta,
     })
     inferredNames.set(info.tool_call_id, name)
     return name
