@@ -396,8 +396,27 @@ impl DelegationBroker {
             );
         }
 
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(outcome)) => {
+        enum WaitResult {
+            Completed(DelegationOutcome),
+            CompletionDropped,
+            TimedOut,
+        }
+
+        let wait_result = if timeout.is_zero() {
+            match rx.await {
+                Ok(outcome) => WaitResult::Completed(outcome),
+                Err(_) => WaitResult::CompletionDropped,
+            }
+        } else {
+            match tokio::time::timeout(timeout, rx).await {
+                Ok(Ok(outcome)) => WaitResult::Completed(outcome),
+                Ok(Err(_)) => WaitResult::CompletionDropped,
+                Err(_) => WaitResult::TimedOut,
+            }
+        };
+
+        match wait_result {
+            WaitResult::Completed(outcome) => {
                 // complete_call already removed from `pending`, wrote meta,
                 // emitted DelegationCompleted, and disconnected; this is a
                 // belt-and-braces idempotent prune in case complete_call
@@ -406,7 +425,7 @@ impl DelegationBroker {
                 self.pending.inner.lock().await.remove(&call_id);
                 outcome
             }
-            Ok(Err(_)) => {
+            WaitResult::CompletionDropped => {
                 // The sender was dropped before sending — should not happen in
                 // practice (complete_call always sends before drop), but be defensive.
                 // Drain pending FIRST so a racing complete_call (from a late
@@ -442,7 +461,7 @@ impl DelegationBroker {
                     Some(child_conversation_id),
                 )
             }
-            Err(_) => {
+            WaitResult::TimedOut => {
                 // Timeout. Drain pending FIRST so the subsequent
                 // spawner.disconnect (which fires the child's
                 // StatusChanged{Disconnected} → forward_disconnect_to_broker →
@@ -907,6 +926,48 @@ mod tests {
         assert_eq!(mock.cancels.lock().await.as_slice(), &["c1"]);
         assert_eq!(mock.disconnects.lock().await.as_slice(), &["c1"]);
         assert_eq!(broker.pending_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn zero_timeout_waits_until_completion() {
+        let mock = Arc::new(MockSpawner::new());
+        mock.queue_spawn(Ok("c1".into())).await;
+        mock.queue_send(Ok(99)).await;
+        let broker =
+            DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        let mut req = request(1, "pt-1");
+        req.timeout_seconds = Some(0);
+
+        let driver = {
+            let broker = broker.clone();
+            tokio::spawn(async move { broker.handle_request(req).await })
+        };
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(broker.pending_count().await, 1);
+        assert!(mock.cancels.lock().await.is_empty());
+
+        let call_id = broker.peek_first_pending_call_id().await.unwrap();
+        broker
+            .complete_call(
+                &call_id,
+                DelegationOutcome::Ok(DelegationSuccess {
+                    text: "done".into(),
+                    child_conversation_id: 99,
+                    child_agent_type: AgentType::Codex,
+                    turn_count: 1,
+                    duration_ms: 50,
+                    token_usage: None,
+                }),
+            )
+            .await;
+
+        let outcome = driver.await.unwrap();
+        match outcome {
+            DelegationOutcome::Ok(s) => assert_eq!(s.text, "done"),
+            other => panic!("expected Ok, got {other:?}"),
+        }
+        assert_eq!(mock.disconnects.lock().await.as_slice(), &["c1"]);
     }
 
     // -- Task 4.6: parent-cancel cascade -----------------------------------

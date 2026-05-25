@@ -36,6 +36,7 @@ pub mod depth;
 pub mod event_emitter;
 pub mod listener;
 pub mod meta_writer;
+pub mod parent_watcher;
 pub mod spawner;
 pub mod transport;
 pub mod types;

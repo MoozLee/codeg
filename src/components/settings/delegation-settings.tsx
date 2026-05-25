@@ -6,7 +6,8 @@
  *
  *   * `enabled` — feature kill switch
  *   * `depth_limit` — bounds chain depth (1..=8)
- *   * `default_timeout_seconds` — broker fallback when LLM omits it (30..=3600)
+ *   * `default_timeout_seconds` — broker fallback when LLM omits it (0..=3600,
+ *     where 0 disables the timeout)
  *
  * Mounted under `/settings/general` next to the terminal and rendering
  * sections, because delegation is a global feature — not per-agent — and
@@ -30,7 +31,7 @@ import {
 
 const DEPTH_MIN = 1
 const DEPTH_MAX = 8
-const TIMEOUT_MIN = 30
+const TIMEOUT_MIN = 0
 const TIMEOUT_MAX = 3600
 
 function clamp(n: number, lo: number, hi: number): number {

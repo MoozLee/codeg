@@ -1109,6 +1109,12 @@ async fn inject_codeg_delegate_mcp(
         injection.socket_path.to_string_lossy().to_string(),
         "--token".to_string(),
         token.clone(),
+        // Self-cleanup watchdog: codeg-mcp exits when this PID is gone so
+        // orphaned companions can't keep the binary file locked across an
+        // installer upgrade (Windows) or hold a stale broker connection
+        // (any platform).
+        "--parent-pid".to_string(),
+        std::process::id().to_string(),
     ]);
     servers.push(McpServer::Stdio(server));
     Some(token)

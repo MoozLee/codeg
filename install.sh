@@ -226,6 +226,12 @@ if [ "${#PATH_CONFLICTS[@]}" -gt 0 ]; then
 fi
 
 # ── Stop running service before upgrade ──
+#
+# Stop codeg-mcp too: on Unix `cp` over a running binary succeeds (the
+# kernel keeps the old inode alive for the running process), so this is
+# not required to make the install itself work — but stale companions
+# would keep talking to the OLD inode and never pick up the new logic.
+# Killing them lets the new server spawn a fresh, matching companion.
 
 RESTARTED_PIDS=""
 if pgrep -x codeg-server >/dev/null 2>&1; then
@@ -247,6 +253,25 @@ if pgrep -x codeg-server >/dev/null 2>&1; then
     fi
   fi
   echo "codeg-server stopped."
+fi
+
+if pgrep -x codeg-mcp >/dev/null 2>&1; then
+  echo "Stopping running codeg-mcp companion process(es)..."
+  MCP_PIDS=$(pgrep -x codeg-mcp || true)
+  if [ -n "$MCP_PIDS" ]; then
+    kill $MCP_PIDS 2>/dev/null || true
+    # Companions are short-lived; give them a brief moment to exit on
+    # SIGTERM before we escalate.
+    for i in $(seq 1 3); do
+      if ! pgrep -x codeg-mcp >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+    if pgrep -x codeg-mcp >/dev/null 2>&1; then
+      kill -9 $(pgrep -x codeg-mcp) 2>/dev/null || true
+    fi
+  fi
 fi
 
 # ── Download and extract ──

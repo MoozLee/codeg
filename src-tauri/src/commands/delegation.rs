@@ -30,7 +30,7 @@ pub const KEY_DELEGATION_TIMEOUT: &str = "delegation.default_timeout_seconds";
 
 pub const DEPTH_MIN: u32 = 1;
 pub const DEPTH_MAX: u32 = 8;
-pub const TIMEOUT_MIN_SECS: u64 = 30;
+pub const TIMEOUT_MIN_SECS: u64 = 0;
 pub const TIMEOUT_MAX_SECS: u64 = 3600;
 
 /// Newtype so the Tauri managed-state lookup can distinguish the delegation
@@ -199,11 +199,22 @@ mod tests {
         let s = DelegationSettings {
             enabled: true,
             depth_limit: 99,
-            default_timeout_seconds: 10,
+            default_timeout_seconds: 9999,
         }
         .clamped();
         assert_eq!(s.depth_limit, DEPTH_MAX);
-        assert_eq!(s.default_timeout_seconds, TIMEOUT_MIN_SECS);
+        assert_eq!(s.default_timeout_seconds, TIMEOUT_MAX_SECS);
+    }
+
+    #[test]
+    fn settings_allow_zero_timeout() {
+        let s = DelegationSettings {
+            enabled: true,
+            depth_limit: 2,
+            default_timeout_seconds: 0,
+        }
+        .clamped();
+        assert_eq!(s.default_timeout_seconds, 0);
     }
 
     #[tokio::test]
@@ -255,12 +266,36 @@ mod tests {
             DelegationSettings {
                 enabled: true,
                 depth_limit: 999,
-                default_timeout_seconds: 10,
+                default_timeout_seconds: 9999,
             },
         )
         .await
         .unwrap();
         assert_eq!(saved.depth_limit, DEPTH_MAX);
-        assert_eq!(saved.default_timeout_seconds, TIMEOUT_MIN_SECS);
+        assert_eq!(saved.default_timeout_seconds, TIMEOUT_MAX_SECS);
+    }
+
+    #[tokio::test]
+    async fn set_persists_zero_timeout_and_applies_to_broker() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let broker = make_broker();
+        let saved = set_delegation_settings_core(
+            &db.conn,
+            &broker,
+            DelegationSettings {
+                enabled: true,
+                depth_limit: 2,
+                default_timeout_seconds: 0,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(saved.default_timeout_seconds, 0);
+
+        let loaded = load_delegation_settings(&db.conn).await;
+        assert_eq!(loaded.default_timeout_seconds, 0);
+
+        let cfg = broker.config_snapshot().await;
+        assert_eq!(cfg.default_timeout, Duration::from_secs(0));
     }
 }

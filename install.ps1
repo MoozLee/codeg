@@ -178,6 +178,11 @@ if ($PathConflicts.Count -gt 0) {
 }
 
 # ── Stop running service before upgrade ──
+#
+# codeg-mcp.exe is the stdio MCP companion spawned per ACP session.
+# On Windows, Copy-Item -Force fails with a sharing violation if the
+# target .exe is currently running (the OS holds an exclusive write
+# lock on executable images). Stop both binaries before overwriting.
 
 $ServerProcesses = Get-Process -Name "codeg-server" -ErrorAction SilentlyContinue
 if ($ServerProcesses) {
@@ -192,6 +197,18 @@ if ($ServerProcesses) {
         Start-Sleep -Seconds 1
     }
     Write-Host "codeg-server stopped."
+}
+
+$McpProcesses = Get-Process -Name "codeg-mcp" -ErrorAction SilentlyContinue
+if ($McpProcesses) {
+    Write-Host "Stopping running codeg-mcp companion process(es)..."
+    $McpProcesses | Stop-Process -Force
+    Start-Sleep -Seconds 1
+    $StillRunning = Get-Process -Name "codeg-mcp" -ErrorAction SilentlyContinue
+    if ($StillRunning) {
+        $StillRunning | Stop-Process -Force
+        Start-Sleep -Seconds 1
+    }
 }
 
 # ── Download and extract ──

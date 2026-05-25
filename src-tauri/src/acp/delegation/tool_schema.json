@@ -1,6 +1,6 @@
 {
   "name": "delegate_to_agent",
-  "description": "Delegate a self-contained task to another local AI coding agent and wait for its result. The sub-agent runs as an independent session with no access to this conversation's history; pass everything it needs in `task`. Use sparingly — each call spawns a full agent process and may take minutes.",
+  "description": "Delegate a self-contained task to another local AI agent and return the sub-agent's result. The sub-agent runs in a separate session without access to the current conversation, so include all required context in `task`.",
   "inputSchema": {
     "type": "object",
     "required": ["agent_type", "task"],
@@ -15,22 +15,22 @@
           "cline",
           "open_claw"
         ],
-        "description": "Which agent type to spawn for this sub-task."
+        "description": "Agent type to launch as the sub-agent for this delegated task."
       },
       "task": {
         "type": "string",
-        "description": "Complete, self-contained task description. The sub-agent does NOT see this conversation's prior messages."
+        "description": "Complete task prompt for the sub-agent, including the goal, relevant context, constraints, and expected output. The sub-agent cannot see this conversation."
       },
       "working_dir": {
         "type": "string",
-        "description": "Optional absolute path. Defaults to the parent session's working directory."
+        "description": "Absolute directory where the sub-agent should run. Defaults to the parent session's current working directory."
       },
       "timeout_seconds": {
         "type": "integer",
-        "minimum": 30,
+        "minimum": 0,
         "maximum": 3600,
         "default": 600,
-        "description": "Per-call timeout. Defaults to 600 seconds."
+        "description": "Timeout in seconds for the sub-agent run. Defaults to 600 seconds; 0 disables the timeout."
       }
     }
   }

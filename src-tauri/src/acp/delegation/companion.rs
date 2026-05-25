@@ -221,6 +221,12 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(agents.len(), 6);
+        let timeout = &tools[0]["inputSchema"]["properties"]["timeout_seconds"];
+        assert_eq!(timeout["minimum"], 0);
+        assert!(timeout["description"]
+            .as_str()
+            .unwrap()
+            .contains("0 disables the timeout"));
     }
 
     #[tokio::test]
