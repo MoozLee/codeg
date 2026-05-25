@@ -1102,6 +1102,7 @@ const ConversationTabView = memo(function ConversationTabView({
   const messageListNode = (
     <MessageListView
       conversationId={effectiveConversationId}
+      anchorStorageConversationId={dbConversationId ?? undefined}
       agentType={selectedAgent}
       connStatus={connStatus}
       isActive={isActive}
