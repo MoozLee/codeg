@@ -306,12 +306,20 @@ jobs:
                 ? `No categorized feature or bug fix commits were found since ${releaseBase.tag}.`
                 : `No categorized feature or bug fix commits were found for ${tag}.`;
             const chineseNotesPath = `.github/release-notes/${tag}.zh.md`;
-            const chineseNotes = existsSync(chineseNotesPath)
-              ? readFileSync(chineseNotesPath, "utf8").trim()
-              : "";
-            const finalReleaseBody = chineseNotes
-              ? `${releaseBody}\n\n## 中文说明\n\n${chineseNotes}`
-              : releaseBody;
+            if (!existsSync(chineseNotesPath)) {
+              core.setFailed(
+                `Missing Simplified Chinese release notes file: ${chineseNotesPath}`,
+              );
+              return;
+            }
+            const chineseNotes = readFileSync(chineseNotesPath, "utf8").trim();
+            if (!chineseNotes) {
+              core.setFailed(
+                `Simplified Chinese release notes file is empty: ${chineseNotesPath}`,
+              );
+              return;
+            }
+            const finalReleaseBody = `${releaseBody}\n\n## 中文说明\n\n${chineseNotes}`;
             let release;
 
             try {
