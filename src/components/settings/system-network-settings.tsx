@@ -148,9 +148,10 @@ let processStartDisableHwAccel: boolean | null = null
 
 export function SystemNetworkSettings() {
   const t = useTranslations("SystemSettings")
-  // Backend-driven label keys are dynamic strings, so we widen `t` for that
-  // single call site rather than casting at every use.
-  const tDynamic = t as unknown as (key: string) => string
+  const tGeneral = useTranslations("GeneralSettings")
+  // Backend-driven label keys are dynamic strings, so we widen `tGeneral` for
+  // that single call site rather than casting at every use.
+  const tDynamic = tGeneral as unknown as (key: string) => string
   const tLanguage = useTranslations("Language")
   const locale = useLocale()
   const { languageSettings, languageSettingsLoaded, setLanguageSettings } =
@@ -411,12 +412,12 @@ export function SystemNetworkSettings() {
         }
       } catch (err) {
         const message = toErrorMessage(err)
-        toast.error(t("terminalSaveFailed", { message }))
+        toast.error(tGeneral("terminalSaveFailed", { message }))
       } finally {
         setSavingTerminal(false)
       }
     },
-    [t]
+    [tGeneral]
   )
 
   const onShellSelectChange = useCallback(
@@ -579,12 +580,12 @@ export function SystemNetworkSettings() {
       } catch (err) {
         setDisableHwAccel(prev)
         const message = toErrorMessage(err)
-        toast.error(t("renderingSaveFailed", { message }))
+        toast.error(tGeneral("renderingSaveFailed", { message }))
       } finally {
         setSavingRendering(false)
       }
     },
-    [t]
+    [tGeneral]
   )
 
   const restartNow = useCallback(async () => {
@@ -592,9 +593,9 @@ export function SystemNetworkSettings() {
       await relaunchApp()
     } catch (err) {
       const message = toErrorMessage(err)
-      toast.error(t("restartFailed", { message }))
+      toast.error(tGeneral("restartFailed", { message }))
     }
-  }, [t])
+  }, [tGeneral])
 
   const saveLanguage = useCallback(
     async (lang: LanguageSelectValue) => {
@@ -1052,16 +1053,18 @@ export function SystemNetworkSettings() {
         <section className="rounded-xl border bg-card p-4 space-y-4">
           <div className="flex items-center gap-2">
             <SquareTerminal className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">{t("terminalTitle")}</h2>
+            <h2 className="text-sm font-semibold">
+              {tGeneral("terminalTitle")}
+            </h2>
           </div>
 
           <p className="text-xs text-muted-foreground leading-5">
-            {t("terminalDescription")}
+            {tGeneral("terminalDescription")}
           </p>
 
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground">
-              {t("defaultTerminalShell")}
+              {tGeneral("defaultTerminalShell")}
             </label>
             <Select
               value={selectedShellId}
@@ -1078,7 +1081,7 @@ export function SystemNetworkSettings() {
                       <span>{tDynamic(opt.label_key)}</span>
                       {!opt.exists && !opt.accepts_custom_path && (
                         <span className="text-[10px] text-muted-foreground">
-                          ({t("terminalShellNotInstalled")})
+                          ({tGeneral("terminalShellNotInstalled")})
                         </span>
                       )}
                     </span>
@@ -1088,7 +1091,7 @@ export function SystemNetworkSettings() {
             </Select>
             {availableShells && (
               <p className="text-[11px] text-muted-foreground">
-                {t("terminalCurrentShell", {
+                {tGeneral("terminalCurrentShell", {
                   path: availableShells.resolved_shell,
                 })}
               </p>
@@ -1097,7 +1100,7 @@ export function SystemNetworkSettings() {
             {selectedShellId === TERMINAL_SHELL_OPTION_CUSTOM && (
               <div className="space-y-2 pt-2">
                 <label className="text-xs font-medium text-muted-foreground">
-                  {t("terminalShellCustomPath")}
+                  {tGeneral("terminalShellCustomPath")}
                 </label>
                 <div className="flex gap-2">
                   <Input
@@ -1106,7 +1109,7 @@ export function SystemNetworkSettings() {
                       setCustomShellPath(event.target.value)
                       setCustomPathExists(null)
                     }}
-                    placeholder={t("terminalShellCustomPlaceholder")}
+                    placeholder={tGeneral("terminalShellCustomPlaceholder")}
                     disabled={savingTerminal}
                     className="flex-1"
                   />
@@ -1115,16 +1118,16 @@ export function SystemNetworkSettings() {
                     onClick={onCustomPathSave}
                     disabled={savingTerminal || !customShellPath.trim()}
                   >
-                    {t("terminalShellCustomSave")}
+                    {tGeneral("terminalShellCustomSave")}
                   </Button>
                 </div>
                 {customPathExists === false && customShellPath.trim() && (
                   <p className="text-[11px] text-amber-500">
-                    {t("terminalShellNotFoundWarning")}
+                    {tGeneral("terminalShellNotFoundWarning")}
                   </p>
                 )}
                 <p className="text-[11px] text-muted-foreground">
-                  {t("terminalShellCustomHint")}
+                  {tGeneral("terminalShellCustomHint")}
                 </p>
               </div>
             )}
@@ -1201,11 +1204,13 @@ export function SystemNetworkSettings() {
           <section className="rounded-xl border bg-card p-4 space-y-4">
             <div className="flex items-center gap-2">
               <MonitorCog className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">{t("renderingTitle")}</h2>
+              <h2 className="text-sm font-semibold">
+                {tGeneral("renderingTitle")}
+              </h2>
             </div>
 
             <p className="text-xs text-muted-foreground leading-5">
-              {t("renderingDescription")}
+              {tGeneral("renderingDescription")}
             </p>
 
             <label className="inline-flex items-center gap-2 text-sm">
@@ -1220,13 +1225,13 @@ export function SystemNetworkSettings() {
                   saveRenderingSettings(next, prev)
                 }}
               />
-              {t("disableHardwareAcceleration")}
+              {tGeneral("disableHardwareAcceleration")}
             </label>
 
             {renderingDirty && (
               <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-xs">
                 <span className="text-muted-foreground">
-                  {t("restartRequired")}
+                  {tGeneral("restartRequired")}
                 </span>
                 <Button
                   size="sm"
@@ -1234,7 +1239,7 @@ export function SystemNetworkSettings() {
                   disabled={savingRendering}
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
-                  {t("restartNow")}
+                  {tGeneral("restartNow")}
                 </Button>
               </div>
             )}
