@@ -847,6 +847,9 @@ function reducer(
         optimisticTurns: current.optimisticTurns.filter(
           (turn) => turn.anchor_id !== action.anchorId
         ),
+        localTurns: current.localTurns.filter(
+          (turn) => turn.anchor_id !== action.anchorId
+        ),
         syncState: "idle",
         activeTurnToken: null,
       }))
