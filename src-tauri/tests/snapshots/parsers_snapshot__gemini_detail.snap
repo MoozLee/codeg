@@ -18,6 +18,7 @@ expression: detail
   "turns": [
     {
       "id": "turn-0",
+      "anchor_id": "user:68a8fa7cd6d6a637f92f644a",
       "role": "user",
       "blocks": [
         {

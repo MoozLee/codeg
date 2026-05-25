@@ -2476,8 +2476,10 @@ pub async fn acp_prompt(
             folder_id,
             conversation_id,
             origin_client_id,
+            None,
         )
         .await
+        .map(|_| ())
 }
 
 #[cfg(feature = "tauri-runtime")]

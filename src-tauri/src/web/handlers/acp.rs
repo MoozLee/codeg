@@ -186,6 +186,7 @@ pub async fn acp_prompt(
             params.folder_id,
             params.conversation_id,
             params.origin_client_id,
+            None,
         )
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;

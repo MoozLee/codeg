@@ -49,5 +49,9 @@ docs/superpowers
 .codex
 .trellis
 AGENTS.md
-AGENTS.md
 log/
+
+# Tauri sidecar staging (built per-target by prepare-sidecars.mjs).
+# The binaries are platform-specific build artifacts; ship them through
+# release.yml, not git.
+src-tauri/binaries/
