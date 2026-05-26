@@ -521,13 +521,21 @@
       "enableHint": "عند الإيقاف، يتم إخفاء أداة delegate_to_agent من قائمة أدوات MCP الخاصة بالوكيل.",
       "depthLimit": "أقصى عمق للتفويض",
       "depthHint": "النطاق المسموح: {min}–{max}. يحدّ من عمق سلسلة التفويض (جذر ← فرعي ← حفيد …).",
-      "timeoutSeconds": "المهلة الافتراضية (بالثواني)",
-      "timeoutHint": "النطاق المسموح: {min}–{max}. القيمة 0 تلغي المهلة؛ يمكن للمهمة الفرعية أن تعمل حتى تنتهي. يُستخدم عند عدم تحديد العامل المستدعي timeout_seconds.",
       "save": "حفظ",
       "saving": "جارٍ الحفظ…",
       "saved": "تم حفظ إعدادات التفويض",
       "saveFailed": "فشل حفظ إعدادات التفويض",
-      "loadFailed": "فشل تحميل إعدادات التفويض: {detail}"
+      "loadFailed": "فشل تحميل إعدادات التفويض: {detail}",
+      "tabGeneral": "عام",
+      "tabAgentDefaults": "إعدادات الوكيل الفرعي",
+      "agentDefaultsDescription": "تجاوزات لكل وكيل تُطبَّق عندما يقوم التعاون متعدد الوكلاء بتشغيل وكيل فرعي لاستدعاء تفويض. تأتي الخيارات المعروضة هنا من فحص حي، لذا فإن ما تختاره هو بالضبط ما سيقبله الوكيل.",
+      "probing": "جارٍ تحميل الخيارات المتاحة من الوكيل…",
+      "probeFailed": "فشل تحميل الخيارات: {detail}",
+      "retry": "إعادة المحاولة",
+      "noConfigAvailable": "لا يحتوي هذا الوكيل على خيارات قابلة للضبط.",
+      "modeLabel": "الوضع",
+      "agentDefaultHint": "افتراضي الوكيل: {value}",
+      "defaultOptionLabel": "افتراضي ({value})"
     },
     "actions": {
       "dragSort": "اسحب لإعادة الترتيب",
@@ -1200,7 +1208,9 @@
       "editSource": "تحرير المصدر",
       "openInEditor": "فتح في المحرر",
       "openInEditorFailed": "فشل الفتح في المحرر: {message}",
-      "openInBrowserFailed": "فشل الفتح في المتصفح: {message}"
+      "openInBrowserFailed": "فشل الفتح في المتصفح: {message}",
+      "maximize": "تكبير",
+      "restore": "استعادة"
     },
     "terminal": {
       "rename": "إعادة تسمية",

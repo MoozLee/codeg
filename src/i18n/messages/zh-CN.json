@@ -521,13 +521,21 @@
       "enableHint": "关闭后，delegate_to_agent 工具会从智能体的 MCP 工具清单中隐藏。",
       "depthLimit": "最大委托深度",
       "depthHint": "允许范围：{min}–{max}。限制委托链（根 → 子 → 孙 …）的最大递归深度。",
-      "timeoutSeconds": "默认超时（秒）",
-      "timeoutHint": "允许范围：{min}–{max}。设为 0 表示不超时，子任务可一直运行直到完成；当调用方未指定 timeout_seconds 时使用。",
       "save": "保存",
       "saving": "保存中…",
       "saved": "委托设置已保存",
       "saveFailed": "委托设置保存失败",
-      "loadFailed": "加载委托设置失败：{detail}"
+      "loadFailed": "加载委托设置失败：{detail}",
+      "tabGeneral": "通用",
+      "tabAgentDefaults": "子智能体配置",
+      "agentDefaultsDescription": "多智能体协同在为委托调用启动子智能体时使用这些覆盖项。下方选项通过实时探测获取，所选即所用。",
+      "probing": "正在加载该智能体的可用配置项…",
+      "probeFailed": "加载配置项失败：{detail}",
+      "retry": "重试",
+      "noConfigAvailable": "该智能体没有可配置项。",
+      "modeLabel": "模式",
+      "agentDefaultHint": "智能体默认：{value}",
+      "defaultOptionLabel": "默认（{value}）"
     },
     "actions": {
       "dragSort": "拖拽排序",
@@ -1200,7 +1208,9 @@
       "editSource": "编辑源码",
       "openInEditor": "在编辑器中打开",
       "openInEditorFailed": "在编辑器中打开失败：{message}",
-      "openInBrowserFailed": "在浏览器中打开失败：{message}"
+      "openInBrowserFailed": "在浏览器中打开失败：{message}",
+      "maximize": "最大化",
+      "restore": "还原"
     },
     "terminal": {
       "rename": "重命名",

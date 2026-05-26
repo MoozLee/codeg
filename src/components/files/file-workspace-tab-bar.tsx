@@ -2,7 +2,16 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Reorder } from "motion/react"
-import { Code, Eye, ExternalLink, FileText, GitCompare, X } from "lucide-react"
+import {
+  Code,
+  Eye,
+  ExternalLink,
+  FileText,
+  GitCompare,
+  Maximize2,
+  Minimize2,
+  X,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { getSystemOpenTargetSettings, openPathWithTarget } from "@/lib/api"
@@ -12,6 +21,7 @@ import { useTerminalContext } from "@/contexts/terminal-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
 import type { FileWorkspaceTab } from "@/contexts/workspace-context"
 import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useLongPressDrag } from "@/hooks/use-long-press-drag"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { toErrorMessage } from "@/lib/app-error"
@@ -56,12 +66,15 @@ export function FileWorkspaceTabBar() {
     reorderFileTabs,
     previewFileTabIds,
     toggleFileTabPreview,
+    filesMaximized,
+    toggleFilesMaximized,
   } = useWorkspaceContext()
   const { activeFolder: folder } = useActiveFolder()
   const { createTerminalInDirectory } = useTerminalContext()
   const { shortcuts } = useShortcutSettings()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isCoarsePointer = useIsCoarsePointer()
+  const isMobile = useIsMobile()
   const [isHovered, setIsHovered] = useState(false)
   const [webFileOpenMethod, setWebFileOpenMethod] =
     useState<SystemWebFileOpenMethod>("browser")
@@ -103,7 +116,10 @@ export function FileWorkspaceTabBar() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const shouldHandleShortcut = mode === "fusion" && activePane === "files"
+      // While maximized only the files pane is interactive, so route shortcuts
+      // here regardless of the user's last-clicked pane.
+      const shouldHandleShortcut =
+        mode === "fusion" && (activePane === "files" || filesMaximized)
       if (!shouldHandleShortcut) return
       if (matchShortcutEvent(event, shortcuts.close_all_file_tabs)) {
         event.preventDefault()
@@ -127,6 +143,7 @@ export function FileWorkspaceTabBar() {
     closeFileTab,
     mode,
     activePane,
+    filesMaximized,
     shortcuts.close_all_file_tabs,
     shortcuts.close_current_tab,
   ])
@@ -372,6 +389,25 @@ export function FileWorkspaceTabBar() {
           }
         >
           <ExternalLink className="h-4 w-4" />
+        </button>
+      )}
+      {!isMobile && mode === "fusion" && (
+        <button
+          type="button"
+          onClick={toggleFilesMaximized}
+          className={cn(
+            "shrink-0 flex items-center justify-center w-10 border-b border-border hover:bg-primary/8 transition-colors",
+            filesMaximized && "text-primary"
+          )}
+          aria-label={filesMaximized ? t("restore") : t("maximize")}
+          aria-pressed={filesMaximized}
+          title={filesMaximized ? t("restore") : t("maximize")}
+        >
+          {filesMaximized ? (
+            <Minimize2 className="h-4 w-4" />
+          ) : (
+            <Maximize2 className="h-4 w-4" />
+          )}
         </button>
       )}
     </div>

@@ -10,9 +10,33 @@
 //! column types — keeping them strongly typed here saves us a parse-or-die step
 //! at every DB boundary.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::models::AgentType;
+
+/// Per-agent defaults applied when codeg-mcp spawns a subagent on behalf of a
+/// `delegate_to_agent` call. Mirrors the two knobs `ConnectionManager::spawn_agent`
+/// already accepts:
+///   * `mode_id` → forwarded as `preferred_mode_id`
+///   * `config_values` → forwarded as `preferred_config_values`
+///
+/// All fields are optional / may be empty; an absent entry means "no override —
+/// use whatever the agent advertises as the default."
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentDelegationDefaults {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_id: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub config_values: BTreeMap<String, String>,
+}
+
+impl AgentDelegationDefaults {
+    pub fn is_empty(&self) -> bool {
+        self.mode_id.is_none() && self.config_values.is_empty()
+    }
+}
 
 /// Everything the broker needs to dispatch a single delegation call.
 ///
@@ -20,6 +44,12 @@ use crate::models::AgentType;
 /// parent session (NOT the agent-assigned ACP session id). The broker uses it
 /// to inherit the parent's EventEmitter/working_dir and to scope
 /// `cancel_by_parent`.
+///
+/// `external_handle` is a companion-minted opaque token (per MCP `tools/call`)
+/// that the broker stores alongside the pending entry so an MCP-side
+/// `notifications/cancelled` can target this specific delegation without the
+/// companion having to know the broker-internal `call_id`. `None` for non-MCP
+/// callers and tests that don't exercise the cancel path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationRequest {
     pub parent_connection_id: String,
@@ -28,7 +58,8 @@ pub struct DelegationRequest {
     pub agent_type: AgentType,
     pub task: String,
     pub working_dir: Option<String>,
-    pub timeout_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_handle: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,8 +110,6 @@ pub enum DelegationError {
     ChildEmpty,
     #[error("subagent ended with unrecognized stop reason: {0}")]
     ChildUnknown(String),
-    #[error("timeout after {elapsed_ms}ms")]
-    Timeout { elapsed_ms: u64 },
     #[error("canceled: {reason}")]
     Canceled { reason: String },
     #[error("parent session is gone")]
@@ -119,7 +148,6 @@ impl DelegationOutcome {
             DelegationError::ChildMaxTurnRequests => "child_max_turn_requests",
             DelegationError::ChildEmpty => "child_empty",
             DelegationError::ChildUnknown(_) => "child_unknown",
-            DelegationError::Timeout { .. } => "timeout",
             DelegationError::Canceled { .. } => "canceled",
             DelegationError::ParentSessionGone => "canceled",
         };

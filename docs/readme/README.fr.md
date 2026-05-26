@@ -19,12 +19,7 @@
   <a href="./README.ar.md">العربية</a>
 </p>
 
-Codeg (Code Generation) est un workspace de codage multi-agents de niveau entreprise.
-Il unifie les agents de codage IA locaux (Claude Code, Codex CLI, OpenCode, Gemini CLI,
-OpenClaw, Cline, etc.) dans une application de bureau, un serveur autonome ou un conteneur
-Docker — permettant le développement à distance depuis n'importe quel navigateur — avec agrégation de conversations, développement
-parallèle via `git worktree`, gestion MCP/Skills, interaction avec les canaux de chat (Telegram, Lark, iLink, etc.)
-et workflows intégrés Git/fichiers/terminal.
+Codeg (Code Generation) est un espace de travail de codage multi-agent. Il réunit plusieurs agents (Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline, etc.) dans un seul espace de travail, prend en charge l'agrégation des conversations et la collaboration multi-agent, ainsi que l'installation desktop et le déploiement serveur/Docker.
 
 ## Note sur le fork et la branche de release
 
@@ -32,19 +27,40 @@ Ce dépôt est un fork de [xintaofei/codeg](https://github.com/xintaofei/codeg).
 
 ![gallery](../images/gallery.svg)
 
+## Sponsors
+
+<table>
+  <tr>
+    <td colspan="2" align="center">
+      <a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg" target="_blank"><img src="https://raw.githubusercontent.com/LeoYeAI/myclaw-sponsor-preview/main/banner.svg" alt="MyClaw.ai — Your OpenClaw Agent, Always On." /></a><br/>
+      <strong><a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg">MyClaw.ai</a></strong> — Plateforme OpenClaw cloud entièrement gérée : déploiement en un clic, disponibilité 24h/24 et 7j/7, et propriété totale des données, sans aucune gestion de serveur.
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="220">
+      <a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg" target="_blank"><img src="../images/compshare.png" alt="Compshare" width="160" /></a><br/>
+      <strong><a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg">Compshare (UCloud)</a></strong>
+    </td>
+    <td>Merci à Compshare pour son parrainage de ce projet ! Compshare est la plateforme cloud IA d'UCloud, proposant des forfaits Plan d'agents avec modèles nationaux en abonnement mensuel ou à l'usage, à partir de 49 ¥/mois. Elle offre également un accès stable aux modèles étrangers via relais officiel. Compatible avec Claude Code, Codex et les appels d'API. Prête pour l'entreprise : forte concurrence, assistance technique 24h/24 et 7j/7, facturation en libre-service. Les utilisateurs qui s'inscrivent via <a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg">ce lien</a> reçoivent 5 ¥ de crédits gratuits sur la plateforme !</td>
+  </tr>
+</table>
+
+> Vous souhaitez devenir sponsor de Codeg ? [Contactez-nous par e-mail.](mailto:itpkcn@gmail.com)
+
 ## Interface principale
+
 ![Codeg Light](../images/main-light.png#gh-light-mode-only)
 ![Codeg Dark](../images/main-dark.png#gh-dark-mode-only)
 
 ## Paramètres
-| Agents | MCP | Skills | Contrôle de version | Service web |
-| :---: | :---: | :---: | :---: | :---: |
-| ![Agents](../images/1-light.png#gh-light-mode-only) ![Agents](../images/1-dark.png#gh-dark-mode-only) | ![MCP](../images/2-light.png#gh-light-mode-only) ![MCP](../images/2-dark.png#gh-dark-mode-only) | ![Skills](../images/3-light.png#gh-light-mode-only) ![Skills](../images/3-dark.png#gh-dark-mode-only) | ![Version Control](../images/4-light.png#gh-light-mode-only) ![Version Control](../images/4-dark.png#gh-dark-mode-only) | ![Web Service](../images/5-light.png#gh-light-mode-only) ![Web Service](../images/5-dark.png#gh-dark-mode-only) |
+
+![Codeg Light](../images/settings-light.png#gh-light-mode-only)
+![Codeg Dark](../images/settings-dark.png#gh-dark-mode-only)
 
 ## Points forts
 
-- Workspace multi-agents unifié dans le même projet
-- Ingestion locale des conversations avec rendu structuré
+- **Agrégation de conversations** — importez les sessions de tous les agents pris en charge dans un workspace unifié
+- **Collaboration multi-agents** — au sein d'une même session, l'agent principal délègue à des sous-agents de différents types (p. ex. Claude Code appelant Codex, Gemini) pour accomplir une tâche conjointement, chacun s'exécutant comme une session indépendante
 - Développement parallèle avec flux `git worktree` intégré
 - **Lanceur de projet** — créez visuellement de nouveaux projets avec aperçu en temps réel
 - **Canaux de chat** — connectez Telegram, Lark (Feishu), iLink (Weixin) et plus à vos agents de codage pour des notifications en temps réel, une interaction complète avec les sessions et le contrôle à distance des tâches
@@ -56,7 +72,21 @@ Ce dépôt est un fork de [xintaofei/codeg](https://github.com/xintaofei/codeg).
 - **Support Docker** — `docker compose up` ou `docker run`, avec token/port personnalisables, persistance des données et montage de répertoires de projets
 - Boucle d'ingénierie intégrée (arborescence de fichiers, diff, changements git, commit, terminal)
 
-## Lanceur de projet
+## Agents supportés
+
+| Agent       | Chemin via variable d'environnement   | Défaut macOS / Linux                  | Défaut Windows                                        |
+| ----------- | ------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
+| Claude Code | `$CLAUDE_CONFIG_DIR/projects`         | `~/.claude/projects`                  | `%USERPROFILE%\\.claude\\projects`                    |
+| Codex CLI   | `$CODEX_HOME/sessions`                | `~/.codex/sessions`                   | `%USERPROFILE%\\.codex\\sessions`                     |
+| OpenCode    | `$XDG_DATA_HOME/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` | `%USERPROFILE%\\.local\\share\\opencode\\opencode.db` |
+| Gemini CLI  | `$GEMINI_CLI_HOME/.gemini`            | `~/.gemini`                           | `%USERPROFILE%\\.gemini`                              |
+| OpenClaw    | —                                     | `~/.openclaw/agents`                  | `%USERPROFILE%\\.openclaw\\agents`                    |
+| Cline       | `$CLINE_DIR`                          | `~/.cline/data/tasks`                 | `%USERPROFILE%\\.cline\\data\\tasks`                  |
+
+> Remarque : les variables d'environnement ont priorité sur les chemins par défaut.
+
+<details>
+<summary><h2>Lanceur de projet</h2></summary>
 
 Créez visuellement de nouveaux projets avec une interface à panneaux divisés : configuration à gauche, aperçu en temps réel à droite.
 
@@ -73,34 +103,27 @@ Créez visuellement de nouveaux projets avec une interface à panneaux divisés 
 
 Prend actuellement en charge le scaffolding de projets **shadcn/ui**, avec un design à onglets prêt pour d'autres types de projets à l'avenir.
 
-## Canaux de chat
+</details>
+
+<details>
+<summary><h2>Canaux de chat</h2></summary>
 
 Connectez vos applications de messagerie préférées — Telegram, Lark (Feishu), iLink (Weixin) et plus — à vos agents de codage IA. Créez des tâches, envoyez des messages de suivi, approuvez les permissions, reprenez des sessions et surveillez l'activité directement depuis votre chat — recevez les réponses des agents en temps réel avec les détails des appels d'outils, les demandes de permissions et les résumés de complétion, le tout sans ouvrir de navigateur.
 
 ### Canaux pris en charge
 
-| Canal | Protocole | Statut |
-| --- | --- | --- |
-| Telegram | Bot API (HTTP long-polling) | Intégré |
-| Lark (Feishu) | WebSocket + REST API | Intégré |
-| iLink (Weixin) | WebSocket + REST API | Intégré |
+| Canal          | Protocole                   | Statut  |
+| -------------- | --------------------------- | ------- |
+| Telegram       | Bot API (HTTP long-polling) | Intégré |
+| Lark (Feishu)  | WebSocket + REST API        | Intégré |
+| iLink (Weixin) | WebSocket + REST API        | Intégré |
 
 > D'autres canaux (Discord, Slack, DingTalk, etc.) sont prévus pour de futures versions.
 
-## Agents supportés
+</details>
 
-| Agent | Chemin via variable d'environnement | Défaut macOS / Linux | Défaut Windows |
-| --- | --- | --- | --- |
-| Claude Code | `$CLAUDE_CONFIG_DIR/projects` | `~/.claude/projects` | `%USERPROFILE%\\.claude\\projects` |
-| Codex CLI | `$CODEX_HOME/sessions` | `~/.codex/sessions` | `%USERPROFILE%\\.codex\\sessions` |
-| OpenCode | `$XDG_DATA_HOME/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` | `%USERPROFILE%\\.local\\share\\opencode\\opencode.db` |
-| Gemini CLI | `$GEMINI_CLI_HOME/.gemini` | `~/.gemini` | `%USERPROFILE%\\.gemini` |
-| OpenClaw | — | `~/.openclaw/agents` | `%USERPROFILE%\\.openclaw\\agents` |
-| Cline | `$CLINE_DIR` | `~/.cline/data/tasks` | `%USERPROFILE%\\.cline\\data\\tasks` |
-
-> Remarque : les variables d'environnement ont priorité sur les chemins par défaut.
-
-## Démarrage rapide
+<details>
+<summary><h2>Démarrage rapide</h2></summary>
 
 ### Prérequis
 
@@ -120,28 +143,44 @@ sudo apt-get install -y \
   patchelf
 ```
 
+### Binaires
+
+Codeg fournit trois binaires Rust issus d'un seul workspace :
+
+| Binaire        | Rôle                                                                                                                  | Build                                                                          |
+| -------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `codeg`        | Application de bureau Tauri (fenêtre, tray, updater)                                                                  | `pnpm tauri build` (release) / `pnpm tauri dev` (dev)                          |
+| `codeg-server` | Serveur HTTP + WebSocket autonome pour les déploiements navigateur/headless                                           | `pnpm server:build` / `pnpm server:dev`                                        |
+| `codeg-mcp`    | Compagnon MCP stdio lancé par session, qui expose l'outil `delegate_to_agent` aux CLI d'agents (collaboration multi-agents) | `pnpm tauri:prepare-sidecars` (invoqué automatiquement par `tauri dev` / `tauri build`) |
+
+`codeg-mcp` doit se trouver à côté de son binaire parent au moment de l'exécution — les installeurs, l'image Docker et le bundler de sidecar Tauri le placent tous à côté de `codeg` / `codeg-server`. Les builds depuis les sources et les agencements personnalisés peuvent surcharger la recherche via la variable d'environnement `CODEG_MCP_BIN=/chemin/abs/codeg-mcp`. Si le compagnon est absent, la délégation est ignorée (un seul avertissement est journalisé) et le reste de la session de l'agent continue de fonctionner.
+
 ### Développement
 
 ```bash
 pnpm install
 
+# Frontend uniquement (serveur de dev Next.js, sans Rust)
+pnpm dev
+
 # Export statique du frontend vers out/
 pnpm build
 
-# Application de bureau complète (Tauri + Next.js)
+# Application de bureau complète (Tauri + Next.js, compile automatiquement le sidecar codeg-mcp)
 pnpm tauri dev
 
-# Frontend uniquement
-pnpm dev
-
-# Build de l'application de bureau
+# Build de release de l'application de bureau (intègre codeg-mcp comme externalBin)
 pnpm tauri build
 
 # Serveur autonome (sans Tauri/GUI requis)
 pnpm server:dev
+pnpm server:build                  # binaire de release dans src-tauri/target/release/codeg-server
 
-# Compiler le binaire serveur pour la production
-pnpm server:build
+# Compiler explicitement le compagnon codeg-mcp (pour la triplet hôte)
+pnpm tauri:prepare-sidecars        # sortie : src-tauri/binaries/codeg-mcp-<triple>
+
+# Sauter la préparation du sidecar lors d'itérations sur le frontend sans besoin de délégation
+CODEG_SKIP_SIDECAR=1 pnpm tauri dev
 
 # Lint
 pnpm eslint .
@@ -152,14 +191,18 @@ pnpm test:watch
 pnpm test:coverage
 
 # Vérifications Rust (exécuter dans src-tauri/)
-cargo check
+cargo check                                                     # bureau (features par défaut)
+cargo check --no-default-features --bin codeg-server            # mode serveur
+cargo check --no-default-features --bin codeg-mcp               # compagnon MCP
 cargo clippy --all-targets --features test-utils -- -D warnings
-cargo build
 
 # Tests Rust
 cargo test --features test-utils                                # bureau (avec intégration)
 cargo test --no-default-features --bin codeg-server --lib       # mode serveur
+cargo insta review                                              # accepter les mises à jour de snapshots de parser
 ```
+
+> Astuce : lorsque vous avez un build récent de `codeg-mcp` sous `src-tauri/target/release/` et que vous voulez y faire pointer un `codeg-server` lancé manuellement sans réinstaller, exportez `CODEG_MCP_BIN=$(pwd)/src-tauri/target/release/codeg-mcp`.
 
 ### Déploiement du serveur
 
@@ -199,13 +242,13 @@ Ou installer une version spécifique :
 
 Les binaires pré-compilés (avec les ressources web incluses) sont disponibles sur la page [Releases](https://github.com/xintaofei/codeg/releases) :
 
-| Plateforme | Fichier |
-| --- | --- |
-| Linux x64 | `codeg-server-linux-x64.tar.gz` |
-| Linux arm64 | `codeg-server-linux-arm64.tar.gz` |
-| macOS x64 | `codeg-server-darwin-x64.tar.gz` |
+| Plateforme  | Fichier                            |
+| ----------- | ---------------------------------- |
+| Linux x64   | `codeg-server-linux-x64.tar.gz`    |
+| Linux arm64 | `codeg-server-linux-arm64.tar.gz`  |
+| macOS x64   | `codeg-server-darwin-x64.tar.gz`   |
 | macOS arm64 | `codeg-server-darwin-arm64.tar.gz` |
-| Windows x64 | `codeg-server-windows-x64.zip` |
+| Windows x64 | `codeg-server-windows-x64.zip`     |
 
 ```bash
 # Exemple : télécharger, extraire et exécuter
@@ -239,24 +282,32 @@ L'image Docker utilise un build multi-stage (Node.js + Rust → runtime Debian a
 pnpm install && pnpm build          # compiler le frontend
 cd src-tauri
 cargo build --release --bin codeg-server --no-default-features
-CODEG_STATIC_DIR=../out ./target/release/codeg-server
+cargo build --release --bin codeg-mcp --no-default-features    # compagnon de délégation
+CODEG_STATIC_DIR=../out ./target/release/codeg-server          # codeg-mcp est détecté comme fichier voisin
 ```
+
+Si vous conservez les deux binaires dans des répertoires séparés, définissez `CODEG_MCP_BIN=/chemin/abs/vers/codeg-mcp` pour que le runtime puisse toujours trouver le compagnon ; sans cela, la délégation multi-agents est désactivée silencieusement.
 
 #### Configuration
 
 Variables d'environnement :
 
-| Variable | Valeur par défaut | Description |
-| --- | --- | --- |
-| `CODEG_PORT` | `3080` | Port HTTP |
-| `CODEG_HOST` | `0.0.0.0` | Adresse de liaison |
-| `CODEG_TOKEN` | *(aléatoire)* | Jeton d'authentification (affiché sur stderr au démarrage) |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | Répertoire de la base de données SQLite (racine également de `uploads/`, `pets/`) |
-| `CODEG_STATIC_DIR` | `./web` ou `./out` | Répertoire d'export statique Next.js |
-| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *(non défini)* | Limite stricte du nombre total d'octets résidant sous `<data dir>/uploads/`. Nombre d'octets en décimal (p. ex. `10737418240` pour 10 Gio). Non défini, `0` ou une valeur non analysable désactive la limite et imprime une ligne au démarrage pour que la configuration soit visible. La limite est appliquée au sein d'un seul processus `codeg-server` — les déploiements à mise à l'échelle horizontale partageant un même volume `uploads/` nécessitent une coordination externe (verrou de fichier, Redis, quota de proxy inverse). |
-| `CODEG_UPLOAD_QUOTA_STRICT` | *(non défini)* | Lorsque vrai (`1` / `true` / `yes` / `on`), interrompt le démarrage avec le code de sortie 2 si `CODEG_UPLOAD_MAX_TOTAL_BYTES` est défini sur une valeur non analysable, au lieu de continuer avec un WARN. Utilisez ceci lorsque votre politique de sécurité exige que « le quota configuré doit être effectif ». |
+| Variable                       | Valeur par défaut      | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CODEG_PORT`                   | `3080`                 | Port HTTP                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `CODEG_HOST`                   | `0.0.0.0`              | Adresse de liaison                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `CODEG_TOKEN`                  | _(aléatoire)_          | Jeton d'authentification (affiché sur stderr au démarrage)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `CODEG_DATA_DIR`               | `~/.local/share/codeg` | Répertoire de la base de données SQLite (racine également de `uploads/`, `pets/`)                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `CODEG_STATIC_DIR`             | `./web` ou `./out`     | Répertoire d'export statique Next.js                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `CODEG_MCP_BIN`                | _(non défini)_         | Chemin absolu vers le compagnon `codeg-mcp`. Remplace la recherche par défaut (fichier voisin de l'exécutable + `PATH`). À utiliser pour les builds depuis les sources ou les agencements personnalisés où le compagnon réside en dehors du répertoire d'installation du serveur.                                                                                                                                                                                                                                                         |
+| `CODEG_SKIP_SIDECAR`           | _(non défini)_         | Variable de confort réservée au frontend pour `pnpm tauri dev` / `pnpm tauri build` — lorsqu'elle vaut `1`, la compilation du sidecar `codeg-mcp` est ignorée. La délégation est désactivée dans ce build ; les artefacts de qualité production doivent la laisser non définie.                                                                                                                                                                                                                                                          |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | _(non défini)_         | Limite stricte du nombre total d'octets résidant sous `<data dir>/uploads/`. Nombre d'octets en décimal (p. ex. `10737418240` pour 10 Gio). Non défini, `0` ou une valeur non analysable désactive la limite et imprime une ligne au démarrage pour que la configuration soit visible. La limite est appliquée au sein d'un seul processus `codeg-server` — les déploiements à mise à l'échelle horizontale partageant un même volume `uploads/` nécessitent une coordination externe (verrou de fichier, Redis, quota de proxy inverse). |
+| `CODEG_UPLOAD_QUOTA_STRICT`    | _(non défini)_         | Lorsque vrai (`1` / `true` / `yes` / `on`), interrompt le démarrage avec le code de sortie 2 si `CODEG_UPLOAD_MAX_TOTAL_BYTES` est défini sur une valeur non analysable, au lieu de continuer avec un WARN. Utilisez ceci lorsque votre politique de sécurité exige que « le quota configuré doit être effectif ».                                                                                                                                                                                                                        |
 
-## Architecture
+</details>
+
+<details>
+<summary><h2>Architecture</h2></summary>
 
 ```text
 Next.js 16 (Static Export) + React 19
@@ -289,6 +340,8 @@ Next.js 16 (Static Export) + React 19
   Local Filesystem  Git   Chat Channels
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
+
+</details>
 
 ## Confidentialité et sécurité
 

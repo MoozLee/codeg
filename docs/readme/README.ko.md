@@ -19,10 +19,7 @@
   <a href="./README.ar.md">العربية</a>
 </p>
 
-Codeg(Code Generation)는 엔터프라이즈급 멀티 Agent 코딩 워크스페이스입니다.
-Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline 등 로컬 AI 코딩 Agent를
-데스크톱 앱, 독립형 서버 또는 Docker 컨테이너로 통합하여 — 브라우저만으로 어디서든 원격 개발이 가능하며 — 대화 집계, 병렬 `git worktree` 개발, MCP/Skills 관리,
-채팅 채널 연동(Telegram, Lark, iLink 등), Git/파일/터미널 통합 워크플로를 제공합니다.
+Codeg(Code Generation)는 멀티 에이전트 코딩 워크스페이스입니다. Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline 등의 여러 에이전트를 하나의 워크스페이스로 통합하며, 대화 집계와 멀티 에이전트 협업을 지원하고 데스크톱 설치와 서버/Docker 배포를 지원합니다.
 
 ## 포크 / 릴리스 라인 안내
 
@@ -30,19 +27,40 @@ Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline 등 로컬 AI 코�
 
 ![gallery](../images/gallery.svg)
 
+## 스폰서
+
+<table>
+  <tr>
+    <td colspan="2" align="center">
+      <a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg" target="_blank"><img src="https://raw.githubusercontent.com/LeoYeAI/myclaw-sponsor-preview/main/banner.svg" alt="MyClaw.ai — Your OpenClaw Agent, Always On." /></a><br/>
+      <strong><a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg">MyClaw.ai</a></strong> — 완전관리형 OpenClaw 클라우드 인스턴스 서비스. 원클릭 배포, 24/7 상시 운영, 데이터 완전 소유권 보장 — 서버를 직접 관리할 필요가 없습니다.
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="220">
+      <a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg" target="_blank"><img src="../images/compshare.png" alt="Compshare" width="160" /></a><br/>
+      <strong><a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg">Compshare(UCloud)</a></strong>
+    </td>
+    <td>본 프로젝트를 후원해 주신 Compshare에 감사드립니다! Compshare는 UCloud 산하의 AI 클라우드 플랫폼으로, 월정액·종량제 방식의 가성비 높은 국내 모델 agent Plan 요금제를 월 49위안부터 제공합니다. 또한 안정적인 공식 프록시 방식의 해외 모델 접근도 지원합니다. Claude Code, Codex 및 API 연동을 지원하며, 기업 환경의 높은 동시성, 7×24 기술 지원, 셀프 인보이스 발급도 지원합니다. <a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg">이 링크</a>를 통해 가입하시면 무료 5위안 플랫폼 체험 크레딧을 받으실 수 있습니다!</td>
+  </tr>
+</table>
+
+> Codeg의 스폰서가 되고 싶으신가요? [이메일로 문의해 주세요.](mailto:itpkcn@gmail.com)
+
 ## 메인 인터페이스
+
 ![Codeg Light](../images/main-light.png#gh-light-mode-only)
 ![Codeg Dark](../images/main-dark.png#gh-dark-mode-only)
 
 ## 설정
-| 에이전트 | MCP | Skills | 버전 관리 | 웹 서비스 |
-| :---: | :---: | :---: | :---: | :---: |
-| ![Agents](../images/1-light.png#gh-light-mode-only) ![Agents](../images/1-dark.png#gh-dark-mode-only) | ![MCP](../images/2-light.png#gh-light-mode-only) ![MCP](../images/2-dark.png#gh-dark-mode-only) | ![Skills](../images/3-light.png#gh-light-mode-only) ![Skills](../images/3-dark.png#gh-dark-mode-only) | ![Version Control](../images/4-light.png#gh-light-mode-only) ![Version Control](../images/4-dark.png#gh-dark-mode-only) | ![Web Service](../images/5-light.png#gh-light-mode-only) ![Web Service](../images/5-dark.png#gh-dark-mode-only) |
+
+![Codeg Light](../images/settings-light.png#gh-light-mode-only)
+![Codeg Dark](../images/settings-dark.png#gh-dark-mode-only)
 
 ## 하이라이트
 
-- 동일 프로젝트에서 멀티 Agent 통합 워크스페이스
-- 로컬 대화 수집 및 구조화 렌더링
+- **세션 통합** — 지원되는 모든 에이전트의 세션을 통합 워크스페이스로 가져오기
+- **멀티 에이전트 협업** — 단일 세션 내에서 메인 에이전트가 다양한 유형의 서브 에이전트(예: Claude Code가 Codex, Gemini 등을 호출)를 호출하여 함께 작업을 완료하며, 각 서브 에이전트는 독립된 세션으로 실행
 - 내장 `git worktree` 플로를 통한 병렬 개발
 - **프로젝트 부트** — 시각적 설정과 실시간 미리보기로 새 프로젝트 생성
 - **채팅 채널** — Telegram, Lark(Feishu), iLink(Weixin) 등을 코딩 에이전트에 연결하여 실시간 알림 수신, 전체 세션 상호작용 및 원격 작업 제어
@@ -54,7 +72,21 @@ Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline 등 로컬 AI 코�
 - **Docker 지원** — `docker compose up` 또는 `docker run` 지원, 사용자 정의 토큰/포트, 데이터 영속화 및 프로젝트 디렉토리 마운트 지원
 - 통합 엔지니어링 루프 (파일 트리, Diff, Git 변경사항, 커밋, 터미널)
 
-## 프로젝트 부트
+## 지원 에이전트
+
+| Agent       | 환경 변수 경로                        | macOS / Linux 기본값                  | Windows 기본값                                        |
+| ----------- | ------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
+| Claude Code | `$CLAUDE_CONFIG_DIR/projects`         | `~/.claude/projects`                  | `%USERPROFILE%\\.claude\\projects`                    |
+| Codex CLI   | `$CODEX_HOME/sessions`                | `~/.codex/sessions`                   | `%USERPROFILE%\\.codex\\sessions`                     |
+| OpenCode    | `$XDG_DATA_HOME/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` | `%USERPROFILE%\\.local\\share\\opencode\\opencode.db` |
+| Gemini CLI  | `$GEMINI_CLI_HOME/.gemini`            | `~/.gemini`                           | `%USERPROFILE%\\.gemini`                              |
+| OpenClaw    | —                                     | `~/.openclaw/agents`                  | `%USERPROFILE%\\.openclaw\\agents`                    |
+| Cline       | `$CLINE_DIR`                          | `~/.cline/data/tasks`                 | `%USERPROFILE%\\.cline\\data\\tasks`                  |
+
+> 참고: 환경 변수가 기본 경로보다 우선합니다.
+
+<details>
+<summary><h2>프로젝트 부트</h2></summary>
 
 분할 패널 인터페이스로 새 프로젝트를 시각적으로 생성: 왼쪽에서 설정, 오른쪽에서 실시간 미리보기.
 
@@ -71,34 +103,27 @@ Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline 등 로컬 AI 코�
 
 현재 **shadcn/ui** 프로젝트 스캐폴딩을 지원하며, 탭 기반 디자인으로 향후 더 많은 프로젝트 유형을 지원할 준비가 되어 있습니다.
 
-## 채팅 채널
+</details>
+
+<details>
+<summary><h2>채팅 채널</h2></summary>
 
 즐겨 사용하는 메신저 앱 — Telegram, Lark(Feishu), iLink(Weixin) 등 — 을 AI 코딩 에이전트에 연결하세요. 채팅에서 직접 작업을 생성하고, 후속 메시지를 보내고, 권한을 승인하고, 세션을 재개하고, 활동을 모니터링할 수 있습니다 — 도구 호출 상세 정보, 권한 프롬프트, 완료 요약이 포함된 실시간 에이전트 응답을 브라우저를 열지 않고도 받을 수 있습니다.
 
 ### 지원 채널
 
-| 채널 | 프로토콜 | 상태 |
-| --- | --- | --- |
-| Telegram | Bot API (HTTP 롱폴링) | 내장 |
-| Lark (Feishu) | WebSocket + REST API | 내장 |
-| iLink (Weixin) | WebSocket + REST API | 내장 |
+| 채널           | 프로토콜              | 상태 |
+| -------------- | --------------------- | ---- |
+| Telegram       | Bot API (HTTP 롱폴링) | 내장 |
+| Lark (Feishu)  | WebSocket + REST API  | 내장 |
+| iLink (Weixin) | WebSocket + REST API  | 내장 |
 
 > 추가 채널(Discord, Slack, DingTalk 등)은 향후 릴리스에서 지원 예정입니다.
 
-## 지원 에이전트
+</details>
 
-| Agent | 환경 변수 경로 | macOS / Linux 기본값 | Windows 기본값 |
-| --- | --- | --- | --- |
-| Claude Code | `$CLAUDE_CONFIG_DIR/projects` | `~/.claude/projects` | `%USERPROFILE%\\.claude\\projects` |
-| Codex CLI | `$CODEX_HOME/sessions` | `~/.codex/sessions` | `%USERPROFILE%\\.codex\\sessions` |
-| OpenCode | `$XDG_DATA_HOME/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` | `%USERPROFILE%\\.local\\share\\opencode\\opencode.db` |
-| Gemini CLI | `$GEMINI_CLI_HOME/.gemini` | `~/.gemini` | `%USERPROFILE%\\.gemini` |
-| OpenClaw | — | `~/.openclaw/agents` | `%USERPROFILE%\\.openclaw\\agents` |
-| Cline | `$CLINE_DIR` | `~/.cline/data/tasks` | `%USERPROFILE%\\.cline\\data\\tasks` |
-
-> 참고: 환경 변수가 기본 경로보다 우선합니다.
-
-## 빠른 시작
+<details>
+<summary><h2>빠른 시작</h2></summary>
 
 ### 요구 사항
 
@@ -118,28 +143,44 @@ sudo apt-get install -y \
   patchelf
 ```
 
+### 바이너리
+
+Codeg는 단일 워크스페이스에서 세 개의 Rust 바이너리를 제공합니다:
+
+| 바이너리       | 역할                                                                                                | 빌드                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `codeg`        | Tauri 데스크톱 앱 (윈도우, 트레이, 업데이터)                                                        | `pnpm tauri build` (릴리스) / `pnpm tauri dev` (개발)                       |
+| `codeg-server` | 브라우저/헤드리스 배포용 독립형 HTTP + WebSocket 서버                                               | `pnpm server:build` / `pnpm server:dev`                                     |
+| `codeg-mcp`    | 에이전트 CLI에 `delegate_to_agent` 도구를 노출하는 실행별 stdio MCP 컴패니언 (멀티 에이전트 협업) | `pnpm tauri:prepare-sidecars` (`tauri dev` / `tauri build`에서 자동 호출) |
+
+`codeg-mcp`는 런타임에 부모 바이너리 옆에 위치해야 합니다 — 설치 프로그램, Docker 이미지, Tauri 사이드카 번들러 모두 이를 `codeg` / `codeg-server` 옆에 배치합니다. 소스 빌드나 사용자 정의 레이아웃의 경우 `CODEG_MCP_BIN=/abs/path/codeg-mcp` 환경 변수로 조회 위치를 재정의할 수 있습니다. 컴패니언이 누락된 경우 위임은 건너뛰어지고(경고가 한 번 기록됨) 나머지 에이전트 세션은 계속 작동합니다.
+
 ### 개발
 
 ```bash
 pnpm install
 
+# 프론트엔드 전용 (Next.js 개발 서버, Rust 없음)
+pnpm dev
+
 # 프론트엔드 정적 내보내기 (out/)
 pnpm build
 
-# 전체 데스크톱 앱 (Tauri + Next.js)
+# 전체 데스크톱 앱 (Tauri + Next.js, codeg-mcp 사이드카 자동 빌드)
 pnpm tauri dev
 
-# 프론트엔드만
-pnpm dev
-
-# 데스크톱 빌드
+# 데스크톱 릴리스 빌드 (codeg-mcp를 externalBin으로 번들링)
 pnpm tauri build
 
 # 독립형 서버 (Tauri/GUI 불필요)
 pnpm server:dev
+pnpm server:build                  # 릴리스 바이너리 위치: src-tauri/target/release/codeg-server
 
-# 서버 릴리스 바이너리 빌드
-pnpm server:build
+# codeg-mcp 컴패니언을 명시적으로 빌드 (호스트 트리플용)
+pnpm tauri:prepare-sidecars        # 출력: src-tauri/binaries/codeg-mcp-<triple>
+
+# 프론트엔드 작업 중이고 위임이 필요하지 않을 때 사이드카 준비 건너뛰기
+CODEG_SKIP_SIDECAR=1 pnpm tauri dev
 
 # Lint
 pnpm eslint .
@@ -150,14 +191,18 @@ pnpm test:watch
 pnpm test:coverage
 
 # Rust 검사 (src-tauri/에서 실행)
-cargo check
+cargo check                                                     # 데스크톱 (기본 features)
+cargo check --no-default-features --bin codeg-server            # 서버 모드
+cargo check --no-default-features --bin codeg-mcp               # MCP 컴패니언
 cargo clippy --all-targets --features test-utils -- -D warnings
-cargo build
 
 # Rust 테스트
 cargo test --features test-utils                                # 데스크톱 (통합 포함)
 cargo test --no-default-features --bin codeg-server --lib       # 서버 모드
+cargo insta review                                              # 파서 스냅샷 업데이트 승인
 ```
+
+> 팁: `src-tauri/target/release/` 아래에 새 `codeg-mcp` 빌드가 있고 재설치 없이 수동으로 실행한 `codeg-server`가 이를 가리키게 하려면, `CODEG_MCP_BIN=$(pwd)/src-tauri/target/release/codeg-mcp`를 export 하십시오.
 
 ### 서버 배포
 
@@ -197,13 +242,13 @@ irm https://raw.githubusercontent.com/xintaofei/codeg/main/install.ps1 | iex
 
 사전 빌드된 바이너리(웹 에셋 포함)는 [Releases](https://github.com/xintaofei/codeg/releases) 페이지에서 다운로드할 수 있습니다:
 
-| 플랫폼 | 파일 |
-| --- | --- |
-| Linux x64 | `codeg-server-linux-x64.tar.gz` |
-| Linux arm64 | `codeg-server-linux-arm64.tar.gz` |
-| macOS x64 | `codeg-server-darwin-x64.tar.gz` |
+| 플랫폼      | 파일                               |
+| ----------- | ---------------------------------- |
+| Linux x64   | `codeg-server-linux-x64.tar.gz`    |
+| Linux arm64 | `codeg-server-linux-arm64.tar.gz`  |
+| macOS x64   | `codeg-server-darwin-x64.tar.gz`   |
 | macOS arm64 | `codeg-server-darwin-arm64.tar.gz` |
-| Windows x64 | `codeg-server-windows-x64.zip` |
+| Windows x64 | `codeg-server-windows-x64.zip`     |
 
 ```bash
 # 예시: 다운로드, 압축 해제, 실행
@@ -237,24 +282,32 @@ Docker 이미지는 멀티 스테이지 빌드(Node.js + Rust → 경량 Debian 
 pnpm install && pnpm build          # 프론트엔드 빌드
 cd src-tauri
 cargo build --release --bin codeg-server --no-default-features
-CODEG_STATIC_DIR=../out ./target/release/codeg-server
+cargo build --release --bin codeg-mcp --no-default-features    # 위임 컴패니언
+CODEG_STATIC_DIR=../out ./target/release/codeg-server          # codeg-mcp는 형제 파일로 인식됨
 ```
+
+두 바이너리를 서로 다른 디렉토리에 두는 경우, 런타임이 컴패니언을 찾을 수 있도록 `CODEG_MCP_BIN=/abs/path/to/codeg-mcp`를 설정하십시오. 설정하지 않으면 멀티 에이전트 위임이 조용히 비활성화됩니다.
 
 #### 구성
 
 환경 변수:
 
-| 변수 | 기본값 | 설명 |
-| --- | --- | --- |
-| `CODEG_PORT` | `3080` | HTTP 포트 |
-| `CODEG_HOST` | `0.0.0.0` | 바인드 주소 |
-| `CODEG_TOKEN` | *(랜덤)* | 인증 토큰 (시작 시 stderr에 출력) |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | SQLite 데이터베이스 디렉토리(`uploads/`, `pets/`의 루트 역할도 함) |
-| `CODEG_STATIC_DIR` | `./web` 또는 `./out` | Next.js 정적 내보내기 디렉토리 |
-| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *(설정 안 됨)* | `<data dir>/uploads/` 아래 상주하는 모든 파일의 총 바이트 수에 대한 하드 한도. 10진수 바이트 수(예: 10 GiB의 경우 `10737418240`). 설정하지 않거나 `0`, 또는 파싱할 수 없는 값이면 한도가 비활성화되며, 현재 상태가 보이도록 시작 시 로그 라인을 출력합니다. 이 한도는 단일 `codeg-server` 프로세스 내에서만 적용됩니다 — 하나의 `uploads/` 볼륨을 공유하는 수평 확장 배포에는 외부 조정(파일 잠금, Redis, 리버스 프록시 쿼터)이 필요합니다. |
-| `CODEG_UPLOAD_QUOTA_STRICT` | *(설정 안 됨)* | 참값(`1` / `true` / `yes` / `on`)으로 설정된 경우, `CODEG_UPLOAD_MAX_TOTAL_BYTES`가 파싱할 수 없는 값으로 설정되어 있으면 WARN과 함께 fail-open 하는 대신 종료 코드 2로 시작을 중단합니다. 보안 정책상 "구성된 쿼터가 반드시 적용되어야 한다"는 요구가 있을 때 사용합니다. |
+| 변수                           | 기본값                 | 설명                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CODEG_PORT`                   | `3080`                 | HTTP 포트                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `CODEG_HOST`                   | `0.0.0.0`              | 바인드 주소                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `CODEG_TOKEN`                  | _(랜덤)_               | 인증 토큰 (시작 시 stderr에 출력)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `CODEG_DATA_DIR`               | `~/.local/share/codeg` | SQLite 데이터베이스 디렉토리(`uploads/`, `pets/`의 루트 역할도 함)                                                                                                                                                                                                                                                                                                                                                                          |
+| `CODEG_STATIC_DIR`             | `./web` 또는 `./out`   | Next.js 정적 내보내기 디렉토리                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `CODEG_MCP_BIN`                | _(설정 안 됨)_         | `codeg-mcp` 컴패니언의 절대 경로. 기본 실행 파일 형제 + `PATH` 조회를 재정의합니다. 컴패니언이 서버의 설치 디렉토리 외부에 있는 소스 빌드나 사용자 정의 레이아웃에 사용하십시오.                                                                                                                                                                                                                                                            |
+| `CODEG_SKIP_SIDECAR`           | _(설정 안 됨)_         | `pnpm tauri dev` / `pnpm tauri build`를 위한 프론트엔드 전용 편의 기능 — `1`일 때 `codeg-mcp` 사이드카 빌드를 건너뜁니다. 해당 빌드에서는 위임이 비활성화됩니다. 출시 품질 산출물에서는 설정하지 않아야 합니다.                                                                                                                                                                                                                              |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | _(설정 안 됨)_         | `<data dir>/uploads/` 아래 상주하는 모든 파일의 총 바이트 수에 대한 하드 한도. 10진수 바이트 수(예: 10 GiB의 경우 `10737418240`). 설정하지 않거나 `0`, 또는 파싱할 수 없는 값이면 한도가 비활성화되며, 현재 상태가 보이도록 시작 시 로그 라인을 출력합니다. 이 한도는 단일 `codeg-server` 프로세스 내에서만 적용됩니다 — 하나의 `uploads/` 볼륨을 공유하는 수평 확장 배포에는 외부 조정(파일 잠금, Redis, 리버스 프록시 쿼터)이 필요합니다. |
+| `CODEG_UPLOAD_QUOTA_STRICT`    | _(설정 안 됨)_         | 참값(`1` / `true` / `yes` / `on`)으로 설정된 경우, `CODEG_UPLOAD_MAX_TOTAL_BYTES`가 파싱할 수 없는 값으로 설정되어 있으면 WARN과 함께 fail-open 하는 대신 종료 코드 2로 시작을 중단합니다. 보안 정책상 "구성된 쿼터가 반드시 적용되어야 한다"는 요구가 있을 때 사용합니다.                                                                                                                                                                  |
 
-## 아키텍처
+</details>
+
+<details>
+<summary><h2>아키텍처</h2></summary>
 
 ```text
 Next.js 16 (Static Export) + React 19
@@ -287,6 +340,8 @@ Next.js 16 (Static Export) + React 19
   Local Filesystem  Git   Chat Channels
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
+
+</details>
 
 ## 개인정보 보호 및 보안
 

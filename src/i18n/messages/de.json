@@ -521,13 +521,21 @@
       "enableHint": "Wenn deaktiviert, wird das Tool delegate_to_agent im MCP-Toolkatalog des Agenten ausgeblendet.",
       "depthLimit": "Maximale Delegationstiefe",
       "depthHint": "Zulässiger Bereich: {min}–{max}. Begrenzt, wie tief eine Delegationskette (Root → Kind → Enkel …) rekursieren kann.",
-      "timeoutSeconds": "Standard-Timeout (Sekunden)",
-      "timeoutHint": "Zulässiger Bereich: {min}–{max}. 0 deaktiviert das Timeout; die untergeordnete Aufgabe kann laufen, bis sie fertig ist. Wird verwendet, wenn der aufrufende Agent timeout_seconds nicht angibt.",
       "save": "Speichern",
       "saving": "Wird gespeichert…",
       "saved": "Delegationseinstellungen gespeichert",
       "saveFailed": "Delegationseinstellungen konnten nicht gespeichert werden",
-      "loadFailed": "Delegationseinstellungen konnten nicht geladen werden: {detail}"
+      "loadFailed": "Delegationseinstellungen konnten nicht geladen werden: {detail}",
+      "tabGeneral": "Allgemein",
+      "tabAgentDefaults": "Subagent-Standards",
+      "agentDefaultsDescription": "Pro-Agent-Überschreibungen, die angewendet werden, wenn die Multi-Agent-Zusammenarbeit einen Subagenten für einen Delegationsaufruf startet. Die hier gezeigten Optionen stammen aus einer Live-Abfrage – Ihre Auswahl ist exakt das, was der Agent akzeptiert.",
+      "probing": "Verfügbare Optionen vom Agenten werden geladen…",
+      "probeFailed": "Optionen konnten nicht geladen werden: {detail}",
+      "retry": "Erneut versuchen",
+      "noConfigAvailable": "Dieser Agent hat keine konfigurierbaren Optionen.",
+      "modeLabel": "Modus",
+      "agentDefaultHint": "Agent-Standard: {value}",
+      "defaultOptionLabel": "Standard ({value})"
     },
     "actions": {
       "dragSort": "Zum Neuordnen ziehen",
@@ -1200,7 +1208,9 @@
       "editSource": "Quelle bearbeiten",
       "openInEditor": "Im Editor öffnen",
       "openInEditorFailed": "Öffnen im Editor fehlgeschlagen: {message}",
-      "openInBrowserFailed": "Konnte nicht im Browser geöffnet werden: {message}"
+      "openInBrowserFailed": "Konnte nicht im Browser geöffnet werden: {message}",
+      "maximize": "Maximieren",
+      "restore": "Wiederherstellen"
     },
     "terminal": {
       "rename": "Umbenennen",

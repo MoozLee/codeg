@@ -19,10 +19,7 @@
   <strong>العربية</strong>
 </p>
 
-Codeg (Code Generation) هو مساحة عمل مؤسسية متعددة الوكلاء للبرمجة.
-يوحّد وكلاء البرمجة المحليين بالذكاء الاصطناعي (Claude Code، Codex CLI، OpenCode، Gemini CLI،
-OpenClaw، Cline، وغيرها) في تطبيق سطح مكتب أو خادم مستقل أو حاوية Docker — مما يتيح التطوير عن بُعد من أي متصفح — مع تجميع المحادثات، والتطوير المتوازي
-عبر `git worktree`، وإدارة MCP/Skills، والتفاعل عبر قنوات الدردشة (Telegram وLark وiLink وغيرها)، وسير عمل متكامل لـ Git/الملفات/الطرفية.
+Codeg (Code Generation) هو مساحة عمل للبرمجة متعددة الوكلاء. يجمع عدة وكلاء (Claude Code، Codex CLI، OpenCode، Gemini CLI، OpenClaw، Cline، وغيرها) في مساحة عمل واحدة، ويدعم تجميع المحادثات والتعاون بين عدة وكلاء، مع دعم التثبيت على سطح المكتب والنشر على الخادم/Docker.
 
 ## ملاحظة حول التفرّع وخط الإصدارات
 
@@ -30,19 +27,40 @@ OpenClaw، Cline، وغيرها) في تطبيق سطح مكتب أو خادم �
 
 ![gallery](../images/gallery.svg)
 
+## الرعاة
+
+<table>
+  <tr>
+    <td colspan="2" align="center">
+      <a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg" target="_blank"><img src="https://raw.githubusercontent.com/LeoYeAI/myclaw-sponsor-preview/main/banner.svg" alt="MyClaw.ai — Your OpenClaw Agent, Always On." /></a><br/>
+      <strong><a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg">MyClaw.ai</a></strong> — منصة OpenClaw سحابية مُدارة بالكامل: نشر بنقرة واحدة، وتشغيل على مدار الساعة طوال أيام الأسبوع، وملكية كاملة للبيانات — دون الحاجة إلى إدارة أي خادم.
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="220">
+      <a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg" target="_blank"><img src="../images/compshare.png" alt="Compshare" width="160" /></a><br/>
+      <strong><a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg">Compshare (UCloud)</a></strong>
+    </td>
+    <td>شكراً لـ Compshare على رعاية هذا المشروع! Compshare هي منصة الذكاء الاصطناعي السحابية التابعة لشركة UCloud، وتقدّم باقات Plan للوكلاء بنماذج محلية بأسعار اقتصادية شهرياً أو حسب الاستخدام، بدءاً من 49 يوان/شهر. كما توفّر وصولاً مستقراً إلى النماذج الأجنبية عبر وكيل رسمي. تدعم التكامل مع Claude Code وCodex واستدعاءات API. جاهزة للمؤسسات: تزامن عالٍ، ودعم فني على مدار الساعة طوال أيام الأسبوع، وإصدار الفواتير ذاتياً. المستخدمون الذين يسجّلون عبر <a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg">هذا الرابط</a> يحصلون على رصيد تجريبي مجاني بقيمة 5 يوان على المنصة!</td>
+  </tr>
+</table>
+
+> هل ترغب في أن تصبح راعياً لـ Codeg؟ [راسلنا عبر البريد الإلكتروني.](mailto:itpkcn@gmail.com)
+
 ## الواجهة الرئيسية
+
 ![Codeg Light](../images/main-light.png#gh-light-mode-only)
 ![Codeg Dark](../images/main-dark.png#gh-dark-mode-only)
 
 ## الإعدادات
-| الوكلاء | MCP | Skills | التحكم في الإصدارات | خدمة الويب |
-| :---: | :---: | :---: | :---: | :---: |
-| ![Agents](../images/1-light.png#gh-light-mode-only) ![Agents](../images/1-dark.png#gh-dark-mode-only) | ![MCP](../images/2-light.png#gh-light-mode-only) ![MCP](../images/2-dark.png#gh-dark-mode-only) | ![Skills](../images/3-light.png#gh-light-mode-only) ![Skills](../images/3-dark.png#gh-dark-mode-only) | ![Version Control](../images/4-light.png#gh-light-mode-only) ![Version Control](../images/4-dark.png#gh-dark-mode-only) | ![Web Service](../images/5-light.png#gh-light-mode-only) ![Web Service](../images/5-dark.png#gh-dark-mode-only) |
+
+![Codeg Light](../images/settings-light.png#gh-light-mode-only)
+![Codeg Dark](../images/settings-dark.png#gh-dark-mode-only)
 
 ## أبرز المزايا
 
-- مساحة عمل موحّدة متعددة الوكلاء في نفس المشروع
-- استيعاب محلي للمحادثات مع عرض منظّم
+- **تجميع المحادثات** — استيراد جلسات جميع الوكلاء المدعومين إلى مساحة عمل موحّدة
+- **التعاون متعدد الوكلاء** — داخل جلسة واحدة، يفوّض الوكيل الرئيسي إلى وكلاء فرعيين من أنواع مختلفة (مثل Claude Code يستدعي Codex وGemini) لإنجاز مهمة بشكل مشترك، مع تشغيل كل وكيل فرعي كجلسة مستقلة
 - تطوير متوازي مع تدفقات `git worktree` مدمجة
 - **مُنشئ المشروع** — إنشاء مشاريع جديدة بصريًا مع معاينة حية
 - **قنوات الدردشة** — ربط Telegram وLark (Feishu) وiLink (Weixin) والمزيد بوكلاء البرمجة لاستقبال الإشعارات الفورية والتفاعل الكامل مع الجلسات والتحكم عن بُعد في المهام
@@ -54,7 +72,21 @@ OpenClaw، Cline، وغيرها) في تطبيق سطح مكتب أو خادم �
 - **دعم Docker** — `docker compose up` أو `docker run`، مع رمز مصادقة ومنفذ قابلين للتخصيص، واستمرارية البيانات وتحميل مجلدات المشاريع
 - حلقة هندسية متكاملة (شجرة الملفات، الفروقات، تغييرات git، الإيداع، الطرفية)
 
-## مُنشئ المشروع
+## الوكلاء المدعومون
+
+| الوكيل      | مسار متغير البيئة                     | الافتراضي في macOS / Linux            | الافتراضي في Windows                                  |
+| ----------- | ------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
+| Claude Code | `$CLAUDE_CONFIG_DIR/projects`         | `~/.claude/projects`                  | `%USERPROFILE%\\.claude\\projects`                    |
+| Codex CLI   | `$CODEX_HOME/sessions`                | `~/.codex/sessions`                   | `%USERPROFILE%\\.codex\\sessions`                     |
+| OpenCode    | `$XDG_DATA_HOME/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` | `%USERPROFILE%\\.local\\share\\opencode\\opencode.db` |
+| Gemini CLI  | `$GEMINI_CLI_HOME/.gemini`            | `~/.gemini`                           | `%USERPROFILE%\\.gemini`                              |
+| OpenClaw    | —                                     | `~/.openclaw/agents`                  | `%USERPROFILE%\\.openclaw\\agents`                    |
+| Cline       | `$CLINE_DIR`                          | `~/.cline/data/tasks`                 | `%USERPROFILE%\\.cline\\data\\tasks`                  |
+
+> ملاحظة: متغيرات البيئة لها الأولوية على المسارات الافتراضية.
+
+<details>
+<summary><h2>مُنشئ المشروع</h2></summary>
 
 أنشئ مشاريع جديدة بصريًا من خلال واجهة مقسّمة: التكوين على اليسار، والمعاينة الحية على اليمين.
 
@@ -71,34 +103,27 @@ OpenClaw، Cline، وغيرها) في تطبيق سطح مكتب أو خادم �
 
 يدعم حاليًا إنشاء مشاريع **shadcn/ui**، مع تصميم قائم على علامات التبويب جاهز لدعم المزيد من أنواع المشاريع في المستقبل.
 
-## قنوات الدردشة
+</details>
+
+<details>
+<summary><h2>قنوات الدردشة</h2></summary>
 
 اربط تطبيقات المراسلة المفضلة لديك — Telegram وLark (Feishu) وiLink (Weixin) والمزيد — بوكلاء البرمجة بالذكاء الاصطناعي. أنشئ مهامًا، وأرسل رسائل متابعة، ووافق على الأذونات، واستأنف الجلسات، وراقب النشاط من تطبيق الدردشة — واستقبل ردود الوكلاء الفورية مع تفاصيل استدعاءات الأدوات وطلبات الأذونات وملخصات الإنجاز دون الحاجة لفتح المتصفح.
 
 ### القنوات المدعومة
 
-| القناة | البروتوكول | الحالة |
-| --- | --- | --- |
-| Telegram | Bot API (HTTP long-polling) | مدمج |
-| Lark (Feishu) | WebSocket + REST API | مدمج |
-| iLink (Weixin) | WebSocket + REST API | مدمج |
+| القناة         | البروتوكول                  | الحالة |
+| -------------- | --------------------------- | ------ |
+| Telegram       | Bot API (HTTP long-polling) | مدمج   |
+| Lark (Feishu)  | WebSocket + REST API        | مدمج   |
+| iLink (Weixin) | WebSocket + REST API        | مدمج   |
 
 > يُخطَّط لدعم المزيد من القنوات (Discord وSlack وDingTalk وغيرها) في الإصدارات المستقبلية.
 
-## الوكلاء المدعومون
+</details>
 
-| الوكيل | مسار متغير البيئة | الافتراضي في macOS / Linux | الافتراضي في Windows |
-| --- | --- | --- | --- |
-| Claude Code | `$CLAUDE_CONFIG_DIR/projects` | `~/.claude/projects` | `%USERPROFILE%\\.claude\\projects` |
-| Codex CLI | `$CODEX_HOME/sessions` | `~/.codex/sessions` | `%USERPROFILE%\\.codex\\sessions` |
-| OpenCode | `$XDG_DATA_HOME/opencode/opencode.db` | `~/.local/share/opencode/opencode.db` | `%USERPROFILE%\\.local\\share\\opencode\\opencode.db` |
-| Gemini CLI | `$GEMINI_CLI_HOME/.gemini` | `~/.gemini` | `%USERPROFILE%\\.gemini` |
-| OpenClaw | — | `~/.openclaw/agents` | `%USERPROFILE%\\.openclaw\\agents` |
-| Cline | `$CLINE_DIR` | `~/.cline/data/tasks` | `%USERPROFILE%\\.cline\\data\\tasks` |
-
-> ملاحظة: متغيرات البيئة لها الأولوية على المسارات الافتراضية.
-
-## البدء السريع
+<details>
+<summary><h2>البدء السريع</h2></summary>
 
 ### المتطلبات
 
@@ -118,28 +143,44 @@ sudo apt-get install -y \
   patchelf
 ```
 
+### الملفات التنفيذية
+
+يوفّر Codeg ثلاثة ملفات تنفيذية بلغة Rust من workspace واحد:
+
+| الملف التنفيذي | الدور                                                                                                                  | البناء                                                                       |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `codeg`        | تطبيق سطح المكتب Tauri (نافذة، شريط النظام، المُحدِّث)                                                                 | `pnpm tauri build` (إصدار) / `pnpm tauri dev` (تطوير)                        |
+| `codeg-server` | خادم HTTP + WebSocket مستقل لعمليات النشر عبر المتصفح/بدون واجهة                                                       | `pnpm server:build` / `pnpm server:dev`                                      |
+| `codeg-mcp`    | رفيق MCP عبر stdio يُشغَّل لكل جلسة، ويُتيح أداة `delegate_to_agent` لواجهات CLI للوكلاء (التعاون متعدد الوكلاء)        | `pnpm tauri:prepare-sidecars` (يُستدعى تلقائيًا من `tauri dev` / `tauri build`) |
+
+يجب أن يكون `codeg-mcp` بجوار ملفه التنفيذي الأصلي وقت التشغيل — برامج التثبيت وصورة Docker ومُجمِّع sidecar الخاص بـ Tauri جميعها تضعه بجوار `codeg` / `codeg-server`. يمكن لعمليات البناء من المصدر والتخطيطات المخصّصة تجاوز البحث باستخدام متغير البيئة `CODEG_MCP_BIN=/مسار/مطلق/codeg-mcp`. في حال غياب الرفيق، يتم تخطّي التفويض (مع تسجيل تحذير واحد) وتستمر باقي جلسة الوكيل في العمل.
+
 ### التطوير
 
 ```bash
 pnpm install
 
+# الواجهة الأمامية فقط (خادم تطوير Next.js، بدون Rust)
+pnpm dev
+
 # تصدير ثابت للواجهة الأمامية إلى out/
 pnpm build
 
-# تطبيق سطح المكتب الكامل (Tauri + Next.js)
+# تطبيق سطح المكتب الكامل (Tauri + Next.js، يبني sidecar الخاص بـ codeg-mcp تلقائيًا)
 pnpm tauri dev
 
-# الواجهة الأمامية فقط
-pnpm dev
-
-# بناء تطبيق سطح المكتب
+# بناء إصدار سطح المكتب (يُضمِّن codeg-mcp بوصفه externalBin)
 pnpm tauri build
 
 # خادم مستقل (بدون Tauri/واجهة رسومية)
 pnpm server:dev
+pnpm server:build                  # ملف الإصدار التنفيذي ضمن src-tauri/target/release/codeg-server
 
-# بناء الملف التنفيذي للخادم
-pnpm server:build
+# بناء رفيق codeg-mcp بشكل صريح (لثلاثية المضيف)
+pnpm tauri:prepare-sidecars        # الناتج: src-tauri/binaries/codeg-mcp-<triple>
+
+# تخطّي تحضير sidecar عند التكرار على الواجهة الأمامية ولا تحتاج إلى التفويض
+CODEG_SKIP_SIDECAR=1 pnpm tauri dev
 
 # فحص الأكواد
 pnpm eslint .
@@ -150,14 +191,18 @@ pnpm test:watch
 pnpm test:coverage
 
 # فحوصات Rust (تنفيذ في src-tauri/)
-cargo check
+cargo check                                                     # سطح المكتب (الميزات الافتراضية)
+cargo check --no-default-features --bin codeg-server            # وضع الخادم
+cargo check --no-default-features --bin codeg-mcp               # رفيق MCP
 cargo clippy --all-targets --features test-utils -- -D warnings
-cargo build
 
 # اختبارات Rust
 cargo test --features test-utils                                # سطح المكتب (يشمل التكامل)
 cargo test --no-default-features --bin codeg-server --lib       # وضع الخادم
+cargo insta review                                              # قبول تحديثات لقطات المُحلِّل
 ```
+
+> نصيحة: عند توفّر بناء جديد لـ `codeg-mcp` ضمن `src-tauri/target/release/` وأردت توجيه `codeg-server` مُشغَّل يدويًا إليه دون إعادة التثبيت، صدِّر `CODEG_MCP_BIN=$(pwd)/src-tauri/target/release/codeg-mcp`.
 
 ### نشر الخادم
 
@@ -197,13 +242,13 @@ irm https://raw.githubusercontent.com/xintaofei/codeg/main/install.ps1 | iex
 
 الملفات التنفيذية المُعدّة مسبقًا (مع موارد الويب المضمّنة) متاحة في صفحة [Releases](https://github.com/xintaofei/codeg/releases):
 
-| المنصة | الملف |
-| --- | --- |
-| Linux x64 | `codeg-server-linux-x64.tar.gz` |
-| Linux arm64 | `codeg-server-linux-arm64.tar.gz` |
-| macOS x64 | `codeg-server-darwin-x64.tar.gz` |
+| المنصة      | الملف                              |
+| ----------- | ---------------------------------- |
+| Linux x64   | `codeg-server-linux-x64.tar.gz`    |
+| Linux arm64 | `codeg-server-linux-arm64.tar.gz`  |
+| macOS x64   | `codeg-server-darwin-x64.tar.gz`   |
 | macOS arm64 | `codeg-server-darwin-arm64.tar.gz` |
-| Windows x64 | `codeg-server-windows-x64.zip` |
+| Windows x64 | `codeg-server-windows-x64.zip`     |
 
 ```bash
 # مثال: التنزيل والاستخراج والتشغيل
@@ -237,24 +282,32 @@ docker run -d -p 3080:3080 \
 pnpm install && pnpm build          # بناء الواجهة الأمامية
 cd src-tauri
 cargo build --release --bin codeg-server --no-default-features
-CODEG_STATIC_DIR=../out ./target/release/codeg-server
+cargo build --release --bin codeg-mcp --no-default-features    # رفيق التفويض
+CODEG_STATIC_DIR=../out ./target/release/codeg-server          # يتم التقاط codeg-mcp بوصفه ملفًا شقيقًا
 ```
+
+إذا احتفظت بالملفين التنفيذيين في دليلين منفصلين، فاضبط `CODEG_MCP_BIN=/مسار/مطلق/إلى/codeg-mcp` حتى يستطيع التشغيل العثور على الرفيق؛ بدون ذلك، يُعطَّل التفويض متعدد الوكلاء بصمت.
 
 #### التكوين
 
 متغيرات البيئة:
 
-| المتغير | الافتراضي | الوصف |
-| --- | --- | --- |
-| `CODEG_PORT` | `3080` | منفذ HTTP |
-| `CODEG_HOST` | `0.0.0.0` | عنوان الربط |
-| `CODEG_TOKEN` | *(عشوائي)* | رمز المصادقة (يُطبع في stderr عند البدء) |
-| `CODEG_DATA_DIR` | `~/.local/share/codeg` | دليل قاعدة بيانات SQLite (والجذر أيضاً لـ `uploads/` و `pets/`) |
-| `CODEG_STATIC_DIR` | `./web` أو `./out` | دليل التصدير الثابت لـ Next.js |
-| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | *(غير مُحدّد)* | حدّ صارم لإجمالي البايتات المقيمة تحت `<data dir>/uploads/`. عدد بايتات عشري (مثلاً `10737418240` لـ 10 GiB). إذا كان غير مُحدّد أو `0` أو قيمة لا يمكن تحليلها فسيتم تعطيل الحدّ وطباعة سطر عند البدء حتى تكون الحالة مرئية. يُطبَّق الحدّ داخل عملية `codeg-server` واحدة — تحتاج عمليات النشر الموسَّعة أفقياً التي تتشارك حجم `uploads/` واحداً إلى تنسيق خارجي (قفل ملف، Redis، حصّة عبر بروكسي عكسي). |
-| `CODEG_UPLOAD_QUOTA_STRICT` | *(غير مُحدّد)* | عند كونه صحيحاً (`1` / `true` / `yes` / `on`)، يُلغي البدء برمز خروج 2 إذا كانت `CODEG_UPLOAD_MAX_TOTAL_BYTES` مضبوطة على قيمة لا يمكن تحليلها، بدلاً من المتابعة مع تحذير WARN. استخدم هذا حين تتطلب سياستك الأمنية أن «تكون الحصّة المُعدَّة فعّالة». |
+| المتغير                        | الافتراضي              | الوصف                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CODEG_PORT`                   | `3080`                 | منفذ HTTP                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `CODEG_HOST`                   | `0.0.0.0`              | عنوان الربط                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `CODEG_TOKEN`                  | _(عشوائي)_             | رمز المصادقة (يُطبع في stderr عند البدء)                                                                                                                                                                                                                                                                                                                                                                    |
+| `CODEG_DATA_DIR`               | `~/.local/share/codeg` | دليل قاعدة بيانات SQLite (والجذر أيضاً لـ `uploads/` و `pets/`)                                                                                                                                                                                                                                                                                                                                             |
+| `CODEG_STATIC_DIR`             | `./web` أو `./out`     | دليل التصدير الثابت لـ Next.js                                                                                                                                                                                                                                                                                                                                                                              |
+| `CODEG_MCP_BIN`                | _(غير مُحدّد)_         | المسار المطلق لرفيق `codeg-mcp`. يتجاوز البحث الافتراضي (ملف شقيق للملف التنفيذي + `PATH`). استخدمه لعمليات البناء من المصدر أو التخطيطات المخصّصة التي يقع فيها الرفيق خارج دليل تثبيت الخادم.                                                                                                                                                                                                            |
+| `CODEG_SKIP_SIDECAR`           | _(غير مُحدّد)_         | متغير راحة للواجهة الأمامية فقط لـ `pnpm tauri dev` / `pnpm tauri build` — عند `1` يتم تخطّي بناء sidecar الخاص بـ `codeg-mcp`. يُعطَّل التفويض في هذا البناء؛ ويجب ترك المتغير غير مُحدَّد للقطع الصالحة للشحن.                                                                                                                                                                                            |
+| `CODEG_UPLOAD_MAX_TOTAL_BYTES` | _(غير مُحدّد)_         | حدّ صارم لإجمالي البايتات المقيمة تحت `<data dir>/uploads/`. عدد بايتات عشري (مثلاً `10737418240` لـ 10 GiB). إذا كان غير مُحدّد أو `0` أو قيمة لا يمكن تحليلها فسيتم تعطيل الحدّ وطباعة سطر عند البدء حتى تكون الحالة مرئية. يُطبَّق الحدّ داخل عملية `codeg-server` واحدة — تحتاج عمليات النشر الموسَّعة أفقياً التي تتشارك حجم `uploads/` واحداً إلى تنسيق خارجي (قفل ملف، Redis، حصّة عبر بروكسي عكسي). |
+| `CODEG_UPLOAD_QUOTA_STRICT`    | _(غير مُحدّد)_         | عند كونه صحيحاً (`1` / `true` / `yes` / `on`)، يُلغي البدء برمز خروج 2 إذا كانت `CODEG_UPLOAD_MAX_TOTAL_BYTES` مضبوطة على قيمة لا يمكن تحليلها، بدلاً من المتابعة مع تحذير WARN. استخدم هذا حين تتطلب سياستك الأمنية أن «تكون الحصّة المُعدَّة فعّالة».                                                                                                                                                     |
 
-## الهندسة المعمارية
+</details>
+
+<details>
+<summary><h2>الهندسة المعمارية</h2></summary>
 
 ```text
 Next.js 16 (Static Export) + React 19
@@ -287,6 +340,8 @@ Next.js 16 (Static Export) + React 19
   Local Filesystem  Git   Chat Channels
     / Git Repos    Repos  (Telegram, Lark, iLink)
 ```
+
+</details>
 
 ## الخصوصية والأمان
 

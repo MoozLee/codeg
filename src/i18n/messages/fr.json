@@ -521,13 +521,21 @@
       "enableHint": "Lorsque cette option est désactivée, l’outil delegate_to_agent est masqué du catalogue d’outils MCP de l’agent.",
       "depthLimit": "Profondeur maximale de délégation",
       "depthHint": "Plage autorisée : {min}–{max}. Limite la profondeur de récursion d’une chaîne de délégation (racine → enfant → petit-enfant …).",
-      "timeoutSeconds": "Délai d’expiration par défaut (secondes)",
-      "timeoutHint": "Plage autorisée : {min}–{max}. 0 désactive le délai d’expiration ; la tâche enfant peut s’exécuter jusqu’à sa fin. Utilisé lorsque l’agent appelant ne précise pas timeout_seconds.",
       "save": "Enregistrer",
       "saving": "Enregistrement…",
       "saved": "Paramètres de délégation enregistrés",
       "saveFailed": "Échec de l’enregistrement des paramètres de délégation",
-      "loadFailed": "Échec du chargement des paramètres de délégation : {detail}"
+      "loadFailed": "Échec du chargement des paramètres de délégation : {detail}",
+      "tabGeneral": "Général",
+      "tabAgentDefaults": "Valeurs par défaut du sous-agent",
+      "agentDefaultsDescription": "Remplacements par agent appliqués lorsque la Collaboration multi-agent démarre un sous-agent pour un appel de délégation. Les options affichées proviennent d’une sonde en direct : votre sélection correspond exactement à ce que l’agent acceptera.",
+      "probing": "Chargement des options disponibles depuis l’agent…",
+      "probeFailed": "Échec du chargement des options : {detail}",
+      "retry": "Réessayer",
+      "noConfigAvailable": "Cet agent n’a aucune option configurable.",
+      "modeLabel": "Mode",
+      "agentDefaultHint": "Valeur par défaut de l’agent : {value}",
+      "defaultOptionLabel": "Par défaut ({value})"
     },
     "actions": {
       "dragSort": "Glisser pour réordonner",
@@ -1200,7 +1208,9 @@
       "editSource": "Modifier la source",
       "openInEditor": "Ouvrir dans l’éditeur",
       "openInEditorFailed": "Échec de l’ouverture dans l’éditeur : {message}",
-      "openInBrowserFailed": "Échec de l’ouverture dans le navigateur : {message}"
+      "openInBrowserFailed": "Échec de l’ouverture dans le navigateur : {message}",
+      "maximize": "Agrandir",
+      "restore": "Restaurer"
     },
     "terminal": {
       "rename": "Renommer",

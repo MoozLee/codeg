@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-codeg 是一个多模式应用，支持桌面客户端和独立服务器部署，用于聚合和浏览本地 AI 编码代理的会话记录。它从多个代理（Claude Code、Codex、OpenCode、Gemini CLI、OpenClaw、Cline）的本地文件系统中读取会话数据，统一格式后在 UI 中展示。同时支持通过聊天频道（Telegram、飞书、微信）远程交互，以及项目脚手架生成、Git 工作流、终端管理等功能。
+Codeg（Code Generation）是一个多智能体编码工作台，它将多个智能体（Claude Code、Codex CLI、OpenCode、Gemini CLI、OpenClaw、Cline 等）统一到一个工作区中，支持会话聚合和多智能体协作，支持桌面安装，服务器/Docker 部署。
 
 ## 技术栈
 
@@ -41,6 +41,10 @@ cargo check --no-default-features --bin codeg-server
 cargo test --no-default-features --bin codeg-server --lib
 cargo clippy --no-default-features --bin codeg-server --lib -- -D warnings
 
+# codeg-mcp 协作伴生进程（多智能体委托）
+cargo check --no-default-features --bin codeg-mcp
+cargo clippy --no-default-features --bin codeg-mcp -- -D warnings
+
 # 解析器快照评审（输出变化时）
 cargo insta review
 INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
@@ -50,10 +54,11 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 
 ### 双模式运行
 
-项目通过 Cargo feature flags 支持两种运行模式：
+项目通过 Cargo feature flags 支持三种二进制：
 
-- **`tauri-runtime`（默认）**：完整桌面应用，包含 Tauri 窗口管理、系统通知、自动更新等
-- **无 feature（`--no-default-features`）**：独立服务器模式，仅编译 Axum HTTP API + WebSocket
+- **`codeg`**（`tauri-runtime`，默认）：完整桌面应用，包含 Tauri 窗口管理、系统通知、自动更新等
+- **`codeg-server`**（无 feature，`--no-default-features`）：独立服务器模式，仅编译 Axum HTTP API + WebSocket
+- **`codeg-mcp`**（无 feature）：per-launch stdio MCP 伴生进程，被注入到代理 CLI 的 MCP 配置中，向 LLM 暴露内置 `delegate_to_agent` 工具。
 
 ### 共享核心
 
@@ -67,11 +72,11 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 后端负责读取和解析本地文件系统上的代理会话文件：
 
 - **`app_state.rs`** — 共享状态（db、连接管理器、终端管理器、事件广播器）
-- **`models/`** — 共享数据结构（agent、conversation、message、folder、chat_channel、system）
-- **`parsers/`** — 每个代理一个解析器（claude、codex、opencode、gemini、cline、openclaw）
+- **`models/`** — 共享数据结构
+- **`parsers/`** — 每个智能体一个解析器
 - **`commands/`** — 业务逻辑，`_core` 函数供两种模式共用，`#[tauri::command]` 函数仅桌面模式
 - **`web/`** — Axum HTTP API + WebSocket + 静态文件服务 + 认证中间件
-- **`acp/`** — Agent Client Protocol 连接管理（注册、预检、fork、二进制缓存、终端运行时）
+- **`acp/`** — Agent Client Protocol 连接管理
 - **`db/`** — SeaORM + SQLite
 
 ### 前端（`src/`）
@@ -105,7 +110,6 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 
 - **仅支持静态导出**：`next.config.ts` 设置 `output: "export"`，不支持动态路由（`[param]`），必须使用查询参数替代
 - **路径别名**：`@/*` 映射到 `./src/*`，导入写法为 `@/lib/utils`、`@/components/ui/button`
-- **Rust serde 约定**：`AgentType` 序列化为 snake_case（`claude_code`、`open_code`）。Tauri 命令参数在 JS 侧使用 camelCase，Rust 侧使用 snake_case
 - **服务器部署**：通过环境变量配置（`CODEG_PORT`、`CODEG_HOST`、`CODEG_TOKEN`、`CODEG_DATA_DIR`、`CODEG_STATIC_DIR`）
 - **Docker 支持**：多阶段构建（Node.js + Rust），支持 `docker-compose` 一键部署
 
