@@ -281,6 +281,7 @@ const ConversationTabView = memo(function ConversationTabView({
     null
   )
   const pendingRetryReplacementOldAnchorRef = useRef<string | null>(null)
+  const pendingRetryOptimisticAnchorRef = useRef<string | null>(null)
 
   const hasPersistedConversation = dbConversationId != null
 
@@ -765,6 +766,13 @@ const ConversationTabView = memo(function ConversationTabView({
         pendingRetryReplacementOldAnchorRef.current = null
       }
 
+      const optimisticRetryAnchorId = pendingRetryOptimisticAnchorRef.current
+      if (optimisticRetryAnchorId) {
+        syncCancelRef.current?.()
+        removeOptimisticTurn(effectiveConversationId, optimisticRetryAnchorId)
+        pendingRetryOptimisticAnchorRef.current = null
+      }
+
       // Pin the tab if it was a temporary preview (single-click opened)
       const currentTab = tabs.find((tab) => tab.id === tabId)
       if (currentTab && !currentTab.isPinned) {
@@ -857,6 +865,7 @@ const ConversationTabView = memo(function ConversationTabView({
       setSyncState,
       sharedT,
       tabs,
+      removeOptimisticTurn,
       tWelcome,
       tabId,
     ]
@@ -1014,6 +1023,7 @@ const ConversationTabView = memo(function ConversationTabView({
 
   const handleCancelRetryEdit = useCallback(() => {
     pendingRetryReplacementOldAnchorRef.current = null
+    pendingRetryOptimisticAnchorRef.current = null
     setRetryEditingTurn(null)
   }, [])
 
@@ -1039,14 +1049,14 @@ const ConversationTabView = memo(function ConversationTabView({
       mqCancelEditing()
       if (isStableRetryEditAnchorId(anchorId)) {
         pendingRetryReplacementOldAnchorRef.current = anchorId
+        pendingRetryOptimisticAnchorRef.current = null
       } else {
         pendingRetryReplacementOldAnchorRef.current = null
-        syncCancelRef.current?.()
-        removeOptimisticTurn(effectiveConversationId, anchorId)
+        pendingRetryOptimisticAnchorRef.current = anchorId
       }
       setRetryEditingTurn(turn)
     },
-    [effectiveConversationId, mqCancelEditing, removeOptimisticTurn]
+    [mqCancelEditing]
   )
 
   const handleSaveQueueEdit = useCallback(

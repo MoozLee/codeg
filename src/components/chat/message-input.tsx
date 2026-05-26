@@ -2438,7 +2438,17 @@ export function MessageInput({
     </>
   )
 
-  const actionButtons = isExternalDraftEditing ? (
+  const actionButtons = isRetryEditingMessage ? (
+    <Button
+      onClick={handleSend}
+      disabled={!hasSendableContent || disabled}
+      size="icon"
+      className="h-8 w-8"
+      title={t("send")}
+    >
+      <Send className="size-4" />
+    </Button>
+  ) : isEditingQueueItem ? (
     <div className="flex items-center gap-1">
       <Button
         onClick={handleCancelExternalEditClick}
@@ -2451,7 +2461,7 @@ export function MessageInput({
       </Button>
       <Button
         onClick={handleSend}
-        disabled={!hasSendableContent || (isRetryEditingMessage && disabled)}
+        disabled={!hasSendableContent}
         size="icon"
         className="h-8 w-8"
         title={tQueue("saveEdit")}
