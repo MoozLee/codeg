@@ -3037,6 +3037,7 @@ mod tests {
             message: "agent exploded".into(),
             agent_type: "claude_code".into(),
             code: Some("sdk_not_installed".into()),
+            terminal: true,
         });
         let captured = s.last_error.as_ref().expect("error must be captured");
         assert_eq!(captured.message, "agent exploded");
@@ -3049,6 +3050,7 @@ mod tests {
             message: "second failure".into(),
             agent_type: "claude_code".into(),
             code: None,
+            terminal: true,
         });
         let captured = s.last_error.as_ref().unwrap();
         assert_eq!(captured.message, "second failure");

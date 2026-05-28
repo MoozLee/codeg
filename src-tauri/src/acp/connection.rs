@@ -504,6 +504,12 @@ pub async fn spawn_agent_connection(
                     message: e.to_string(),
                     agent_type: agent_type.to_string(),
                     code,
+                    // The only genuinely terminal emit site: `run_connection`
+                    // is unwinding and the next event is `Disconnected`.
+                    // The lifecycle worker uses this flag to decide whether
+                    // to flip the conversation row to Cancelled and to
+                    // buffer the detail for the broker's cancel reason.
+                    terminal: true,
                 },
             )
             .await;
@@ -1694,6 +1700,9 @@ async fn run_connection(
                                     message: format!("Failed to load session, starting new: {e}"),
                                     agent_type: agent_type.to_string(),
                                     code: None,
+                                    // Recoverable: we fall through to `session/new`
+                                    // below. Connection stays alive.
+                                    terminal: false,
                                 },
                             )
                             .await;
@@ -2870,6 +2879,13 @@ fn turn_failure_error_event(reason_str: &str, agent_type: AgentType) -> Option<A
         message,
         agent_type: agent_type.to_string(),
         code: Some(code.to_string()),
+        // Non-terminal: this Error is paired with a `TurnComplete`
+        // carrying the same stop reason. The connection stays alive and
+        // the broker's pending entry is drained by `complete_call` with
+        // the correct child-side mapping (`ChildRefusal` /
+        // `ChildMaxTokens` / …). See F1 in the v0.14.3 sub-agent
+        // delegation post-mortem.
+        terminal: false,
     })
 }
 
@@ -2942,6 +2958,9 @@ async fn run_conversation_loop<'a>(
                             message: "Prompt must contain at least one content block".into(),
                             agent_type: agent_type.to_string(),
                             code: None,
+                            // Recoverable: idle loop continues, awaiting the
+                            // next user command. Connection stays alive.
+                            terminal: false,
                         },
                     )
                     .await;
@@ -3207,6 +3226,8 @@ async fn run_conversation_loop<'a>(
                                                     message: format!("Failed to set mode: {e}"),
                                                     agent_type: agent_type.to_string(),
                                                     code: None,
+                                                    // Recoverable: just a failed mode toggle.
+                                                    terminal: false,
                                                 },
                                             )
                                             .await;
@@ -3235,6 +3256,8 @@ async fn run_conversation_loop<'a>(
                                                 message: format!("Failed to set config option: {e}"),
                                                 agent_type: agent_type.to_string(),
                                                 code: None,
+                                                // Recoverable: just a failed config-option toggle.
+                                                terminal: false,
                                             },
                                         )
                                         .await;
@@ -3372,6 +3395,10 @@ async fn run_conversation_loop<'a>(
                             message: format!("Failed to set mode: {e}"),
                             agent_type: agent_type.to_string(),
                             code: None,
+                            // Recoverable: idle SetMode failure leaves the
+                            // connection alive — same rationale as the
+                            // mid-prompt SetMode site above.
+                            terminal: false,
                         },
                     )
                     .await;
@@ -3392,6 +3419,9 @@ async fn run_conversation_loop<'a>(
                             message: format!("Failed to set config option: {e}"),
                             agent_type: agent_type.to_string(),
                             code: None,
+                            // Recoverable: idle SetConfigOption failure leaves
+                            // the connection alive.
+                            terminal: false,
                         },
                     )
                     .await;
@@ -4639,5 +4669,67 @@ mod tests {
                 .to_string(),
         );
         assert!(is_opencode_subagent_invocation(AgentType::OpenCode, &input));
+    }
+
+    // ─── inject_codeg_delegate_mcp: enabled=false short-circuit ──────────
+    //
+    // Guards the "default off" product contract: when the broker config has
+    // `enabled: false` (the new production default for fresh installs), the
+    // delegate-MCP injection must not push a server entry and must not
+    // register a per-launch token. The early return at the top of
+    // `inject_codeg_delegate_mcp` is the single chokepoint that keeps a
+    // codeg-delegate stdio MCP out of every ACP session until the user
+    // opts in via the settings panel.
+    #[tokio::test]
+    async fn inject_codeg_delegate_skipped_when_broker_disabled() {
+        use crate::acp::delegation::broker::{
+            ConversationDepthLookup, DelegationBroker,
+        };
+        use crate::acp::delegation::listener::TokenRegistry;
+        use crate::acp::delegation::spawner::{mock::MockSpawner, ConnectionSpawner};
+        use crate::acp::delegation::types::DelegationError;
+
+        struct EmptyLookup;
+        #[async_trait::async_trait]
+        impl ConversationDepthLookup for EmptyLookup {
+            async fn parent_of(&self, _id: i32) -> Result<Option<i32>, DelegationError> {
+                Ok(None)
+            }
+        }
+
+        let broker = Arc::new(DelegationBroker::new(
+            Arc::new(MockSpawner::default()) as Arc<dyn ConnectionSpawner>,
+            Arc::new(EmptyLookup) as Arc<dyn ConversationDepthLookup>,
+        ));
+        // No set_config call: broker carries its default config, which is
+        // `enabled: false` after the product-default flip. This is the
+        // exact state a fresh install reaches before the user touches the
+        // settings panel.
+        let injection = DelegationInjection {
+            broker,
+            tokens: Arc::new(TokenRegistry::default()),
+            socket_path: std::path::PathBuf::from("/tmp/codeg-delegate.sock"),
+        };
+
+        let mut servers: Vec<McpServer> = Vec::new();
+        let result = inject_codeg_delegate_mcp(
+            &mut servers,
+            &injection,
+            "parent-conn",
+            std::path::Path::new("/tmp"),
+        )
+        .await;
+
+        assert!(result.is_none(), "disabled broker must return None");
+        assert!(
+            servers.is_empty(),
+            "disabled broker must not push any MCP server entry; got {servers:?}"
+        );
+        // Token registry stays untouched — no lookup should resolve to a
+        // valid entry because nothing was registered.
+        assert!(
+            injection.tokens.lookup("any-token").await.is_none(),
+            "disabled broker must not register a delegate token"
+        );
     }
 }

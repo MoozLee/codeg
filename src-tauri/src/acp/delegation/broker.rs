@@ -70,7 +70,7 @@ pub struct DelegationConfig {
 impl Default for DelegationConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             depth_limit: 2,
             agent_defaults: BTreeMap::new(),
         }
@@ -775,7 +775,19 @@ impl DelegationBroker {
     /// session disconnects or errors out without firing a clean
     /// TurnComplete — the parent's `tool_use_id` shouldn't dangle.
     /// No-op when no matching entry exists.
-    pub async fn cancel_by_child_connection(&self, child_connection_id: &str) {
+    ///
+    /// `terminal_error` carries the child connection's last `AcpEvent::Error`
+    /// detail when the lifecycle worker is dispatching off an `Error` event
+    /// (vs. a bare `Disconnected`). When present, it gets appended to the
+    /// `Canceled { reason }` string so the parent agent's tool-call result
+    /// surfaces the real cause (e.g. "Authentication required",
+    /// "transport closed") instead of the opaque default. Falls back to
+    /// the default reason when `None`.
+    pub async fn cancel_by_child_connection(
+        &self,
+        child_connection_id: &str,
+        terminal_error: Option<&str>,
+    ) {
         let drained: Vec<PendingCall> = {
             let mut map = self.pending.inner.lock().await;
             let keys: Vec<String> = map
@@ -786,6 +798,12 @@ impl DelegationBroker {
             keys.into_iter()
                 .map(|k| map.remove(&k).expect("key just observed"))
                 .collect()
+        };
+        let reason = match terminal_error {
+            Some(detail) if !detail.trim().is_empty() => {
+                format!("child session ended without TurnComplete: {detail}")
+            }
+            _ => "child session ended without TurnComplete".to_string(),
         };
         for entry in drained {
             self.write_meta_if_real(
@@ -812,7 +830,7 @@ impl DelegationBroker {
             let _ = self.spawner.disconnect(&entry.child_connection_id).await;
             let _ = entry.tx.send(DelegationOutcome::from_err(
                 DelegationError::Canceled {
-                    reason: "child session ended without TurnComplete".into(),
+                    reason: reason.clone(),
                 },
                 Some(entry.child_conversation_id),
             ));
@@ -950,6 +968,20 @@ mod tests {
         r
     }
 
+    /// Bring the broker's `enabled` switch up before driving any test that
+    /// hits `handle_request`. Production now defaults to `enabled: false`,
+    /// so a bare `DelegationBroker::new(...)` would short-circuit before
+    /// parking a pending entry. Tests that assert disabled behavior set
+    /// their own config explicitly and skip this helper.
+    async fn enable_delegation(broker: &DelegationBroker) {
+        broker
+            .set_config(DelegationConfig {
+                enabled: true,
+                ..DelegationConfig::default()
+            })
+            .await;
+    }
+
     // -- Task 4.3 -----------------------------------------------------------
 
     #[tokio::test]
@@ -999,6 +1031,7 @@ mod tests {
         mock.queue_send(Ok(42)).await;
         let broker =
             DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1049,6 +1082,7 @@ mod tests {
         mock.queue_spawn(Err(SpawnerError::Spawn("nope".into())))
             .await;
         let broker = DelegationBroker::new(mock as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
         let outcome = broker.handle_request(request(1, "pt-1")).await;
         match outcome {
             DelegationOutcome::Err { code, .. } => assert_eq!(code, "spawn_failed"),
@@ -1142,6 +1176,7 @@ mod tests {
             .await;
         let broker =
             DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
         let outcome = broker.handle_request(request(1, "pt-1")).await;
         match outcome {
             DelegationOutcome::Err { code, .. } => assert_eq!(code, "spawn_failed"),
@@ -1160,6 +1195,7 @@ mod tests {
         mock.queue_send(Ok(99)).await;
         let broker =
             DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1204,6 +1240,7 @@ mod tests {
         }
         let broker =
             DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
 
         let mut handles = Vec::new();
         for i in 0..3 {
@@ -1238,6 +1275,7 @@ mod tests {
         mock.queue_send(Ok(200)).await;
         let broker =
             DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1343,6 +1381,7 @@ mod tests {
         mock.queue_send(Ok(7)).await;
         let broker =
             DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
         broker
             .register_pending_tool_call("parent-conn", "tu-from-acp".into())
             .await;
@@ -1384,6 +1423,7 @@ mod tests {
         mock.queue_send(Ok(13)).await;
         let broker =
             DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1429,6 +1469,7 @@ mod tests {
         mock.queue_send(Ok(11)).await;
         let broker =
             DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
         let driver = {
             let broker = broker.clone();
             tokio::spawn(async move { broker.handle_request(request(1, "")).await })
@@ -1512,12 +1553,17 @@ mod tests {
     use crate::acp::delegation::meta_writer::mock::MockMetaWriter;
     use crate::acp::delegation::meta_writer::DelegationMetaWriter;
 
-    fn broker_with_meta(mock: Arc<MockSpawner>, writer: Arc<MockMetaWriter>) -> DelegationBroker {
-        DelegationBroker::with_meta_writer(
+    async fn broker_with_meta(
+        mock: Arc<MockSpawner>,
+        writer: Arc<MockMetaWriter>,
+    ) -> DelegationBroker {
+        let broker = DelegationBroker::with_meta_writer(
             mock as Arc<dyn ConnectionSpawner>,
             shallow_lookup(),
             writer as Arc<dyn DelegationMetaWriter>,
-        )
+        );
+        enable_delegation(&broker).await;
+        broker
     }
 
     #[tokio::test]
@@ -1526,7 +1572,7 @@ mod tests {
         mock.queue_spawn(Ok("child-conn-1".into())).await;
         mock.queue_send(Ok(42)).await;
         let writer = Arc::new(MockMetaWriter::new());
-        let broker = broker_with_meta(mock.clone(), writer.clone());
+        let broker = broker_with_meta(mock.clone(), writer.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1604,7 +1650,7 @@ mod tests {
         mock.queue_spawn(Ok("child-conn-2".into())).await;
         mock.queue_send(Ok(7)).await;
         let writer = Arc::new(MockMetaWriter::new());
-        let broker = broker_with_meta(mock.clone(), writer.clone());
+        let broker = broker_with_meta(mock.clone(), writer.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1648,7 +1694,7 @@ mod tests {
         mock.queue_spawn(Ok("c-cancel".into())).await;
         mock.queue_send(Ok(33)).await;
         let writer = Arc::new(MockMetaWriter::new());
-        let broker = broker_with_meta(mock.clone(), writer.clone());
+        let broker = broker_with_meta(mock.clone(), writer.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1683,7 +1729,7 @@ mod tests {
         mock.queue_spawn(Ok("c-synth".into())).await;
         mock.queue_send(Ok(8)).await;
         let writer = Arc::new(MockMetaWriter::new());
-        let broker = broker_with_meta(mock.clone(), writer.clone());
+        let broker = broker_with_meta(mock.clone(), writer.clone()).await;
 
         // Empty `parent_tool_use_id` triggers the broker's UUID fallback —
         // `"delegation-<uuid>"` — which the writer must skip because no
@@ -1735,17 +1781,19 @@ mod tests {
     use crate::acp::delegation::event_emitter::DelegationEventEmitter;
     use crate::acp::types::DelegationResultSummary;
 
-    fn broker_with_emitter(
+    async fn broker_with_emitter(
         mock: Arc<MockSpawner>,
         writer: Arc<MockMetaWriter>,
         emitter: Arc<MockEventEmitter>,
     ) -> DelegationBroker {
-        DelegationBroker::with_writers(
+        let broker = DelegationBroker::with_writers(
             mock as Arc<dyn ConnectionSpawner>,
             shallow_lookup(),
             writer as Arc<dyn DelegationMetaWriter>,
             emitter as Arc<dyn DelegationEventEmitter>,
-        )
+        );
+        enable_delegation(&broker).await;
+        broker
     }
 
     #[tokio::test]
@@ -1755,7 +1803,7 @@ mod tests {
         mock.queue_send(Ok(42)).await;
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1802,7 +1850,7 @@ mod tests {
         mock.queue_send(Ok(11)).await;
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1846,7 +1894,7 @@ mod tests {
         mock.queue_send(Ok(91)).await;
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1893,7 +1941,7 @@ mod tests {
         mock.queue_send(Ok(13)).await;
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         // Pre-cancel before spawning the driver — handle is unknown to the
         // broker right now, but a buffered entry should make the next
@@ -1923,7 +1971,7 @@ mod tests {
         mock.queue_send(Ok(55)).await;
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -1932,12 +1980,19 @@ mod tests {
         while broker.pending_count().await == 0 {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        broker.cancel_by_child_connection("c-dropped").await;
+        broker.cancel_by_child_connection("c-dropped", None).await;
         let outcome = driver.await.unwrap();
-        assert!(matches!(
-            outcome,
-            DelegationOutcome::Err { ref code, .. } if code == "canceled"
-        ));
+        match &outcome {
+            DelegationOutcome::Err { code, message, .. } => {
+                assert_eq!(code, "canceled");
+                // No terminal_error supplied → falls back to default reason.
+                assert_eq!(
+                    message,
+                    "canceled: child session ended without TurnComplete"
+                );
+            }
+            other => panic!("expected Err{{canceled}}, got {other:?}"),
+        }
 
         let calls = emitter.snapshot().await;
         assert_eq!(calls.len(), 1);
@@ -1950,6 +2005,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancel_by_child_connection_threads_terminal_error_into_reason() {
+        // The lifecycle worker forwards the child's last AcpEvent::Error
+        // detail through `cancel_by_child_connection`. The broker stitches it
+        // into the `Canceled { reason }` message so the parent's
+        // `delegate_to_agent` tool-call result surfaces the real failure
+        // cause (e.g. Gemini OAuth expired) instead of the opaque default.
+        let mock = Arc::new(MockSpawner::new());
+        mock.queue_spawn(Ok("c-auth".into())).await;
+        mock.queue_send(Ok(77)).await;
+        let writer = Arc::new(MockMetaWriter::new());
+        let emitter = Arc::new(MockEventEmitter::new());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
+
+        let driver = {
+            let broker = broker.clone();
+            tokio::spawn(async move { broker.handle_request(request(1, "pt-auth")).await })
+        };
+        while broker.pending_count().await == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        broker
+            .cancel_by_child_connection("c-auth", Some("[auth_required] Authentication required"))
+            .await;
+        let outcome = driver.await.unwrap();
+        match &outcome {
+            DelegationOutcome::Err { code, message, .. } => {
+                assert_eq!(code, "canceled");
+                assert_eq!(
+                    message,
+                    "canceled: child session ended without TurnComplete: \
+                     [auth_required] Authentication required"
+                );
+            }
+            other => panic!("expected Err{{canceled}}, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_by_child_connection_ignores_empty_terminal_error() {
+        // Whitespace-only or empty detail strings shouldn't produce a
+        // dangling "...:" suffix on the reason — fall back to the default.
+        let mock = Arc::new(MockSpawner::new());
+        mock.queue_spawn(Ok("c-empty".into())).await;
+        mock.queue_send(Ok(78)).await;
+        let broker =
+            DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
+
+        let driver = {
+            let broker = broker.clone();
+            tokio::spawn(async move { broker.handle_request(request(1, "pt-empty")).await })
+        };
+        while broker.pending_count().await == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        broker
+            .cancel_by_child_connection("c-empty", Some("   "))
+            .await;
+        let outcome = driver.await.unwrap();
+        match &outcome {
+            DelegationOutcome::Err { message, .. } => {
+                assert_eq!(
+                    message,
+                    "canceled: child session ended without TurnComplete"
+                );
+            }
+            other => panic!("expected Err, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn emitter_records_one_event_per_drained_entry_on_cancel_by_parent() {
         let mock = Arc::new(MockSpawner::new());
         for i in 0..3 {
@@ -1958,7 +2084,7 @@ mod tests {
         }
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         let mut handles = Vec::new();
         for i in 0..3 {
@@ -2001,7 +2127,7 @@ mod tests {
         mock.queue_send(Ok(42)).await;
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -2028,7 +2154,7 @@ mod tests {
         mock.queue_send(Ok(8)).await;
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -2075,7 +2201,7 @@ mod tests {
         mock.queue_send(Ok(7)).await;
         let writer = Arc::new(MockMetaWriter::new());
         let emitter = Arc::new(MockEventEmitter::new());
-        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone());
+        let broker = broker_with_emitter(mock.clone(), writer.clone(), emitter.clone()).await;
 
         let driver = {
             let broker = broker.clone();
@@ -2180,6 +2306,7 @@ mod tests {
                 as Arc<dyn crate::acp::delegation::meta_writer::DelegationMetaWriter>,
             real_emitter as Arc<dyn crate::acp::delegation::event_emitter::DelegationEventEmitter>,
         );
+        enable_delegation(&broker).await;
 
         // Park a pending entry then trigger cancel_by_parent to drive the
         // production emit path. `request()` hard-codes parent_connection_id
@@ -2261,6 +2388,7 @@ mod tests {
                 as Arc<dyn crate::acp::delegation::meta_writer::DelegationMetaWriter>,
             real_emitter as Arc<dyn crate::acp::delegation::event_emitter::DelegationEventEmitter>,
         );
+        enable_delegation(&broker).await;
 
         let driver = {
             let broker = broker.clone();
