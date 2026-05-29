@@ -1202,9 +1202,7 @@ export function ConversationRuntimeProvider({
 
       if (
         session &&
-        (session.optimisticTurns.length > 0 ||
-          session.liveMessage !== null ||
-          session.localTurns.length > 0)
+        (session.optimisticTurns.length > 0 || session.liveMessage !== null)
       ) {
         return
       }

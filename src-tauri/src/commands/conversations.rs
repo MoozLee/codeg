@@ -740,6 +740,7 @@ mod tests {
     fn tool_use_turn(tool_use_id: Option<&str>, tool_name: &str) -> MessageTurn {
         MessageTurn {
             id: "t1".into(),
+            anchor_id: None,
             role: TurnRole::Assistant,
             blocks: vec![ContentBlock::ToolUse {
                 tool_use_id: tool_use_id.map(String::from),
@@ -848,6 +849,7 @@ mod tests {
         let pre_existing = serde_json::json!({ "codeg.delegation": { "status": "running", "child_conversation_id": 999 } });
         let mut turns = vec![MessageTurn {
             id: "t1".into(),
+            anchor_id: None,
             role: TurnRole::Assistant,
             blocks: vec![ContentBlock::ToolUse {
                 tool_use_id: Some("tu-1".into()),

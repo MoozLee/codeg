@@ -197,7 +197,8 @@ pub(crate) async fn handle_event(
             };
             let conversation_id = state_arc.read().await.conversation_id;
             if let Some(cid) = conversation_id {
-                conversation_service::update_external_id(db_conn, cid, session_id.clone()).await?;
+                conversation_service::update_external_id_if_missing(db_conn, cid, session_id.clone())
+                    .await?;
             }
             Ok(())
         }
