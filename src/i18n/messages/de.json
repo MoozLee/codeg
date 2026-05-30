@@ -2269,7 +2269,8 @@
     },
     "toasts": {
       "createFailed": "Projekt konnte nicht erstellt werden",
-      "createSuccess": "Projekt erfolgreich erstellt"
+      "createSuccess": "Projekt erfolgreich erstellt",
+      "openWorkspaceFailed": "Projekt erstellt, konnte aber nicht im Arbeitsbereich geöffnet werden"
     },
     "errors": {
       "directoryExists": "Zielverzeichnis existiert bereits",

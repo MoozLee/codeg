@@ -64,6 +64,7 @@ const defaultFoldersMock: FolderDetail[] = [
     last_opened_at: "2026-05-24T00:00:00Z",
     sort_order: 0,
     color: "blue",
+    is_pinned: false,
   },
   {
     id: 2,
@@ -74,6 +75,7 @@ const defaultFoldersMock: FolderDetail[] = [
     last_opened_at: "2026-05-24T00:00:00Z",
     sort_order: 1,
     color: "green",
+    is_pinned: false,
   },
 ]
 
