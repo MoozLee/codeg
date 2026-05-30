@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Reorder } from "motion/react"
+import { toast } from "sonner"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import type { TabItem as TabItemData } from "@/contexts/tab-context"
@@ -10,6 +11,7 @@ import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useOpenConversation } from "@/hooks/use-open-conversation"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
+import { toErrorMessage } from "@/lib/app-error"
 import { TabItem } from "./tab-item"
 import { cn } from "@/lib/utils"
 
@@ -92,6 +94,8 @@ export function TabBar() {
         agentType: tab.agentType,
         pin: true,
         explicitWindow: true,
+      }).catch((error) => {
+        toast.error(toErrorMessage(error))
       })
     },
     [openConversation]

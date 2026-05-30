@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import {
   buildWorkspaceUrlAfterBootstrap,
+  hasAnyConsumedWorkspaceBootstrap,
   hasWorkspaceBootstrapParams,
   parseWorkspaceBootstrap,
   rememberTabPersistenceMode,
@@ -27,7 +28,8 @@ function parseConversationIdFromWindowLabel(
   label: string | null
 ): number | null {
   if (!label?.startsWith("conversation-")) return null
-  const parsed = Number(label.slice("conversation-".length))
+  const idPart = label.slice("conversation-".length).split("-", 1)[0]
+  const parsed = Number(idPart)
   return Number.isFinite(parsed) ? parsed : null
 }
 
@@ -57,9 +59,11 @@ export function DeepLinkBootstrap() {
 
     const hasBootstrapParams = hasWorkspaceBootstrapParams(search)
 
-    if (!hasBootstrapParams && !isDesktop()) {
-      lastHandledSearchRef.current = search
-      return
+    if (!hasBootstrapParams) {
+      if (!isDesktop() || hasAnyConsumedWorkspaceBootstrap()) {
+        lastHandledSearchRef.current = search
+        return
+      }
     }
 
     lastHandledSearchRef.current = search

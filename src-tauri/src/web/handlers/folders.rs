@@ -9,6 +9,13 @@ use crate::commands::folders as folder_commands;
 use crate::db::service::{conversation_service, folder_service};
 use crate::models::*;
 
+fn agent_type_wire_value(agent_type: AgentType) -> Result<String, AppCommandError> {
+    serde_json::to_value(agent_type)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| AppCommandError::invalid_input("Invalid agent type"))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderIdParams {
@@ -332,10 +339,12 @@ pub async fn open_conversation_window(
         .await
         .map_err(AppCommandError::from)?;
 
+    let agent_type = agent_type_wire_value(summary.agent_type)?;
+
     Ok(Json(SettingsNavigationResult {
         path: format!(
             "/workspace?tabPersistence=window-local&open=conversation&folderId={}&conversationId={}&agent={}",
-            summary.folder_id, summary.id, summary.agent_type
+            summary.folder_id, summary.id, agent_type
         ),
     }))
 }

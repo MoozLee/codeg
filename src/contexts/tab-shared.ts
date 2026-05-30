@@ -168,6 +168,7 @@ export const WORKSPACE_BOOTSTRAP_QUERY_KEYS = [
 export const WINDOW_LOCAL_OPENED_TABS_STORAGE_KEY = "workspace:opened-tabs"
 
 const REMEMBERED_TAB_PERSISTENCE_STORAGE_KEY = "workspace:tab-persistence-mode"
+const CONSUMED_WORKSPACE_BOOTSTRAP_STORAGE_KEY = "workspace:bootstrap-consumed"
 
 function toSearchParams(
   input: string | URLSearchParams | ReadonlyURLSearchParamsLike
@@ -257,6 +258,52 @@ export function rememberTabPersistenceMode(mode: TabPersistenceMode): void {
     window.sessionStorage.removeItem(REMEMBERED_TAB_PERSISTENCE_STORAGE_KEY)
   } catch {
     /* ignore */
+  }
+}
+
+export function consumeWorkspaceBootstrap(search: string): void {
+  if (typeof window === "undefined" || !hasWorkspaceBootstrapParams(search)) {
+    return
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      CONSUMED_WORKSPACE_BOOTSTRAP_STORAGE_KEY,
+      search
+    )
+    window.history.replaceState(
+      {},
+      "",
+      buildWorkspaceUrlAfterBootstrap(window.location.pathname, search)
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+export function hasConsumedWorkspaceBootstrap(search: string): boolean {
+  if (typeof window === "undefined") return false
+
+  try {
+    return (
+      window.sessionStorage.getItem(
+        CONSUMED_WORKSPACE_BOOTSTRAP_STORAGE_KEY
+      ) === search
+    )
+  } catch {
+    return false
+  }
+}
+
+export function hasAnyConsumedWorkspaceBootstrap(): boolean {
+  if (typeof window === "undefined") return false
+
+  try {
+    return Boolean(
+      window.sessionStorage.getItem(CONSUMED_WORKSPACE_BOOTSTRAP_STORAGE_KEY)
+    )
+  } catch {
+    return false
   }
 }
 

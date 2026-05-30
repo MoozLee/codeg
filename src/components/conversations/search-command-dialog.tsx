@@ -5,6 +5,7 @@ import { formatDistanceToNow } from "date-fns"
 import { enUS, zhCN, zhTW } from "date-fns/locale"
 import { File, Folder } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
@@ -29,7 +30,7 @@ import {
   CommandItem,
 } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
-
+import { toErrorMessage } from "@/lib/app-error"
 type SearchTab = "conversations" | "files"
 
 interface SearchCommandDialogProps {
@@ -153,7 +154,12 @@ export function SearchCommandDialog({
         agentType: conv.agent_type,
         pin: true,
       })
-      onOpenChange(false)
+        .then(() => {
+          onOpenChange(false)
+        })
+        .catch((error) => {
+          toast.error(toErrorMessage(error))
+        })
     },
     [onOpenChange, openConversation]
   )

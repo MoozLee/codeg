@@ -1235,6 +1235,8 @@ export function SidebarConversationList({
         conversationId: id,
         agentType: agentType as DbConversationSummary["agent_type"],
         pin: false,
+      }).catch((error) => {
+        toast.error(toErrorMessage(error))
       })
     },
     [conversations, openConversation]
@@ -1251,6 +1253,8 @@ export function SidebarConversationList({
         conversationId: id,
         agentType: agentType as DbConversationSummary["agent_type"],
         pin: true,
+      }).catch((error) => {
+        toast.error(toErrorMessage(error))
       })
     },
     [conversations, openConversation]
@@ -1268,6 +1272,8 @@ export function SidebarConversationList({
         agentType: agentType as DbConversationSummary["agent_type"],
         pin: true,
         explicitWindow: true,
+      }).catch((error) => {
+        toast.error(toErrorMessage(error))
       })
     },
     [conversations, openConversation]

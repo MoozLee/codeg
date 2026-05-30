@@ -44,9 +44,9 @@ mod tauri_app {
         delegation as delegation_commands, experts as experts_commands, file_io, folder_commands,
         folders, mcp as mcp_commands, model_provider as model_provider_commands, notification,
         pet as pet_commands, project_boot, provider_usage as provider_usage_commands,
-        quick_messages as quick_messages_commands,
-        remote_proxy as remote_proxy_commands, remote_workspace as remote_workspace_commands,
-        system_settings, terminal as terminal_commands, version_control, windows,
+        quick_messages as quick_messages_commands, remote_proxy as remote_proxy_commands,
+        remote_workspace as remote_workspace_commands, system_settings,
+        terminal as terminal_commands, version_control, windows,
         workspace_state as workspace_state_commands,
     };
     use crate::terminal::manager::TerminalManager;
@@ -635,7 +635,11 @@ mod tauri_app {
                 {
                     let app = window.app_handle();
                     if let Some(state) = app.try_state::<windows::ConversationWindowState>() {
-                        windows::cleanup_conversation_window(&state, &label);
+                        if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                            windows::begin_closing_conversation_window(&state, &label);
+                        } else {
+                            windows::cleanup_conversation_window(&state, &label);
+                        }
                     }
                     if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                         if let Some(cm) = app.try_state::<ConnectionManager>() {

@@ -70,10 +70,7 @@ export function useOpenConversation() {
         if (focusedExistingWindow) {
           return { focusedExisting: true }
         }
-        if (alreadyOpenInCurrentWindow) {
-          return await openInWorkspaceTab()
-        }
-        return openInDedicatedWindow()
+        return await openInWorkspaceTab()
       }
 
       if (explicitWindow) {

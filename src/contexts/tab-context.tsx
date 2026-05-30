@@ -15,6 +15,7 @@ import { useAcpActions } from "@/contexts/acp-connections-context"
 import {
   TabContext,
   bumpActivationSeq,
+  consumeWorkspaceBootstrap,
   findTabIndexForConversation,
   makeConversationTabId,
   makeNewConversationTabId,
@@ -373,6 +374,7 @@ export function TabProvider({
           }
 
           if (!cancelled && bootstrapState?.target) {
+            consumeWorkspaceBootstrap(window.location.search)
             const initialTab: TabItemInternal =
               bootstrapState.target.kind === "conversation"
                 ? {
