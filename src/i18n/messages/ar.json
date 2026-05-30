@@ -567,7 +567,8 @@
       "deleting": "جارٍ الحذف...",
       "confirmDelete": "تأكيد الحذف",
       "confirmUninstall": "تأكيد إزالة التثبيت",
-      "saveClineConfig": "حفظ تكوين Cline"
+      "saveClineConfig": "حفظ تكوين Cline",
+      "customInstall": "تثبيت مخصص"
     },
     "status": {
       "enabled": "مفعّل",
@@ -690,7 +691,12 @@
       "confirmDeleteProvider": "حذف المزود {providerId}؟",
       "confirmDeleteProviderDescription": "سيتم تحديث إعداد OpenCode وauth JSON معًا. لا يمكن التراجع عن هذا الإجراء.",
       "confirmUninstall": "إزالة تثبيت {name}؟",
-      "confirmUninstallDescription": "سيؤدي هذا إلى إزالة الإصدار المثبت محليًا. يمكنك إعادة التثبيت لاحقًا."
+      "confirmUninstallDescription": "سيؤدي هذا إلى إزالة الإصدار المثبت محليًا. يمكنك إعادة التثبيت لاحقًا.",
+      "customInstallTitle": "تثبيت مخصص لـ {name}",
+      "customInstallDescription": "أدخل الإصدار المراد تثبيته. سيؤدي ذلك إلى إعادة التثبيت واستبدال الإصدار المثبت حاليًا.",
+      "customInstallVersionLabel": "رقم الإصدار",
+      "customInstallInvalid": "أدخل رقم إصدار صالحًا، مثل 1.2.3.",
+      "customInstallSubmit": "تثبيت"
     },
     "errors": {
       "nativeJsonMustBeObject": "يجب أن يكون إعداد JSON الأصلي كائنًا",
@@ -2045,6 +2051,7 @@
         "detailTitle": "محادثة الوكيل الفرعي",
         "detailDescription": "عرض للقراءة فقط لمحادثة الوكيل الفرعي المُفوَّض.",
         "status": {
+          "starting": "قيد البدء",
           "running": "قيد التشغيل",
           "ok": "اكتمل",
           "err": {

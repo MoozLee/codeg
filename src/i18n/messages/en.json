@@ -567,7 +567,8 @@
       "deleting": "Deleting...",
       "confirmDelete": "Confirm Delete",
       "confirmUninstall": "Confirm Uninstall",
-      "saveClineConfig": "Save Cline Config"
+      "saveClineConfig": "Save Cline Config",
+      "customInstall": "Custom install"
     },
     "status": {
       "enabled": "Enabled",
@@ -690,7 +691,12 @@
       "confirmDeleteProvider": "Delete Provider {providerId}?",
       "confirmDeleteProviderDescription": "OpenCode config and auth JSON will be updated together. This action cannot be undone.",
       "confirmUninstall": "Uninstall {name}?",
-      "confirmUninstallDescription": "This removes local installed version. You can reinstall later."
+      "confirmUninstallDescription": "This removes local installed version. You can reinstall later.",
+      "customInstallTitle": "Custom install {name}",
+      "customInstallDescription": "Enter the version to install. This reinstalls and replaces the currently installed version.",
+      "customInstallVersionLabel": "Version number",
+      "customInstallInvalid": "Enter a valid version number, e.g. 1.2.3.",
+      "customInstallSubmit": "Install"
     },
     "errors": {
       "nativeJsonMustBeObject": "Native JSON config must be an object",
@@ -2045,6 +2051,7 @@
         "detailTitle": "Sub-agent conversation",
         "detailDescription": "Read-only view of the delegated sub-agent's conversation.",
         "status": {
+          "starting": "starting",
           "running": "running",
           "ok": "done",
           "err": {
