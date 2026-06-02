@@ -521,6 +521,8 @@
       "enableHint": "オフにすると、delegate_to_agent ツールはエージェントの MCP ツール一覧から非表示になります。",
       "depthLimit": "最大委任深度",
       "depthHint": "許可範囲: {min}–{max}。委任チェーン（ルート → 子 → 孫 …）の再帰深度を制限します。",
+      "completedCacheLabel": "完了結果のキャッシュ（MB）",
+      "completedCacheHint": "実行中の委任セッションが保持する、完了したサブエージェント結果のメモリ内キャッシュ。そのセッションの実行中のみ保持され、セッション終了時に自動的に破棄されます。この予算を超えると古い結果から順にメモリから破棄されます（サブエージェント自身のセッションでは引き続き閲覧可能）。0 は無制限（それでもセッション終了時に破棄）。",
       "save": "保存",
       "saving": "保存中…",
       "saved": "委任設定を保存しました",
@@ -2053,6 +2055,7 @@
         "status": {
           "starting": "起動中",
           "running": "実行中",
+          "waiting": "承認待ち",
           "ok": "完了",
           "err": {
             "default": "失敗",
@@ -2223,7 +2226,21 @@
   "ProjectBoot": {
     "title": "プロジェクトブート",
     "tabs": {
-      "shadcn": "shadcn"
+      "shadcn": "shadcn",
+      "hyperframes": "HyperFrames"
+    },
+    "hyperframes": {
+      "title": "HyperFrames 動画プロジェクト",
+      "subtitle": "HTML から動画を生成するプロジェクトを作成します。ワークスペースのエージェントがそれを記述・レンダリングできます。",
+      "resolution": "解像度",
+      "skillsTitle": "エージェントスキル",
+      "skillsDesc": "選択したエージェント向けに HyperFrames スキルをグローバル(シンボリックリンク)でインストールし、動画の作成・レンダリングを可能にします。",
+      "recheck": "再チェック",
+      "installedBadge": "インストール済み",
+      "skillsInstall": "スキルをインストール / 更新",
+      "skillsInstalling": "スキルをインストール中…",
+      "skillsInstalled": "HyperFrames スキルをインストールしました",
+      "skillsInstallFailed": "HyperFrames スキルのインストールに失敗しました"
     },
     "config": {
       "base": "ベース",

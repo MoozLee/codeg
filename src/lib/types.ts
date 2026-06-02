@@ -642,16 +642,23 @@ export type AcpEvent =
       parent_tool_use_id: string
       child_connection_id: string
       child_conversation_id: number
+      /** Child agent type. Carried so a frontend that missed the
+       *  `delegation_started` event (mounted mid-flight, reconnect, or
+       *  snapshot replay) can bind the correct agent instead of a default. */
+      agent_type: AgentType
       result: DelegationResultSummary
     }
 
 /**
  * Mirror of Rust `DelegationResultSummary`. `kind` discriminates Ok vs Err;
- * Ok carries `duration_ms` (broker-measured), Err carries a stable code from
- * the `DelegationError` taxonomy (e.g. `"timeout"`, `"canceled"`).
+ * Ok carries `duration_ms` (broker-measured) and an optional `text_preview`
+ * (≤ ~2 KiB of the child's final assistant text, so the parent card can render
+ * the result inline without re-fetching the child session); Err carries a
+ * stable code from the `DelegationError` taxonomy (e.g. `"timeout"`,
+ * `"canceled"`).
  */
 export type DelegationResultSummary =
-  | { kind: "ok"; duration_ms: number }
+  | { kind: "ok"; duration_ms: number; text_preview?: string | null }
   | { kind: "err"; error_code: string }
 
 /**
@@ -740,6 +747,23 @@ export interface PendingPermissionState {
   created_at: string
 }
 
+/**
+ * Snapshot-recoverable record of an in-flight (running) sub-agent delegation,
+ * keyed by `parent_tool_use_id`. Mirror of Rust `ActiveDelegationState`. Only
+ * running delegations are carried here — completed ones are removed (recovered
+ * instead from the child's persisted DB row via `inject_delegation_meta`, or
+ * the live `DelegationProvider` binding). Unlike `active_tool_calls`, these
+ * survive the parent's `TurnComplete`, so a web/server client can recover the
+ * running parent↔child binding from the snapshot on any attach — even when it
+ * missed the transient `delegation_started` event.
+ */
+export interface ActiveDelegationState {
+  parent_tool_use_id: string
+  child_connection_id: string
+  child_conversation_id: number
+  agent_type: AgentType
+}
+
 export interface LiveSessionSnapshot {
   connection_id: string
   conversation_id: number | null
@@ -749,6 +773,9 @@ export interface LiveSessionSnapshot {
   live_message: LiveMessage | null
   active_tool_calls: ToolCallState[]
   pending_permission: PendingPermissionState | null
+  /** Live sub-agent delegations recoverable from the snapshot. May be absent
+   *  on older server payloads (then treated as `[]`). */
+  active_delegations?: ActiveDelegationState[]
   modes: SessionModeStateInfo | null
   current_mode: string | null
   config_options: SessionConfigOptionInfo[] | null
@@ -962,6 +989,12 @@ export interface PackageManagerInfo {
   name: string
   installed: boolean
   version: string | null
+}
+
+/** Per-agent install status of the HyperFrames agent skills. */
+export interface HyperframesSkillAgent {
+  agent: string
+  installed: boolean
 }
 
 export interface GitSettings {

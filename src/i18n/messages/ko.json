@@ -521,6 +521,8 @@
       "enableHint": "끄면 delegate_to_agent 도구가 에이전트의 MCP 도구 목록에서 숨겨집니다.",
       "depthLimit": "최대 위임 깊이",
       "depthHint": "허용 범위: {min}–{max}. 위임 체인(루트 → 하위 → 손자 …)의 재귀 깊이를 제한합니다.",
+      "completedCacheLabel": "완료 결과 캐시(MB)",
+      "completedCacheHint": "실행 중인 위임 세션이 보관하는 완료된 하위 에이전트 결과의 메모리 내 캐시입니다. 해당 세션이 실행되는 동안에만 유지되며 세션이 종료되면 자동으로 삭제됩니다. 이 예산을 초과하면 오래된 결과부터 메모리에서 삭제됩니다(하위 에이전트 자체 세션에서는 계속 확인 가능). 0은 무제한(세션 종료 시에는 그래도 삭제됨).",
       "save": "저장",
       "saving": "저장 중…",
       "saved": "위임 설정이 저장되었습니다",
@@ -2053,6 +2055,7 @@
         "status": {
           "starting": "시작 중",
           "running": "실행 중",
+          "waiting": "승인 대기 중",
           "ok": "완료",
           "err": {
             "default": "실패",
@@ -2223,7 +2226,21 @@
   "ProjectBoot": {
     "title": "프로젝트 부트",
     "tabs": {
-      "shadcn": "shadcn"
+      "shadcn": "shadcn",
+      "hyperframes": "HyperFrames"
+    },
+    "hyperframes": {
+      "title": "HyperFrames 비디오 프로젝트",
+      "subtitle": "HTML을 비디오로 만드는 프로젝트를 생성합니다. 이후 워크스페이스 에이전트가 작성하고 렌더링할 수 있습니다.",
+      "resolution": "해상도",
+      "skillsTitle": "에이전트 스킬",
+      "skillsDesc": "선택한 에이전트에 HyperFrames 스킬을 전역(심볼릭 링크)으로 설치하여 영상 작성·렌더링을 지원합니다.",
+      "recheck": "다시 확인",
+      "installedBadge": "설치됨",
+      "skillsInstall": "스킬 설치 / 업데이트",
+      "skillsInstalling": "스킬 설치 중…",
+      "skillsInstalled": "HyperFrames 스킬 설치 완료",
+      "skillsInstallFailed": "HyperFrames 스킬 설치 실패"
     },
     "config": {
       "base": "베이스",
