@@ -38,6 +38,38 @@ describe("inferLiveToolName meta.claudeCode.toolName override", () => {
     ).not.toBe("memory_recall")
   })
 
+  it("returns canonical lower-case 'agent' for the SDK Agent tool before rawInput streams in", () => {
+    // claude-agent-acp reports the Agent/Task tool as `Agent` (capitalised) and
+    // often emits the initial ToolCall before `rawInput` (which carries
+    // `subagent_type`) is available. The metaToolName fallback must return the
+    // canonical lower-case `agent` so the live agent-card nesting check
+    // (`getToolName(...) === "agent"`) recognises it and child tool calls nest
+    // under the card. A capitalised `Agent` slipped past that check, leaving the
+    // children un-nested and the card stuck on its placeholder title.
+    expect(
+      inferLiveToolName({
+        title: "Explore the codebase",
+        kind: "other",
+        rawInput: null,
+        meta: { claudeCode: { toolName: "Agent" } },
+      })
+    ).toBe("agent")
+  })
+
+  it("keeps memory_recall intact when lower-casing the metaToolName fallback", () => {
+    // Guard: the lower-case fix must NOT route metaToolName through
+    // `normalizeToolName`, whose live-title heuristic rewrites `memory_recall`
+    // to `memory_re`.
+    expect(
+      inferLiveToolName({
+        title: "Recalled 3 memories",
+        kind: "read",
+        rawInput: null,
+        meta: { claudeCode: { toolName: "memory_recall" } },
+      })
+    ).toBe("memory_recall")
+  })
+
   it("preserves sub-agent detection when rawInput carries subagent_type", () => {
     // Regression guard: meta.claudeCode.toolName="Task" must NOT override
     // input-shape detection. Otherwise Claude Code's Task tool stops
@@ -54,6 +86,61 @@ describe("inferLiveToolName meta.claudeCode.toolName override", () => {
         meta: { claudeCode: { toolName: "Task" } },
       })
     ).toBe("agent")
+  })
+
+  it("resolves delegation companion tools from meta over the task_id input heuristic", () => {
+    // Regression guard for Task B: get_delegation_status / cancel_delegation
+    // take `{ task_id }` input, which inferFromInput would otherwise classify
+    // as the generic "task" tool (rendered as "任务" with no detail). The
+    // authoritative meta.claudeCode.toolName (the raw mcp__ name) must win.
+    expect(
+      inferLiveToolName({
+        title: "mcp__codeg-delegate__get_delegation_status",
+        kind: "other",
+        rawInput: JSON.stringify({ task_id: "t1", wait_ms: 1000 }),
+        meta: {
+          claudeCode: {
+            toolName: "mcp__codeg-delegate__get_delegation_status",
+          },
+        },
+      })
+    ).toBe("get_delegation_status")
+
+    expect(
+      inferLiveToolName({
+        title: "mcp__codeg-delegate__cancel_delegation",
+        kind: "other",
+        rawInput: JSON.stringify({ task_id: "t1" }),
+        meta: {
+          claudeCode: { toolName: "mcp__codeg-delegate__cancel_delegation" },
+        },
+      })
+    ).toBe("cancel_delegation")
+
+    expect(
+      inferLiveToolName({
+        title: "mcp__codeg-delegate__delegate_to_agent",
+        kind: "other",
+        rawInput: JSON.stringify({ agent_type: "codex", task: "do it" }),
+        meta: {
+          claudeCode: { toolName: "mcp__codeg-delegate__delegate_to_agent" },
+        },
+      })
+    ).toBe("delegate_to_agent")
+  })
+
+  it("still classifies a {task_id} tool as task when no Claude Code meta is present", () => {
+    // Non-Claude agents (no meta.claudeCode.toolName) keep the legacy
+    // input-shape behavior — the fix is meta-driven, not a removal of the
+    // task_id heuristic.
+    expect(
+      inferLiveToolName({
+        title: "Some task",
+        kind: "other",
+        rawInput: JSON.stringify({ task_id: "t1" }),
+        meta: null,
+      })
+    ).toBe("task")
   })
 
   it("ignores meta when claudeCode is missing or malformed", () => {
@@ -108,5 +195,71 @@ describe("normalizeToolName collapses delegate_to_agent across hosts", () => {
     expect(normalizeToolName("xdelegate_to_agent")).not.toBe(
       "delegate_to_agent"
     )
+  })
+})
+
+describe("normalizeToolName collapses delegation companion tools across hosts", () => {
+  it.each([
+    "get_delegation_status",
+    "mcp__codeg-delegate__get_delegation_status",
+    "mcp__codeg__get_delegation_status",
+    "codeg-delegate/get_delegation_status",
+    "codeg-delegate.get_delegation_status",
+    "codeg-delegate:get_delegation_status",
+  ])("%s -> get_delegation_status", (input) => {
+    expect(normalizeToolName(input)).toBe("get_delegation_status")
+  })
+
+  it.each([
+    "cancel_delegation",
+    "mcp__codeg-delegate__cancel_delegation",
+    "mcp__codeg__cancel_delegation",
+    "codeg-delegate/cancel_delegation",
+    "codeg-delegate.cancel_delegation",
+    "codeg-delegate:cancel_delegation",
+  ])("%s -> cancel_delegation", (input) => {
+    expect(normalizeToolName(input)).toBe("cancel_delegation")
+  })
+
+  it("does not match suffixes without a separator", () => {
+    expect(normalizeToolName("xget_delegation_status")).not.toBe(
+      "get_delegation_status"
+    )
+    expect(normalizeToolName("xcancel_delegation")).not.toBe(
+      "cancel_delegation"
+    )
+  })
+})
+
+describe("normalizeToolName collapses Codex goal tools across wrappers", () => {
+  it.each([
+    ["create_goal", "create_goal"],
+    ["functions.create_goal", "create_goal"],
+    ["mcp__codeg__create_goal", "create_goal"],
+    ["Goal updated (active): 分析 README 文件", "create_goal"],
+    ["update_goal", "update_goal"],
+    ["functions.update_goal", "update_goal"],
+    ["mcp__codeg__update_goal", "update_goal"],
+    ["Goal updated (complete): 分析 README 文件", "update_goal"],
+  ])("%s -> %s", (input, expected) => {
+    expect(normalizeToolName(input)).toBe(expected)
+  })
+
+  it("infers live Codex goal updates from ACP titles", () => {
+    expect(
+      inferLiveToolName({
+        title: "Goal updated (active): 分析 README 文件",
+        kind: "other",
+        rawInput: JSON.stringify({ objective: "分析 README 文件" }),
+      })
+    ).toBe("create_goal")
+
+    expect(
+      inferLiveToolName({
+        title: "Goal updated (complete): 分析 README 文件",
+        kind: "other",
+        rawInput: JSON.stringify({ status: "complete" }),
+      })
+    ).toBe("update_goal")
   })
 })

@@ -14,7 +14,9 @@ import { useConversationRuntime } from "@/contexts/conversation-runtime-context"
 import { ContentPartsRenderer } from "./content-parts-renderer"
 import {
   createMessageTurnAdapter,
+  groupGoalRuns,
   mergeAdjacentToolGroups,
+  mergeAdjacentDelegationStatusGroups,
   type AdaptedContentPart,
   type AdaptedMessage,
   type MessageTurnAdapter,
@@ -259,6 +261,8 @@ function forceScrollAnchorToCenter(
   viewport.scrollTop = targetScrollTop
 }
 
+const getThreadItemKey = (item: ThreadRenderItem) => item.key
+
 const CollapsibleSystemMessage = memo(function CollapsibleSystemMessage({
   group,
 }: {
@@ -296,8 +300,12 @@ const CollapsibleSystemMessage = memo(function CollapsibleSystemMessage({
 
 function extractTextFromParts(parts: AdaptedContentPart[]): string {
   return parts
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
+    .flatMap((p): string[] => {
+      if (p.type === "text") return [p.text]
+      if (p.type === "goal-run") return [extractTextFromParts(p.items)]
+      return []
+    })
+    .filter((text) => text.length > 0)
     .join("\n")
 }
 
@@ -390,7 +398,9 @@ function mergeConsecutiveAssistantTurns(
       result.push(buffer[0])
     } else {
       const allParts = buffer.flatMap((it) => it.group.parts)
-      const mergedParts = mergeAdjacentToolGroups(allParts)
+      const mergedParts = groupGoalRuns(
+        mergeAdjacentDelegationStatusGroups(mergeAdjacentToolGroups(allParts))
+      )
       const last = buffer[buffer.length - 1]
       const first = buffer[0]
       const sourceTurn = first.sourceTurn
@@ -709,6 +719,18 @@ function buildContentPartSignature(part: AdaptedContentPart): string {
       return `tool-group:${part.isStreaming}:${part.items
         .map(buildContentPartSignature)
         .join(",")}`
+    case "delegation-status-group":
+      return `delegation-status-group:${part.polls
+        .map(buildContentPartSignature)
+        .join(",")}`
+    case "goal-run":
+      return [
+        "goal-run",
+        part.isRunning ? "running" : "done",
+        buildContentPartSignature(part.start),
+        part.end ? buildContentPartSignature(part.end) : "no-end",
+        part.items.map(buildContentPartSignature).join(","),
+      ].join(":")
     case "generated-image":
       return [
         "generated-image",
@@ -1821,7 +1843,7 @@ export function MessageListView({
         />
         <VirtualizedMessageThread
           items={threadItems}
-          getItemKey={(item) => item.key}
+          getItemKey={getThreadItemKey}
           renderItem={renderThreadItem}
           emptyState={emptyState}
           virtualizerRef={virtualizerRef}

@@ -2052,9 +2052,14 @@
         "openDetail": "檢視會話",
         "detailTitle": "子智慧體會話",
         "detailDescription": "唯讀檢視委派給子智慧體的會話內容。",
+        "waitForResult": "等待 {task} 任務執行結果",
+        "waitForResultNoTask": "等待任務執行結果",
+        "cancelTask": "取消 {task} 任務",
+        "cancelTaskNoTask": "取消任務",
         "status": {
           "starting": "啟動中",
           "running": "執行中",
+          "checked": "已查詢",
           "waiting": "待批准",
           "ok": "完成",
           "err": {
@@ -2070,7 +2075,8 @@
             "child_max_tokens": "子代理超出 token 上限",
             "child_max_turn_requests": "子代理超出請求上限",
             "child_empty": "子代理無回應",
-            "child_unknown": "子代理未知錯誤"
+            "child_unknown": "子代理未知錯誤",
+            "unknown": "未知任務"
           }
         }
       },
@@ -2103,11 +2109,31 @@
         "agentPromptLabel": "提示詞",
         "agentModelLabel": "模型",
         "agentRunning": "執行中...",
+        "agentFallbackTitle": "子智能體啟動中…",
         "agentStatsBash": "命令",
         "agentStatsRead": "讀取檔案",
         "agentStatsSearch": "搜尋",
         "agentStatsEdit": "編輯",
         "agentStatsOther": "其他",
+        "goal": {
+          "title": "目標：",
+          "titleWithStatus": "目標{status}",
+          "objective": "目標",
+          "statusLabel": "狀態",
+          "tokensUsed": "已用 tokens",
+          "budget": "預算",
+          "remaining": "剩餘",
+          "elapsed": "耗時",
+          "tokens": "tokens",
+          "status": {
+            "active": "進行中",
+            "paused": "已暫停",
+            "blocked": "受阻",
+            "usageLimited": "用量受限",
+            "budgetLimited": "預算受限",
+            "complete": "已完成"
+          }
+        },
         "field": {
           "file": "檔案",
           "notebook": "筆記本",

@@ -2052,9 +2052,14 @@
         "openDetail": "Ver conversa",
         "detailTitle": "Conversa do subagente",
         "detailDescription": "Visualização somente leitura da conversa do subagente delegado.",
+        "waitForResult": "Aguardando o resultado da tarefa {task}",
+        "waitForResultNoTask": "Aguardando o resultado da tarefa",
+        "cancelTask": "Cancelando a tarefa {task}",
+        "cancelTaskNoTask": "Cancelando a tarefa",
         "status": {
           "starting": "iniciando",
           "running": "em execução",
+          "checked": "verificado",
           "waiting": "aguardando aprovação",
           "ok": "concluído",
           "err": {
@@ -2070,7 +2075,8 @@
             "child_max_tokens": "subagente: limite de tokens",
             "child_max_turn_requests": "subagente: limite de solicitações",
             "child_empty": "subagente sem saída",
-            "child_unknown": "subagente: erro"
+            "child_unknown": "subagente: erro",
+            "unknown": "tarefa desconhecida"
           }
         }
       },
@@ -2103,11 +2109,31 @@
         "agentPromptLabel": "Instrução",
         "agentModelLabel": "Modelo",
         "agentRunning": "Em execução...",
+        "agentFallbackTitle": "Iniciando subagente…",
         "agentStatsBash": "Comandos",
         "agentStatsRead": "Arquivos lidos",
         "agentStatsSearch": "Pesquisas",
         "agentStatsEdit": "Edições",
         "agentStatsOther": "Outros",
+        "goal": {
+          "title": "Objetivo:",
+          "titleWithStatus": "Objetivo {status}",
+          "objective": "Objetivo",
+          "statusLabel": "Status",
+          "tokensUsed": "Tokens usados",
+          "budget": "Orçamento",
+          "remaining": "Restante",
+          "elapsed": "Decorrido",
+          "tokens": "tokens",
+          "status": {
+            "active": "ativo",
+            "paused": "pausado",
+            "blocked": "bloqueado",
+            "usageLimited": "uso limitado",
+            "budgetLimited": "orçamento limitado",
+            "complete": "concluído"
+          }
+        },
         "field": {
           "file": "Arquivo",
           "notebook": "Caderno",

@@ -2052,9 +2052,14 @@
         "openDetail": "عرض المحادثة",
         "detailTitle": "محادثة الوكيل الفرعي",
         "detailDescription": "عرض للقراءة فقط لمحادثة الوكيل الفرعي المُفوَّض.",
+        "waitForResult": "في انتظار نتيجة المهمة {task}",
+        "waitForResultNoTask": "في انتظار نتيجة المهمة",
+        "cancelTask": "جارٍ إلغاء المهمة {task}",
+        "cancelTaskNoTask": "جارٍ إلغاء المهمة",
         "status": {
           "starting": "قيد البدء",
           "running": "قيد التشغيل",
+          "checked": "تم الفحص",
           "waiting": "في انتظار الموافقة",
           "ok": "اكتمل",
           "err": {
@@ -2070,7 +2075,8 @@
             "child_max_tokens": "الوكيل الفرعي: حد الرموز",
             "child_max_turn_requests": "الوكيل الفرعي: حد الطلبات",
             "child_empty": "الوكيل الفرعي بدون استجابة",
-            "child_unknown": "الوكيل الفرعي: خطأ"
+            "child_unknown": "الوكيل الفرعي: خطأ",
+            "unknown": "مهمة غير معروفة"
           }
         }
       },
@@ -2103,11 +2109,31 @@
         "agentPromptLabel": "المطالبة",
         "agentModelLabel": "النموذج",
         "agentRunning": "قيد التشغيل...",
+        "agentFallbackTitle": "جارٍ تشغيل الوكيل الفرعي…",
         "agentStatsBash": "الأوامر",
         "agentStatsRead": "الملفات المقروءة",
         "agentStatsSearch": "عمليات البحث",
         "agentStatsEdit": "التعديلات",
         "agentStatsOther": "أخرى",
+        "goal": {
+          "title": "الهدف:",
+          "titleWithStatus": "الهدف {status}",
+          "objective": "الهدف",
+          "statusLabel": "الحالة",
+          "tokensUsed": "tokens المستخدمة",
+          "budget": "الميزانية",
+          "remaining": "المتبقي",
+          "elapsed": "المدة",
+          "tokens": "tokens",
+          "status": {
+            "active": "نشط",
+            "paused": "متوقف مؤقتًا",
+            "blocked": "محظور",
+            "usageLimited": "الاستخدام محدود",
+            "budgetLimited": "الميزانية محدودة",
+            "complete": "مكتمل"
+          }
+        },
         "field": {
           "file": "ملف",
           "notebook": "دفتر",

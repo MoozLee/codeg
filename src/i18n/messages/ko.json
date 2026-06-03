@@ -2052,9 +2052,14 @@
         "openDetail": "대화 보기",
         "detailTitle": "서브에이전트 대화",
         "detailDescription": "위임된 서브에이전트 대화를 읽기 전용으로 봅니다.",
+        "waitForResult": "작업 {task} 실행 결과 대기 중",
+        "waitForResultNoTask": "작업 실행 결과 대기 중",
+        "cancelTask": "작업 {task} 취소 중",
+        "cancelTaskNoTask": "작업 취소 중",
         "status": {
           "starting": "시작 중",
           "running": "실행 중",
+          "checked": "확인됨",
           "waiting": "승인 대기 중",
           "ok": "완료",
           "err": {
@@ -2070,7 +2075,8 @@
             "child_max_tokens": "서브에이전트: 토큰 한도",
             "child_max_turn_requests": "서브에이전트: 요청 한도",
             "child_empty": "서브에이전트 응답 없음",
-            "child_unknown": "서브에이전트: 오류"
+            "child_unknown": "서브에이전트: 오류",
+            "unknown": "알 수 없는 작업"
           }
         }
       },
@@ -2103,11 +2109,31 @@
         "agentPromptLabel": "프롬프트",
         "agentModelLabel": "모델",
         "agentRunning": "실행 중...",
+        "agentFallbackTitle": "서브 에이전트 시작 중…",
         "agentStatsBash": "명령",
         "agentStatsRead": "파일 읽기",
         "agentStatsSearch": "검색",
         "agentStatsEdit": "편집",
         "agentStatsOther": "기타",
+        "goal": {
+          "title": "목표:",
+          "titleWithStatus": "목표 {status}",
+          "objective": "목표",
+          "statusLabel": "상태",
+          "tokensUsed": "사용 tokens",
+          "budget": "예산",
+          "remaining": "남음",
+          "elapsed": "경과",
+          "tokens": "tokens",
+          "status": {
+            "active": "진행 중",
+            "paused": "일시 중지",
+            "blocked": "차단됨",
+            "usageLimited": "사용량 제한",
+            "budgetLimited": "예산 제한",
+            "complete": "완료"
+          }
+        },
         "field": {
           "file": "파일",
           "notebook": "노트북",

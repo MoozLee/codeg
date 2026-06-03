@@ -2052,9 +2052,14 @@
         "openDetail": "Voir la conversation",
         "detailTitle": "Conversation du sous-agent",
         "detailDescription": "Vue en lecture seule de la conversation du sous-agent délégué.",
+        "waitForResult": "En attente du résultat de la tâche {task}",
+        "waitForResultNoTask": "En attente du résultat de la tâche",
+        "cancelTask": "Annulation de la tâche {task}",
+        "cancelTaskNoTask": "Annulation de la tâche",
         "status": {
           "starting": "démarrage",
           "running": "en cours",
+          "checked": "vérifié",
           "waiting": "en attente d'approbation",
           "ok": "terminé",
           "err": {
@@ -2070,7 +2075,8 @@
             "child_max_tokens": "sous-agent : limite de jetons",
             "child_max_turn_requests": "sous-agent : limite de requêtes",
             "child_empty": "sous-agent sans sortie",
-            "child_unknown": "sous-agent : erreur"
+            "child_unknown": "sous-agent : erreur",
+            "unknown": "tâche inconnue"
           }
         }
       },
@@ -2103,11 +2109,31 @@
         "agentPromptLabel": "Instruction",
         "agentModelLabel": "Modèle",
         "agentRunning": "En cours...",
+        "agentFallbackTitle": "Démarrage du sous-agent…",
         "agentStatsBash": "Commandes",
         "agentStatsRead": "Fichiers lus",
         "agentStatsSearch": "Recherches",
         "agentStatsEdit": "Modifications",
         "agentStatsOther": "Autres",
+        "goal": {
+          "title": "Objectif :",
+          "titleWithStatus": "Objectif {status}",
+          "objective": "Objectif",
+          "statusLabel": "Statut",
+          "tokensUsed": "Tokens utilisés",
+          "budget": "Budget",
+          "remaining": "Restant",
+          "elapsed": "Écoulé",
+          "tokens": "tokens",
+          "status": {
+            "active": "actif",
+            "paused": "en pause",
+            "blocked": "bloqué",
+            "usageLimited": "utilisation limitée",
+            "budgetLimited": "budget limité",
+            "complete": "terminé"
+          }
+        },
         "field": {
           "file": "Fichier",
           "notebook": "Carnet",
