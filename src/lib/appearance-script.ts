@@ -10,14 +10,14 @@ export const STORAGE_KEY_UI_FONT_FAMILY = "codeg-ui-font-family"
 export const STORAGE_KEY_CODE_FONT_FAMILY = "codeg-code-font-family"
 
 // 字体偏好（界面 / 编辑器 / 终端）。
-// *_STACK 保存「已解析的 CSS font-family 栈」，供 inline 脚本零依赖地预水合写入
-// CSS 变量；*_FONT 保存 id、*_CUSTOM 保存自定义族名，供设置界面回显选中态。
+// 只有界面字体需要 *_STACK（已解析的 CSS font-family 栈），供 inline 脚本零依赖地
+// 预水合写入 --font-sans；编辑器/终端字体只走各自的 Monaco/xterm 选项，水合后才挂载，
+// 无需预水合，也不写任何全局 CSS 变量。*_FONT 存 id、*_CUSTOM 存自定义族名供回显。
 export const STORAGE_KEY_UI_FONT = "codeg-ui-font"
 export const STORAGE_KEY_UI_FONT_CUSTOM = "codeg-ui-font-custom"
 export const STORAGE_KEY_UI_FONT_STACK = "codeg-ui-font-stack"
 export const STORAGE_KEY_EDITOR_FONT = "codeg-editor-font"
 export const STORAGE_KEY_EDITOR_FONT_CUSTOM = "codeg-editor-font-custom"
-export const STORAGE_KEY_EDITOR_FONT_STACK = "codeg-editor-font-stack"
 export const STORAGE_KEY_EDITOR_FONT_SIZE = "codeg-editor-font-size"
 export const STORAGE_KEY_EDITOR_LIGATURES = "codeg-editor-ligatures"
 export const STORAGE_KEY_TERMINAL_FONT = "codeg-terminal-font"
@@ -84,22 +84,14 @@ const SCRIPT = `
     var zoom = VALID_ZOOMS.indexOf(storedZoom) >= 0 ? storedZoom : 100;
     document.documentElement.style.fontSize = (16 * zoom / 100) + "px";
 
-    var applyFontVar = function(key, prop) {
-      var v = localStorage.getItem(key);
-      if (v && v.length < 512 && !/[;{}<>]/.test(v)) {
-        document.documentElement.style.setProperty(prop, v);
-        return true;
-      }
-      return false;
-    };
-
-    if (!applyFontVar("${STORAGE_KEY_UI_FONT_STACK}", "--font-sans")) {
+    // 界面字体：预水合写入 --font-sans（普通组件与会话消息区都跟随它）。
+    // 优先使用已解析 stack；旧版本只存 font-family 时再用 fallback 现场拼栈。
+    var uiFontStack = localStorage.getItem("${STORAGE_KEY_UI_FONT_STACK}");
+    if (uiFontStack && uiFontStack.length < 512 && !/[;{}<>]/.test(uiFontStack)) {
+      document.documentElement.style.setProperty("--font-sans", uiFontStack);
+    } else {
       var uiFont = normalizeFontFamily(localStorage.getItem("${STORAGE_KEY_UI_FONT_FAMILY}"));
       if (uiFont) document.documentElement.style.setProperty("--font-sans", fontFamilyStack(uiFont, UI_FALLBACK));
-    }
-    if (!applyFontVar("${STORAGE_KEY_EDITOR_FONT_STACK}", "--font-mono")) {
-      var codeFont = normalizeFontFamily(localStorage.getItem("${STORAGE_KEY_CODE_FONT_FAMILY}"));
-      if (codeFont) document.documentElement.style.setProperty("--font-mono", fontFamilyStack(codeFont, CODE_FALLBACK));
     }
 
     // 在 next-themes 水合之前同步检测暗色模式，防止白色闪屏。

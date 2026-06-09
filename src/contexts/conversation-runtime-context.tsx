@@ -283,18 +283,6 @@ function createEmptySession(
   }
 }
 
-function formatLivePlanEntries(
-  entries: Array<{ content: string; priority: string; status: string }>
-): string {
-  if (entries.length === 0) {
-    return "Plan updated."
-  }
-  const lines = entries.map(
-    (entry) => `- [${entry.status}] ${entry.content} (${entry.priority})`
-  )
-  return `Plan updated:\n${lines.join("\n")}`
-}
-
 interface BuiltStreamingTurns {
   turns: MessageTurn[]
   inProgressToolCallIds: Set<string>
@@ -601,10 +589,10 @@ function buildStreamingTurnsFromLiveMessage(
         currentBlocks.push({ type: "thinking", text: block.text })
         break
       case "plan": {
-        currentBlocks.push({
-          type: "thinking",
-          text: formatLivePlanEntries(block.entries),
-        })
+        // Carry the live plan through as a first-class `plan` block so it
+        // renders in a dedicated <PlanCard> instead of being down-converted
+        // into a `thinking`/reasoning block.
+        currentBlocks.push({ type: "plan", entries: block.entries })
         break
       }
       case "tool_call": {
@@ -1008,7 +996,9 @@ function reducer(
         return true
       })
       const remainingLocal = action.anchorId
-        ? current.localTurns.filter((turn) => turn.anchor_id !== action.anchorId)
+        ? current.localTurns.filter(
+            (turn) => turn.anchor_id !== action.anchorId
+          )
         : current.localTurns
       if (
         remainingOptimistic.length === current.optimisticTurns.length &&
@@ -1710,7 +1700,8 @@ export function ConversationRuntimeProvider({
       conversationId: number,
       options?: { preserveLive?: boolean; runtimeConversationId?: number }
     ) => {
-      const targetConversationId = options?.runtimeConversationId ?? conversationId
+      const targetConversationId =
+        options?.runtimeConversationId ?? conversationId
       const generation = bumpFetchGeneration(targetConversationId)
       dispatch({
         type: "FETCH_DETAIL_START",

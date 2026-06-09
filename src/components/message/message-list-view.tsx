@@ -812,6 +812,12 @@ function buildContentPartSignature(part: AdaptedContentPart): string {
         part.image?.uri ?? "",
         part.image?.data.length ?? 0,
       ].join(":")
+    case "plan":
+      return `plan:${part.isStreaming}:${part.entries
+        .map(
+          (entry) => `${entry.status}:${entry.priority}:${entry.content.length}`
+        )
+        .join(",")}`
   }
 }
 
