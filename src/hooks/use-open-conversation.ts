@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import {
   focusConversationWindowIfOpen,
   getSystemConversationOpenSettings,
@@ -21,6 +21,16 @@ interface OpenConversationParams {
 export function useOpenConversation() {
   const { openTab, closeConversationTab, tabs, tabPersistenceMode } =
     useTabContext()
+  const tabsRef = useRef(tabs)
+  const tabPersistenceModeRef = useRef(tabPersistenceMode)
+
+  useEffect(() => {
+    tabsRef.current = tabs
+  }, [tabs])
+
+  useEffect(() => {
+    tabPersistenceModeRef.current = tabPersistenceMode
+  }, [tabPersistenceMode])
 
   return useCallback(
     async ({
@@ -30,13 +40,15 @@ export function useOpenConversation() {
       pin = true,
       explicitWindow = false,
     }: OpenConversationParams) => {
+      const currentTabs = tabsRef.current
+      const currentTabPersistenceMode = tabPersistenceModeRef.current
       const focusExistingOwnerWindow = async () => {
         return await focusConversationWindowIfOpen(conversationId)
       }
 
       const openInWorkspaceTab = async () => {
         openTab(folderId, conversationId, agentType, pin, undefined)
-        if (tabPersistenceMode === "shared") {
+        if (currentTabPersistenceMode === "shared") {
           await registerConversationWindowOwner(conversationId)
         }
         return { focusedExisting: false }
@@ -52,32 +64,28 @@ export function useOpenConversation() {
           },
           "force-new-window"
         )
-        if (tabPersistenceMode === "shared") {
+        if (currentTabPersistenceMode === "shared") {
           closeConversationTab(folderId, conversationId, agentType)
         }
         return result as { focusedExisting: boolean }
       }
 
-      const alreadyOpenInCurrentWindow = tabs.some(
+      const alreadyOpenInCurrentWindow = currentTabs.some(
         (tab) =>
           tab.folderId === folderId &&
           tab.conversationId === conversationId &&
           tab.agentType === agentType
       )
 
-      if (tabPersistenceMode === "window-local") {
-        const focusedExistingWindow = await focusExistingOwnerWindow()
-        if (focusedExistingWindow) {
-          return { focusedExisting: true }
-        }
-        return await openInWorkspaceTab()
-      }
-
       if (explicitWindow) {
         return openInDedicatedWindow()
       }
 
-      if (alreadyOpenInCurrentWindow) {
+      if (currentTabPersistenceMode === "window-local") {
+        const focusedExistingWindow = await focusExistingOwnerWindow()
+        if (focusedExistingWindow) {
+          return { focusedExisting: true }
+        }
         return await openInWorkspaceTab()
       }
 
@@ -86,14 +94,18 @@ export function useOpenConversation() {
         return { focusedExisting: true }
       }
 
+      if (alreadyOpenInCurrentWindow) {
+        return await openInWorkspaceTab()
+      }
+
       const settings = await getSystemConversationOpenSettings()
       const mainWorkspaceConversationCount =
-        tabPersistenceMode === "shared"
-          ? tabs.filter((tab) => tab.conversationId != null).length
+        currentTabPersistenceMode === "shared"
+          ? currentTabs.filter((tab) => tab.conversationId != null).length
           : 0
       const thresholdReached =
         settings.threshold != null &&
-        tabPersistenceMode === "shared" &&
+        currentTabPersistenceMode === "shared" &&
         mainWorkspaceConversationCount >= settings.threshold
 
       if (thresholdReached || settings.defaultTarget === "window") {
@@ -102,6 +114,6 @@ export function useOpenConversation() {
 
       return await openInWorkspaceTab()
     },
-    [closeConversationTab, openTab, tabPersistenceMode, tabs]
+    [closeConversationTab, openTab]
   )
 }

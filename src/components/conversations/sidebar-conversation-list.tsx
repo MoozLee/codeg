@@ -37,9 +37,9 @@ import { useTaskContext } from "@/contexts/task-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { useThemeColor, useZoomLevel } from "@/hooks/use-appearance"
 import { useSortedAvailableAgents } from "@/hooks/use-sorted-available-agents"
+import { useOpenConversation } from "@/hooks/use-open-conversation"
 import {
   importLocalConversations,
-  openConversationWindow,
   openProjectBootWindow,
   updateConversationTitle,
   updateConversationStatus,
@@ -526,13 +526,13 @@ export function SidebarConversationList({
   const { activeFolder } = useActiveFolder()
 
   const {
-    openTab,
     closeConversationTab,
     closeTabsByFolder,
     openNewConversationTab,
     activeTabId,
     tabs,
   } = useTabContext()
+  const openConversation = useOpenConversation()
   const { addTask, updateTask } = useTaskContext()
 
   const folderIndex = useMemo(() => {
@@ -1043,29 +1043,45 @@ export function SidebarConversationList({
   // for the card `memo` actually bailing out (see Phase 1 of the perf plan).
   const handleSelect = useCallback(
     (id: number, agentType: string, folderId: number) => {
-      openTab(folderId, id, agentType as Parameters<typeof openTab>[2], true)
-    },
-    [openTab]
-  )
-
-  const handleDoubleClick = useCallback(
-    (id: number, agentType: string, folderId: number) => {
-      openTab(folderId, id, agentType as Parameters<typeof openTab>[2], true)
-    },
-    [openTab]
-  )
-
-  const handleOpenInWindow = useCallback(
-    (id: number, agentType: string, folderId: number) => {
-      void openConversationWindow(id, {
+      void openConversation({
         folderId,
-        agentType: agentType as Parameters<typeof openTab>[2],
-        forceNewWindow: true,
+        conversationId: id,
+        agentType: agentType as AgentType,
+        pin: true,
       }).catch((error) => {
         toast.error(toErrorMessage(error))
       })
     },
-    []
+    [openConversation]
+  )
+
+  const handleDoubleClick = useCallback(
+    (id: number, agentType: string, folderId: number) => {
+      void openConversation({
+        folderId,
+        conversationId: id,
+        agentType: agentType as AgentType,
+        pin: true,
+      }).catch((error) => {
+        toast.error(toErrorMessage(error))
+      })
+    },
+    [openConversation]
+  )
+
+  const handleOpenInWindow = useCallback(
+    (id: number, agentType: string, folderId: number) => {
+      void openConversation({
+        folderId,
+        conversationId: id,
+        agentType: agentType as AgentType,
+        pin: true,
+        explicitWindow: true,
+      }).catch((error) => {
+        toast.error(toErrorMessage(error))
+      })
+    },
+    [openConversation]
   )
 
   const handleRename = useCallback(
@@ -1080,11 +1096,7 @@ export function SidebarConversationList({
     async (id: number, agentType: string, folderId: number) => {
       await deleteConversation(id)
       // No-op if no matching tab is open (the context guards on its tab ref).
-      closeConversationTab(
-        folderId,
-        id,
-        agentType as Parameters<typeof openTab>[2]
-      )
+      closeConversationTab(folderId, id, agentType as AgentType)
       refreshConversations()
     },
     [closeConversationTab, refreshConversations]

@@ -204,6 +204,7 @@ async fn async_main() {
 
     // Build AppState
     let pet_state_handle = codeg_lib::pet_state_mapper::new_pet_state_handle();
+    let provider_usage_cache = codeg_lib::app_state::default_provider_usage_cache();
     let connection_manager = codeg_lib::app_state::default_connection_manager();
     let (
         delegation_broker,
@@ -230,7 +231,7 @@ async fn async_main() {
             codeg_lib::workspace_transfer::WorkspaceTransferManager::new_from_env(),
         ),
         pet_state: pet_state_handle.clone(),
-        provider_usage_cache: codeg_lib::app_state::default_provider_usage_cache(),
+        provider_usage_cache: provider_usage_cache.clone(),
         delegation_broker: delegation_broker.clone(),
         delegation_tokens: delegation_tokens.clone(),
         delegation_socket_path: delegation_socket_path.clone(),
@@ -353,6 +354,12 @@ async fn async_main() {
             std::time::Duration::from_secs(codeg_lib::SWEEP_INTERVAL_SECS),
         ));
     }
+
+    tokio::spawn(codeg_lib::commands::provider_usage::initial_refresh_sweep(
+        state.db.conn.clone(),
+        state.emitter.clone(),
+        provider_usage_cache,
+    ));
 
     // Sweep abandoned upload staging files from any prior run before
     // serving the first request. The quota log/validate ran earlier in

@@ -60,8 +60,8 @@ const stableTabFns = vi.hoisted(() => ({
 }))
 
 const stableAgents = vi.hoisted(() => ({ sortedTypes: ["claude_code"] }))
-const apiMocks = vi.hoisted(() => ({
-  openConversationWindow: vi.fn(async () => ({ focusedExisting: false })),
+const hookMocks = vi.hoisted(() => ({
+  openConversation: vi.fn(async () => ({ focusedExisting: false })),
 }))
 
 // Context functions are stable refs in production (useCallback values); the
@@ -172,12 +172,15 @@ vi.mock("next-themes", () => ({
 vi.mock("@/lib/api", () => ({
   deleteConversation: vi.fn(async () => {}),
   importLocalConversations: vi.fn(async () => ({ imported: 0, skipped: 0 })),
-  openConversationWindow: apiMocks.openConversationWindow,
   openProjectBootWindow: vi.fn(async () => {}),
   updateConversationStatus: vi.fn(async () => {}),
   updateConversationTitle: vi.fn(async () => {}),
   updateFolderColor: vi.fn(async () => {}),
   updateFolderDefaultAgent: vi.fn(async () => {}),
+}))
+
+vi.mock("@/hooks/use-open-conversation", () => ({
+  useOpenConversation: () => hookMocks.openConversation,
 }))
 
 vi.mock("@/hooks/use-appearance", () => ({
@@ -692,8 +695,7 @@ describe("SidebarConversationList — scrollToActive across a worktree merge", (
 
 describe("SidebarConversationList — conversation context menu", () => {
   beforeEach(() => {
-    stableTabFns.openTab.mockClear()
-    apiMocks.openConversationWindow.mockClear()
+    hookMocks.openConversation.mockClear()
     store.folders = [folder(1, "Folder 1")]
     store.allFolders = store.folders
     store.conversations = [conv(11, 1)]
@@ -701,29 +703,44 @@ describe("SidebarConversationList — conversation context menu", () => {
     store.tabSpec = []
   })
 
-  it("pins sidebar clicks as real conversation tabs", () => {
+  it("routes sidebar clicks through conversation ownership", () => {
     render(tree())
 
     fireEvent.click(screen.getByText("conv-11"))
 
-    expect(stableTabFns.openTab).toHaveBeenCalledWith(
-      1,
-      11,
-      "claude_code",
-      true
-    )
+    expect(hookMocks.openConversation).toHaveBeenCalledWith({
+      folderId: 1,
+      conversationId: 11,
+      agentType: "claude_code",
+      pin: true,
+    })
   })
 
-  it("opens sidebar conversations in a forced new window", async () => {
+  it("routes sidebar double-clicks through conversation ownership", () => {
+    render(tree())
+
+    fireEvent.doubleClick(screen.getByText("conv-11"))
+
+    expect(hookMocks.openConversation).toHaveBeenCalledWith({
+      folderId: 1,
+      conversationId: 11,
+      agentType: "claude_code",
+      pin: true,
+    })
+  })
+
+  it("routes sidebar new-window actions through explicit window ownership", async () => {
     render(tree())
 
     fireEvent.contextMenu(screen.getByText("conv-11"))
     fireEvent.click(await screen.findByText("Open in new window"))
 
-    expect(apiMocks.openConversationWindow).toHaveBeenCalledWith(11, {
+    expect(hookMocks.openConversation).toHaveBeenCalledWith({
       folderId: 1,
+      conversationId: 11,
       agentType: "claude_code",
-      forceNewWindow: true,
+      pin: true,
+      explicitWindow: true,
     })
   })
 })

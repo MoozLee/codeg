@@ -364,6 +364,29 @@ impl ConversationWindowState {
             .and_then(|labels| labels.get(&conversation_id).cloned())
     }
 
+    fn should_preserve_owner(&self, next_label: &str, conversation_id: i32) -> bool {
+        if next_label != "main" {
+            return false;
+        }
+        self.label_for_conversation(conversation_id)
+            .is_some_and(|label| label != next_label && label.starts_with("conversation-"))
+    }
+
+    fn set_open_from_sync(&self, label: String, conversation_id: i32) {
+        if self.should_preserve_owner(&label, conversation_id) {
+            if let Ok(mut conversations) = self.conversations_by_label.lock() {
+                if let Some(ids) = conversations.get_mut(&label) {
+                    ids.remove(&conversation_id);
+                    if ids.is_empty() {
+                        conversations.remove(&label);
+                    }
+                }
+            }
+            return;
+        }
+        self.set_open(label, conversation_id);
+    }
+
     fn mark_closing(&self, label: &str) {
         if let Ok(mut labels) = self.closing_labels.lock() {
             labels.insert(label.to_string());
@@ -1051,7 +1074,7 @@ pub async fn sync_conversation_window_ownership(
 
     state.clear_by_label(&label);
     for conversation_id in conversation_ids {
-        state.set_open(label.clone(), conversation_id);
+        state.set_open_from_sync(label.clone(), conversation_id);
     }
 
     Ok(())
@@ -2300,6 +2323,53 @@ pub async fn set_tray_locale(
 ) -> Result<(), AppCommandError> {
     refresh_tray_menu(&app, locale)
         .map_err(|e| AppCommandError::window("Failed to refresh tray menu", e.to_string()))
+}
+
+#[cfg(test)]
+mod conversation_window_state_tests {
+    use super::ConversationWindowState;
+
+    #[test]
+    fn main_sync_does_not_steal_dedicated_owner() {
+        let state = ConversationWindowState::new();
+
+        state.set_open("main".to_string(), 1);
+        state.set_open("conversation-1".to_string(), 1);
+        state.set_open_from_sync("main".to_string(), 1);
+
+        assert_eq!(
+            state.label_for_conversation(1).as_deref(),
+            Some("conversation-1")
+        );
+        assert!(state
+            .conversations_by_label
+            .lock()
+            .expect("conversation labels")
+            .get("main")
+            .map_or(true, |ids| !ids.contains(&1)));
+    }
+
+    #[test]
+    fn main_sync_registers_when_no_dedicated_owner_exists() {
+        let state = ConversationWindowState::new();
+
+        state.set_open_from_sync("main".to_string(), 1);
+
+        assert_eq!(state.label_for_conversation(1).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn non_main_sync_can_move_owner() {
+        let state = ConversationWindowState::new();
+
+        state.set_open("main".to_string(), 1);
+        state.set_open_from_sync("conversation-1".to_string(), 1);
+
+        assert_eq!(
+            state.label_for_conversation(1).as_deref(),
+            Some("conversation-1")
+        );
+    }
 }
 
 #[cfg(test)]
