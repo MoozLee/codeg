@@ -55,7 +55,10 @@ export interface TabContextValue {
   openNewConversationTab: (
     folderId: number,
     workingDir: string,
-    options?: AgentType | { inheritFromActive?: boolean }
+    options?: {
+      inheritFromActive?: boolean
+      folderDefaultAgent?: AgentType | null
+    }
   ) => void
   confirmDraftAgent: (tabId: string, agentType: AgentType) => void
   setDraftAgentFromFallback: (tabId: string, agentType: AgentType) => void

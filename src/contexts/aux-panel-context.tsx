@@ -69,7 +69,7 @@ export function AuxPanelProvider({ children }: AuxPanelProviderProps) {
   const [isOpen, setIsOpen] = useState(DEFAULT_IS_OPEN)
   const [width, setWidthState] = useState(DEFAULT_WIDTH)
   const [restored, setRestored] = useState(false)
-  const [activeTab, setActiveTab] = useState<AuxPanelTab>("user_messages")
+  const [activeTab, setActiveTab] = useState<AuxPanelTab>("file_tree")
   const [pendingRevealPath, setPendingRevealPath] = useState<string | null>(
     null
   )

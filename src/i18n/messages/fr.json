@@ -103,7 +103,23 @@
       "current": "Zoom actuel : {zoom}%"
     },
     "resetToDefaults": "Réinitialiser",
-    "resetHint": "Réinitialise la couleur du thème, le zoom de la fenêtre et les polices."
+    "resetHint": "Réinitialise la couleur du thème, le zoom de la fenêtre et les polices.",
+    "fonts": {
+      "sectionTitle": "Polices",
+      "sectionDescription": "Choisissez les polices pour l’interface, l’éditeur de code et le terminal. Les polices intégrées sont chargées à la demande ; sélectionnez « Personnalisée… » pour utiliser n’importe quelle police installée sur votre système.",
+      "interface": "Interface",
+      "editor": "Éditeur",
+      "terminal": "Terminal",
+      "groupSans": "Sans empattement",
+      "groupMono": "Monospace",
+      "custom": "Personnalisée…",
+      "customPlaceholder": "Nom de la police, par ex. Fira Code",
+      "fontSize": "Taille de police",
+      "ligatures": "Activer les ligatures",
+      "ligaturesUnavailable": "Cette police n’a pas de ligatures",
+      "terminalLigaturesHint": "Les ligatures du terminal ne s’appliquent qu’aux polices de programmation intégrées.",
+      "preview": "Aperçu"
+    }
   },
   "SystemSettings": {
     "loading": "Chargement...",
@@ -178,7 +194,26 @@
       "downloadFailed": "Impossible de télécharger le paquet de mise à jour. Veuillez réessayer plus tard.",
       "installFailed": "Impossible d’installer la mise à jour. Fermez l’app puis réessayez.",
       "unknown": "La mise à jour a échoué. Veuillez réessayer plus tard."
-    }
+    },
+    "upgradeSuccess": "Mise à niveau terminée. Rechargement...",
+    "restartTimeout": "Le serveur n'est pas revenu à temps. Consultez les journaux du conteneur ou du service.",
+    "restartingIn": "Redémarrage dans {seconds} s...",
+    "waitingForServer": "En attente du retour du serveur...",
+    "restartToUpdate": "Redémarrer pour mettre à jour",
+    "updateReadyHint": "Mise à jour téléchargée — redémarrez pour l'appliquer.",
+    "restarting": "Redémarrage...",
+    "dockerUpgradeHint": "Cela met à jour le conteneur en cours d'exécution. La mise à jour est perdue si le conteneur est recréé — pour la conserver, récupérez ou créez une image à la nouvelle version puis recréez le conteneur.",
+    "upgradeRolledBack": "Échec de la mise à niveau ; le serveur est revenu à la version précédente.",
+    "serverUnreachable": "Impossible de joindre le serveur pour démarrer la mise à niveau. Vérifiez qu'il fonctionne et réessayez.",
+    "rollbackButton": "Revenir en arrière",
+    "rollingBack": "Restauration...",
+    "rollbackDescription": "Restaure la version installée avant la dernière mise à niveau.",
+    "rollbackConfirmTitle": "Revenir à la version précédente ?",
+    "rollbackConfirmDescription": "Le serveur redémarrera sur la version installée avant la dernière mise à niveau. Une version plus récente reste disponible à la réinstallation.",
+    "rollbackConfirm": "Revenir en arrière",
+    "rollbackCancel": "Annuler",
+    "rollbackSuccess": "Retour à la version précédente. Rechargement...",
+    "rollbackFailed": "Échec du retour en arrière. Consultez les journaux du serveur."
   },
   "VersionControlSettings": {
     "loading": "Chargement...",
@@ -312,6 +347,14 @@
       "newline_in_message": {
         "title": "Retour à la ligne",
         "description": "Insérer un retour à la ligne dans la zone de saisie"
+      },
+      "next_tab": {
+        "title": "Onglet suivant",
+        "description": "Passer à l'onglet de conversation ou de fichier suivant"
+      },
+      "prev_tab": {
+        "title": "Onglet précédent",
+        "description": "Passer à l'onglet de conversation ou de fichier précédent"
       }
     }
   },
@@ -747,7 +790,8 @@
       "saveConfigManagementFailed": "Échec de l’enregistrement de la gestion de configuration",
       "clineSaved": "Configuration Cline enregistrée",
       "saveClineFailed": "Échec de l'enregistrement de la configuration Cline",
-      "modelProviderRequired": "Veuillez sélectionner un fournisseur de modèle avant d'enregistrer."
+      "modelProviderRequired": "Veuillez sélectionner un fournisseur de modèle avant d'enregistrer.",
+      "affectedRunningSessions": "{count, plural, one {# session active doit se reconnecter pour appliquer la modification} other {# sessions actives doivent se reconnecter pour appliquer la modification}}"
     },
     "version": {
       "statusLabel": "Statut de version",
@@ -922,7 +966,9 @@
         "reorderFoldersFailed": "Échec du réordonnancement des dossiers : {message}",
         "changeFolderColorFailed": "Échec du changement de couleur : {message}",
         "togglePinFailed": "Échec du basculement de l'épinglage : {message}",
-        "changeFolderDefaultAgentFailed": "Échec de la définition de l'agent par défaut : {message}"
+        "changeFolderDefaultAgentFailed": "Échec de la définition de l'agent par défaut : {message}",
+        "importedAndUpdated": "{imported, plural, one {# session} other {# sessions}} importée(s), {updated, plural, one {# titre} other {# titres}} mis à jour, {skipped} ignorée(s)",
+        "updatedTitles": "{updated, plural, one {# titre} other {# titres}} mis à jour, {skipped} ignorée(s)"
       },
       "statsLabel": "{folders} dossiers · {convos} conversations",
       "reorderHandle": "Glisser pour réorganiser",
@@ -951,8 +997,7 @@
         "setDefaultAgent": "Définir l'agent par défaut",
         "defaultAgentNone": "Aucun (utiliser la valeur globale)",
         "agentUnavailableSuffix": "(indisponible)",
-        "loadingAgents": "Chargement des agents…",
-        "removeFromWorkspace": "Retirer de l'espace de travail"
+        "loadingAgents": "Chargement des agents…"
       },
       "sections": {
         "pinned": "Épinglés",
@@ -1276,7 +1321,10 @@
       "loadingEditor": "Chargement de l’éditeur...",
       "imageZoomIn": "Agrandir",
       "imageZoomOut": "Réduire",
-      "imageZoomReset": "Réinitialiser le zoom"
+      "imageZoomReset": "Réinitialiser le zoom",
+      "htmlPreviewTitle": "Aperçu HTML",
+      "htmlPreviewTrust": "Activer les scripts",
+      "htmlPreviewTrustHint": "Exécuter les scripts de ce fichier et autoriser l'accès réseau. À activer uniquement pour les fichiers de confiance."
     },
     "branchDropdown": {
       "toasts": {
@@ -1294,7 +1342,9 @@
         "upstreamSet": "La branche upstream a été définie",
         "upstreamSetAndPushed": "Branche upstream définie et {count, plural, one {# commit} other {# commits}} poussé(s)",
         "noCommitsToPush": "Aucun commit à pousser",
-        "pushedCommits": "{count, plural, one {# commit poussé} other {# commits poussés}}"
+        "pushedCommits": "{count, plural, one {# commit poussé} other {# commits poussés}}",
+        "switchedToFolder": "Basculé vers {name}",
+        "switchFailed": "Échec du changement de branche"
       },
       "tasks": {
         "newBranch": "Créer la branche {name}",
@@ -1661,7 +1711,9 @@
         "createFailed": "Échec de la création",
         "openInBrowserFailed": "Échec de l’ouverture dans le navigateur",
         "downloadFailed": "Échec du téléchargement de {name}",
-        "downloadSaved": "{name} téléchargé"
+        "downloadSaved": "{name} téléchargé",
+        "pathCopied": "Chemin copié",
+        "copyPathFailed": "Échec de la copie du chemin"
       },
       "createDialog": {
         "newFile": "Nouveau fichier",
@@ -1748,7 +1800,8 @@
         "descriptionWithTarget": "Annuler les modifications locales du fichier \"{name}\" ?",
         "descriptionFallback": "Annuler les modifications locales de ce fichier ?"
       },
-      "terminalTitle": "Console · {name}"
+      "terminalTitle": "Console · {name}",
+      "copyPath": "Copier le chemin"
     },
     "commandDropdown": {
       "loading": "Chargement...",
@@ -1894,7 +1947,9 @@
         "attachUploadTooLarge": "{names} dépasse la limite de téléversement de {limit} Mo et a été ignoré.",
         "attachUploadFailed": "Échec du téléversement de {names}.",
         "attachUploadNotAFile": "{names} n'est pas un fichier régulier (répertoire ou fichier spécial) et a été ignoré.",
-        "attachUploadQuotaExceeded": "Le serveur n'a plus d'espace pour les téléversements ; {names} n'a pas pu être envoyé."
+        "attachUploadQuotaExceeded": "Le serveur n'a plus d'espace pour les téléversements ; {names} n'a pas pu être envoyé.",
+        "liveFeedback": "Retour en direct",
+        "liveFeedbackDisabledHint": "Disponible pendant que l'agent travaille"
       },
       "messageQueue": {
         "addToQueue": "Mettre en file",
@@ -2078,7 +2133,11 @@
             "child_unknown": "sous-agent : erreur",
             "unknown": "tâche inconnue"
           }
-        }
+        },
+        "resultPageOf": "{current} / {total}",
+        "prevResult": "Résultat précédent",
+        "nextResult": "Résultat suivant",
+        "noResultText": "Aucun résultat pour cette vérification."
       },
       "contentParts": {
         "showingTailOutput": "Affichage de la fin de la sortie pendant le streaming pour de meilleures performances.",
@@ -2203,6 +2262,44 @@
           "errorSuffix": "{count, plural, one {# échec} other {# échecs}}",
           "joiner": " · "
         }
+      },
+      "subAgentOverlay": {
+        "title": "Sous-agents",
+        "collapsedSummary": "Sous-agents {count}",
+        "collapseAria": "Réduire les sous-agents"
+      },
+      "messageNav": {
+        "title": "Navigation des messages",
+        "expand": "Développer la navigation des messages",
+        "collapse": "Réduire la navigation des messages",
+        "jumpToMessage": "Aller à : {label}",
+        "fileCount": "{count, plural, one {# fichier} other {# fichiers}}",
+        "remove": "Retirer",
+        "noDiffDataAvailable": "Aucune donnée de diff disponible pour {filePath}"
+      },
+      "askQuestion": {
+        "title": "L'agent attend votre choix",
+        "subtitle": "Répondez puis envoyez. Vous pouvez ignorer à tout moment.",
+        "recommended": "Recommandé",
+        "other": "Autre",
+        "otherPlaceholder": "Saisissez votre réponse…",
+        "singleSelect": "Unique",
+        "multiSelect": "Multiple",
+        "skip": "Ignorer",
+        "next": "Suivant",
+        "submit": "Envoyer",
+        "submitError": "Échec de l'envoi. Veuillez réessayer."
+      },
+      "configStale": {
+        "agentConfigTitle": "Paramètres de l'agent mis à jour",
+        "modelProviderTitle": "Fournisseur de modèle mis à jour",
+        "description": "Cette session utilise encore son ancienne configuration. Reconnectez-vous pour l'appliquer (l'historique de conversation est conservé).",
+        "reconnect": "Reconnecter pour appliquer",
+        "reconnecting": "Reconnexion…",
+        "reconnectDisabledDuringTurn": "Disponible une fois le tour en cours terminé",
+        "dismiss": "Ignorer",
+        "reconnectFailed": "Échec de la reconnexion de la session",
+        "applied": "Nouvelle configuration appliquée"
       }
     },
     "diffPreview": {
@@ -2354,7 +2451,11 @@
       "permissionDenied": "Permission refusée. Utilisez un port supérieur à 1024 ou exécutez avec des privilèges plus élevés.",
       "addressUnavailable": "Cette adresse n'est pas disponible sur cette machine",
       "bindFailed": "Échec de la liaison à l'adresse"
-    }
+    },
+    "addressSwitchHint": "Changer ne modifie que l'adresse affichée et ouverte ici ; le service écoute sur toutes les interfaces et reste accessible à chaque adresse.",
+    "qrcode": "Code QR",
+    "qrcodeTitle": "Scanner pour ouvrir",
+    "qrcodeHint": "Scannez avec votre téléphone pour ouvrir Codeg dans un navigateur"
   },
   "DirectoryBrowser": {
     "title": "Parcourir le répertoire",
@@ -2451,7 +2552,34 @@
       "error": "Erreur de l'agent",
       "errorDesc": "Lorsqu'un agent rencontre une erreur",
       "saved": "Filtre d'événements mis à jour.",
-      "saveFailed": "Échec de l'enregistrement du filtre d'événements."
+      "saveFailed": "Échec de l'enregistrement du filtre d'événements.",
+      "permissionRequest": "Demande d'autorisation",
+      "permissionRequestDesc": "Lorsqu'un agent demande une autorisation",
+      "userPromptSent": "Message de l'utilisateur",
+      "userPromptSentDesc": "Lorsque vous envoyez un message (le texte du message est inclus dans la notification)",
+      "loadFailed": "Échec du chargement des paramètres.",
+      "retry": "Réessayer",
+      "webhooksTitle": "Webhooks",
+      "webhooksDescription": "Envoie une charge JSON via POST vers une ou plusieurs URL lorsqu'un événement activé se déclenche. Le filtre d'événements ci-dessus s'applique aussi aux webhooks.",
+      "webhookUrlPlaceholder": "https://example.com/webhook",
+      "addWebhook": "Ajouter un webhook",
+      "removeWebhook": "Supprimer le webhook",
+      "webhookSave": "Enregistrer",
+      "webhooksSaved": "Webhooks enregistrés.",
+      "webhooksSaveFailed": "Échec de l'enregistrement des webhooks.",
+      "webhookInvalidUrl": "Saisissez des URL http(s) valides.",
+      "docsTitle": "Format de la requête",
+      "docsMethod": "Méthode",
+      "docsContentType": "Content-Type",
+      "docsNote": "Chaque événement activé est envoyé à toutes les URL. Les webhooks ne sont pas anti-rebond ; le filtre d'événements ci-dessus s'applique toujours.",
+      "editWebhook": "Modifier le webhook",
+      "enableWebhook": "Activer le webhook",
+      "webhookDuplicate": "Cette URL est déjà configurée.",
+      "cancel": "Annuler",
+      "webhooksEmpty": "Aucun webhook configuré pour le moment.",
+      "deleteWebhookTitle": "Supprimer le webhook",
+      "deleteWebhookMessage": "Supprimer ce webhook ? Les événements ne seront plus envoyés à cette URL.",
+      "delete": "Supprimer"
     },
     "language": {
       "title": "Langue des messages",
@@ -2512,7 +2640,8 @@
     "cancel": "Annuler",
     "delete": "Supprimer",
     "create": "Créer",
-    "save": "Enregistrer"
+    "save": "Enregistrer",
+    "affectedRunningSessions": "{count, plural, one {# session active doit se reconnecter pour appliquer la modification} other {# sessions actives doivent se reconnecter pour appliquer la modification}}"
   },
   "ProviderUsageQuerySettings": {
     "sectionTitle": "Provider Usage",
@@ -2791,6 +2920,19 @@
         "installFailed": "Échec de l’installation",
         "alreadyInstalled": "La mascotte existe déjà localement"
       }
+    },
+    "badge": {
+      "running": "{count} en cours",
+      "waiting": "{count} en attente d'approbation",
+      "error": "{count} en erreur"
+    },
+    "panel": {
+      "title": "Sessions actives",
+      "empty": "Aucune session active",
+      "emptyHint": "Les agents en cours et ceux qui vous attendent apparaissent ici.",
+      "statusRunning": "En cours",
+      "statusWaiting": "En attente",
+      "statusError": "Erreur"
     }
   },
   "RemoteWorkspace": {
@@ -2836,5 +2978,130 @@
     "emptyDirectory": "Ce dossier est vide",
     "errorLoadingDir": "Échec du chargement du dossier",
     "selectedCount": "{count} sélectionné(s)"
+  },
+  "BackupSettings": {
+    "title": "Sauvegarde et restauration",
+    "description": "Exportez une sauvegarde portable de vos données codeg, ou restaurez à partir d'une sauvegarde.",
+    "tabs": {
+      "backup": "Sauvegarde",
+      "restore": "Restauration"
+    },
+    "export": {
+      "includeExternal": "Inclure le contenu des conversations",
+      "includeExternalHint": "Archive aussi les transcriptions des CLI (Claude, Codex, Gemini, …). Augmente la taille.",
+      "passphrase": "Phrase secrète (facultatif)",
+      "passphrasePlaceholder": "Laissez vide pour une archive non chiffrée",
+      "passphraseConfirm": "Confirmer la phrase secrète",
+      "passphraseMismatch": "Les phrases secrètes ne correspondent pas.",
+      "noPassphraseWarning": "Cette sauvegarde contiendra des secrets (clés d'API, jetons) en clair. Conservez-la en lieu sûr.",
+      "passphraseLossWarning": "Chiffrée avec cette phrase secrète. Si vous la perdez, la sauvegarde ne pourra pas être récupérée.",
+      "button": "Exporter la sauvegarde",
+      "inProgress": "Création de la sauvegarde…",
+      "success": "Sauvegarde créée.",
+      "started": "Téléchargement de la sauvegarde lancé."
+    },
+    "restore": {
+      "selectFile": "Sélectionner le fichier de sauvegarde",
+      "passphrasePrompt": "Cette sauvegarde est chiffrée. Saisissez sa phrase secrète.",
+      "unlock": "Déverrouiller",
+      "preview": {
+        "title": "Détails de la sauvegarde",
+        "encrypted": "Chiffrée",
+        "compatible": "Compatible",
+        "incompatible": "Incompatible",
+        "createdAt": "Créée : {value}",
+        "appVersion": "Version de l'app : {value}",
+        "incompatibleHint": "Cette sauvegarde a été créée par une version plus récente de codeg et ne peut pas être restaurée."
+      },
+      "replaceWarning": "La restauration remplace toutes les données codeg actuelles (base de données et téléversements). Vos données actuelles sont d'abord sauvegardées en instantané pour pouvoir être récupérées.",
+      "keyringNote": "Les jetons GitHub/chat du bureau sont dans le trousseau du système et ne sont pas inclus ; ressaisissez-les après la restauration.",
+      "button": "Restaurer",
+      "staging": "Préparation de la restauration…",
+      "staged": "Restauration préparée. Redémarrage…",
+      "restarting": "Restauration préparée. Redémarrage du serveur…",
+      "restartTimeout": "Le serveur n'est pas revenu à temps. Rechargez la page une fois qu'il est actif.",
+      "externalSideLocation": "Les transcriptions de conversations ont été restaurées dans {path}",
+      "confirmTitle": "Remplacer toutes les données ?",
+      "confirmBody": "Cela remplacera votre base de données et vos téléversements codeg actuels par la sauvegarde, puis redémarrera. Vos données actuelles sont d'abord sauvegardées en instantané.",
+      "cancel": "Annuler",
+      "confirmAction": "Remplacer et redémarrer",
+      "external": {
+        "title": "Contenu des conversations",
+        "hint": "Cette sauvegarde inclut des transcriptions des CLI. Choisissez où les restaurer.",
+        "modeSkip": "Ne pas restaurer",
+        "modeSide": "Restaurer dans un dossier annexe sûr",
+        "modeOriginal": "Restaurer aux emplacements d'origine des CLI",
+        "forceOverwrite": "Écraser les fichiers existants",
+        "forceOverwriteHint": "Remplace les fichiers déjà présents dans les dossiers des CLI.",
+        "scanning": "Vérification des conflits…",
+        "noConflicts": "Aucun fichier existant ne sera écrasé.",
+        "conflictCount": "{count} fichier(s) existant(s) seraient concerné(s).",
+        "conflictSkipNote": "Les fichiers existants sont conservés (ignorés) sauf si vous activez l'écrasement."
+      },
+      "restartFailed": "Restauration préparée, mais le serveur n'a pas pu redémarrer. Redémarrez-le manuellement pour l'appliquer."
+    },
+    "remoteUnsupported": "La sauvegarde et la restauration agissent sur les données de la machine qui exécute codeg. Vous êtes connecté à un espace de travail distant : gérez ses sauvegardes directement depuis ce serveur."
+  },
+  "backup": {
+    "restore": {
+      "error": {
+        "badPassphrase": "Phrase secrète incorrecte ou sauvegarde corrompue.",
+        "corrupted": "L'archive de sauvegarde est corrompue.",
+        "unknownFormat": "Ce fichier n'est pas une sauvegarde codeg reconnue.",
+        "newerVersion": "Cette sauvegarde a été créée par codeg {backupVersion}, plus récent que cette version ({appVersion}).",
+        "alreadyPending": "Une restauration est déjà préparée. Redémarrez pour l'appliquer avant d'en préparer une autre."
+      }
+    },
+    "error": {
+      "diskSpace": "Espace disque insuffisant pour terminer l'opération.",
+      "cancelled": "L'opération a été annulée."
+    }
+  },
+  "WebConnection": {
+    "disconnectedTitle": "Connexion perdue",
+    "reconnectingDescription": "Tentative de reconnexion au serveur. Cela se rétablit généralement tout seul en quelques secondes.",
+    "reconnectNow": "Se reconnecter maintenant",
+    "sessionExpiredTitle": "Session expirée",
+    "sessionExpiredDescription": "Votre session n'est plus valide. Veuillez vous reconnecter pour continuer.",
+    "goToLogin": "Aller à la connexion"
+  },
+  "SessionFeedbackSettings": {
+    "title": "Retour en direct",
+    "description": "Envoyez des notes et corrections à un agent pendant qu'il travaille. Une fois activé, l'agent dispose d'un outil pour consulter les retours en direct et les conversations affichent une entrée de notes. Astuce : l'agent ne consulte généralement les retours que lorsque vous le mentionnez dans votre message — par exemple, ajoutez « vérifie régulièrement mes retours en direct pendant le travail ».",
+    "enable": "Activer le retour en direct",
+    "enableHint": "Ajoute un outil de consultation des retours aux agents démarrés après l'activation. Désactivé par défaut.",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Paramètres de retour enregistrés",
+    "saveFailed": "Échec de l'enregistrement des paramètres de retour",
+    "loadFailed": "Échec du chargement : {detail}"
+  },
+  "LiveFeedback": {
+    "placeholder": "Envoyez une note à {agent} pendant qu'il travaille…",
+    "agentFallback": "l'agent",
+    "ariaLabel": "Note de retour en direct",
+    "dialogTitle": "Retour en direct",
+    "dialogDescription": "Envoyez une note à l'agent pendant qu'il travaille. Il la lira lors de sa prochaine vérification, sans interrompre l'étape en cours.",
+    "send": "Envoyer",
+    "cancel": "Annuler",
+    "pending": "en attente",
+    "delivered": "reçue",
+    "turnEndedUnread": "L'agent a terminé avant de lire votre retour.",
+    "sendAsMessage": "Envoyer comme message",
+    "dismiss": "Ignorer",
+    "turnEndedResent": "Le tour est terminé : envoyé comme nouveau message.",
+    "turnEnded": "Le tour est déjà terminé.",
+    "submitFailed": "Impossible d'envoyer votre note"
+  },
+  "AskQuestionSettings": {
+    "title": "Poser une question à l'utilisateur",
+    "description": "Permet aux agents de s'interrompre et de vous poser une question à choix multiples affichée au-dessus de la zone de saisie de la conversation. L'agent attend votre réponse (ou que vous ignoriez). Activé par défaut.",
+    "enable": "Activer les questions à l'utilisateur",
+    "enableHint": "Ajoute l'outil ask_user_question aux agents démarrés après l'activation.",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Paramètres de question enregistrés",
+    "saveFailed": "Échec de l'enregistrement des paramètres de question",
+    "loadFailed": "Échec du chargement : {detail}"
   }
 }

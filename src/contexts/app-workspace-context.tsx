@@ -16,6 +16,7 @@ import {
   listAllFolderDetails,
   listOpenFolderDetails,
   openFolder as apiOpenFolder,
+  openWorktreeFolder as apiOpenWorktreeFolder,
   openFolderById as apiOpenFolderById,
   removeFolderFromWorkspace as apiRemoveFolderFromWorkspace,
   reorderFolders as apiReorderFolders,
@@ -23,13 +24,16 @@ import {
   updateFolderPinned as apiUpdateFolderPinned,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
+import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { useAcpEvent } from "@/contexts/acp-connections-context"
-import type {
-  AgentStats,
-  AgentType,
-  DbConversationSummary,
-  EventEnvelope,
-  FolderDetail,
+import {
+  CONVERSATION_CHANGED_EVENT,
+  type AgentStats,
+  type AgentType,
+  type ConversationChange,
+  type DbConversationSummary,
+  type EventEnvelope,
+  type FolderDetail,
 } from "@/lib/types"
 
 interface ConversationSummaryLocalSync {
@@ -69,6 +73,10 @@ interface AppWorkspaceContextValue {
 
   upsertFolder: (detail: FolderDetail) => void
   openFolder: (path: string) => Promise<FolderDetail>
+  openWorktreeFolder: (
+    path: string,
+    sourceFolderId: number
+  ) => Promise<FolderDetail>
   addFolderToWorkspaceById: (folderId: number) => Promise<FolderDetail>
   removeFolderFromWorkspace: (folderId: number) => Promise<void>
   reorderFolders: (ids: number[]) => Promise<void>
@@ -114,6 +122,12 @@ function computeStats(conversations: DbConversationSummary[]): AgentStats {
     })),
   }
 }
+
+// Bound on the soft-delete tombstone set (see `deletedIdsRef`). The eviction
+// window — 512 deletions — far exceeds any realistic late/out-of-order event
+// delay, so a row can never be resurrected in practice while memory stays
+// bounded across a long-lived session.
+const DELETED_TOMBSTONE_CAP = 512
 
 interface AppWorkspaceProviderProps {
   children: ReactNode
@@ -270,6 +284,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
           id,
           folder_id: folderId,
           title: title ?? null,
+          title_locked: false,
           agent_type: agentType,
           status: status ?? "in_progress",
           model: model ?? null,
@@ -295,6 +310,93 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     },
     [syncConversationSummaryLocal]
   )
+
+  // ── Cross-client list/status sync ──────────────────────────────────────
+  // Tombstones for soft-deleted ids: a stale/out-of-order `upsert` that lands
+  // after a `deleted` (e.g. a concurrent rename racing a delete from another
+  // client) must not resurrect the row. Ids are DB autoincrement and never
+  // reused, so the tombstone is permanent; the set is FIFO-bounded.
+  const deletedIdsRef = useRef<Set<number>>(new Set())
+
+  // Insert-or-replace a conversation by id (create + field updates). Root-only:
+  // delegation children (parent_id set) are not sidebar rows. New rows prepend
+  // (most-recent-first); existing rows replace in place to keep their position.
+  const applyConversationUpsert = useCallback(
+    (summary: DbConversationSummary) => {
+      if (summary.parent_id != null) return
+      if (deletedIdsRef.current.has(summary.id)) return
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => c.id === summary.id)
+        if (idx < 0) return [summary, ...prev]
+        const next = prev.slice()
+        next[idx] = summary
+        return next
+      })
+    },
+    []
+  )
+
+  // Remove a conversation by id. Idempotent: unknown id returns the same
+  // reference (no re-render; keeps the `stats` memo stable).
+  const applyConversationRemove = useCallback((id: number) => {
+    const tombstones = deletedIdsRef.current
+    tombstones.add(id)
+    if (tombstones.size > DELETED_TOMBSTONE_CAP) {
+      // FIFO eviction — Set preserves insertion order.
+      const oldest = tombstones.values().next().value
+      if (oldest !== undefined) tombstones.delete(oldest)
+    }
+    setConversations((prev) => {
+      const idx = prev.findIndex((c) => c.id === id)
+      if (idx < 0) return prev
+      const next = prev.slice()
+      next.splice(idx, 1)
+      return next
+    })
+  }, [])
+
+  // Subscribe to the global `conversation://changed` side-channel so any
+  // client's create/rename/delete/status reaches this client's sidebar in real
+  // time — independent of whether the conversation is open/attached anywhere.
+  useEffect(() => {
+    let disposed = false
+    let unlisten: (() => void) | undefined
+
+    void (async () => {
+      const dispose = await subscribe<ConversationChange>(
+        CONVERSATION_CHANGED_EVENT,
+        (change) => {
+          if (change.kind === "upsert") {
+            applyConversationUpsert(change.summary)
+          } else if (change.kind === "deleted") {
+            applyConversationRemove(change.id)
+          } else {
+            updateConversationLocal(change.id, { status: change.status })
+          }
+        }
+      )
+      if (disposed) dispose()
+      else unlisten = dispose
+    })()
+
+    // Events fired while the WS was disconnected are dropped by the broadcaster
+    // (receiver_count == 0). A full re-fetch on reconnect reconciles. Returns
+    // null on desktop IPC (no disconnect window) → no-op there.
+    const offReconnect = onTransportReconnect(() => {
+      void refreshConversations()
+    })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+      offReconnect?.()
+    }
+  }, [
+    applyConversationUpsert,
+    applyConversationRemove,
+    updateConversationLocal,
+    refreshConversations,
+  ])
 
   const getBranch = useCallback(
     (folderId: number) => branches.get(folderId),
@@ -326,6 +428,21 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
   const openFolder = useCallback(
     async (path: string) => {
       const detail = await apiOpenFolder(path)
+      upsertFolder(detail)
+      setBranches((prev) => {
+        const next = new Map(prev)
+        next.set(detail.id, detail.git_branch ?? null)
+        return next
+      })
+      void refreshConversations()
+      return detail
+    },
+    [refreshConversations, upsertFolder]
+  )
+
+  const openWorktreeFolder = useCallback(
+    async (path: string, sourceFolderId: number) => {
+      const detail = await apiOpenWorktreeFolder(path, sourceFolderId)
       upsertFolder(detail)
       setBranches((prev) => {
         const next = new Map(prev)
@@ -516,6 +633,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       setBranch,
       upsertFolder,
       openFolder,
+      openWorktreeFolder,
       addFolderToWorkspaceById,
       removeFolderFromWorkspace,
       reorderFolders,
@@ -543,6 +661,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       setBranch,
       upsertFolder,
       openFolder,
+      openWorktreeFolder,
       addFolderToWorkspaceById,
       removeFolderFromWorkspace,
       reorderFolders,

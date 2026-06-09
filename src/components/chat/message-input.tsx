@@ -15,6 +15,7 @@ import {
   FolderSearch,
   GitFork,
   Maximize2,
+  MessageSquarePlus,
   MessageSquareText,
   Minimize2,
   Paperclip,
@@ -41,6 +42,11 @@ import {
 import { ImagePreviewDialog } from "@/components/ui/image-preview-dialog"
 import { AgentIcon } from "@/components/agent-icon"
 import { cn, randomUUID } from "@/lib/utils"
+import {
+  filesFromClipboard,
+  clipboardHasText,
+  imageFilesFromClipboardApi,
+} from "@/lib/clipboard-images"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import {
@@ -139,7 +145,16 @@ interface MessageInputProps {
   onSaveQueueEdit?: (draft: PromptDraft) => void
   onCancelQueueEdit?: () => void
   onCancelRetryEdit?: () => void
+  /** Fork the session and send `draft`. Fire-and-forget: the input consumes the
+   *  draft synchronously (clears on click); the parent re-queues it if the fork
+   *  can't run, so it is never lost. */
   onForkSend?: (draft: PromptDraft, modeId?: string | null) => void
+  /** Open the live-feedback dialog (from the "+" menu). When omitted the entry
+   *  is hidden (feature off). */
+  onAddFeedback?: () => void
+  /** Grey out the live-feedback "+" entry when a note can't be sent right now
+   *  (no active turn / agent lacks the tool). */
+  feedbackAddDisabled?: boolean
 }
 
 interface ResourceInputAttachment {
@@ -221,26 +236,6 @@ function toFileUri(path: string): string {
 function hasDragFiles(dataTransfer: DataTransfer | null): boolean {
   if (!dataTransfer?.types) return false
   return Array.from(dataTransfer.types).includes("Files")
-}
-
-// Extract pasted files from a clipboard event. On macOS/Windows pasted images
-// land in `clipboardData.files`, but on Linux (X11/Wayland) the same image is
-// only exposed through `clipboardData.items` as a file-kind DataTransferItem,
-// so fall back to `getAsFile()` when `files` is empty.
-function filesFromClipboard(dataTransfer: DataTransfer | null): File[] {
-  if (!dataTransfer) return []
-  const files = Array.from(dataTransfer.files ?? [])
-  if (files.length > 0) return files
-  // Mixed text+image clipboards (spreadsheet cells, rich web content) expose
-  // both a text/plain string and an image file item. Prefer the text and let
-  // the default paste run, so copying a cell doesn't get hijacked into an
-  // image attachment. Pure image pastes (screenshots) carry no text.
-  if (dataTransfer.getData("text/plain").trim().length > 0) return []
-  const items = dataTransfer.items ? Array.from(dataTransfer.items) : []
-  return items
-    .filter((item) => item.kind === "file")
-    .map((item) => item.getAsFile())
-    .filter((file): file is File => file !== null)
 }
 
 function pointWithinElement(
@@ -508,6 +503,8 @@ export function MessageInput({
   onCancelQueueEdit,
   onCancelRetryEdit,
   onForkSend,
+  onAddFeedback,
+  feedbackAddDisabled,
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
   const tQueue = useTranslations("Folder.chat.messageQueue")
@@ -1503,18 +1500,32 @@ export function MessageInput({
       }
 
       const pastedText = clipboardData?.getData("text/plain") ?? ""
-      if (!pastedText || !shouldCollapsePastedText(pastedText)) return
+      if (pastedText && shouldCollapsePastedText(pastedText)) {
+        const current = textRef.current
+        const rawStart = event.currentTarget.selectionStart ?? current.length
+        const rawEnd = event.currentTarget.selectionEnd ?? rawStart
+        const { start, end } = normalizeSelectionRange(
+          rawStart,
+          rawEnd,
+          current.length
+        )
+        event.preventDefault()
+        insertCollapsedPastedText(pastedText, start, end, current)
+        return
+      }
 
-      const current = textRef.current
-      const rawStart = event.currentTarget.selectionStart ?? current.length
-      const rawEnd = event.currentTarget.selectionEnd ?? rawStart
-      const { start, end } = normalizeSelectionRange(
-        rawStart,
-        rawEnd,
-        current.length
-      )
-      event.preventDefault()
-      insertCollapsedPastedText(pastedText, start, end, current)
+      // Linux/Tauri (WebKitGTK) fallback: screenshot tools (e.g. WeChat) write
+      // the image to the clipboard in a form the synchronous DataTransfer API
+      // can't read, so retry through the async Clipboard API.
+      if (clipboardHasText(clipboardData)) return
+      void imageFilesFromClipboardApi()
+        .then((imageFiles) => {
+          if (imageFiles.length === 0) return
+          return appendFilesFromInput(imageFiles)
+        })
+        .catch((error) => {
+          console.error("[MessageInput] clipboard image paste failed:", error)
+        })
     },
     [appendFilesFromInput, disabled, insertCollapsedPastedText]
   )
@@ -2225,6 +2236,10 @@ export function MessageInput({
     if (!onForkSend) return
     const draft = buildDraft()
     if (!draft) return
+    // Fork-send consumes the draft synchronously, exactly like a normal send:
+    // fire-and-forget and clear the input immediately, so there is no in-flight
+    // editable window. If the fork can't run (queue non-empty / disconnected /
+    // failure) the parent re-queues the draft, so it is never lost.
     onForkSend(draft, showModeSelector ? effectiveModeId : null)
     if (effectiveDraftStorageKey) {
       clearMessageInputDraft(effectiveDraftStorageKey)
@@ -2836,6 +2851,20 @@ export function MessageInput({
                       )}
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
+                  {onAddFeedback && (
+                    <DropdownMenuItem
+                      disabled={feedbackAddDisabled}
+                      onClick={onAddFeedback}
+                      title={
+                        feedbackAddDisabled
+                          ? t("liveFeedbackDisabledHint")
+                          : undefined
+                      }
+                    >
+                      <MessageSquarePlus className="size-4" />
+                      {t("liveFeedback")}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSub>
                     <DropdownMenuSubTrigger>
                       <Sparkles className="size-4" />

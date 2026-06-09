@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useMemo, useRef, type Ref } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, type Ref } from "react"
 import type { CSSProperties, ReactNode, RefObject } from "react"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
 import { useStickToBottomContext } from "use-stick-to-bottom"
@@ -59,7 +59,25 @@ interface VirtualizedMessageThreadProps<T> {
   contentProps?: Omit<MessageThreadContentProps, "children" | "className">
   /** Optional ref for imperative virtual scroll control. */
   virtualizerRef?: Ref<VirtualizerHandle>
+  /**
+   * Publishes the virtualizer scroll handle to an ancestor so siblings that
+   * live outside the `MessageScrollProvider` subtree can drive `scrollToIndex`.
+   */
+  scrollApiRef?: RefObject<MessageScrollContextValue | null>
+  /**
+   * Fires with the index of the item nearest the top of the viewport whenever
+   * the thread scrolls. Used to highlight the active entry in the navigator.
+   */
+  onVisibleStartIndexChange?: (index: number) => void
 }
+
+/**
+ * Small top tolerance (px) when mapping scroll offset → "active" item index.
+ * A click runs `scrollToIndex(N, {align: "start"})`, pinning message N to the
+ * top, but the browser floors `scrollTop` a sub-pixel below `offsetOf(N)`, so
+ * `findItemIndex` (largest i with `offsetOf(i) <= offset`) returns N-1.
+ */
+const ACTIVE_TOP_EPSILON_PX = 2
 
 function VirtualizedMessageThreadImpl<T>({
   items,
@@ -74,6 +92,8 @@ function VirtualizedMessageThreadImpl<T>({
   contentClassName,
   contentProps,
   virtualizerRef,
+  scrollApiRef,
+  onVisibleStartIndexChange,
 }: VirtualizedMessageThreadProps<T>) {
   const { scrollRef } = useStickToBottomContext()
   const virtualizerHandleRef = useRef<VirtualizerHandle>(null)
@@ -87,6 +107,25 @@ function VirtualizedMessageThreadImpl<T>({
   const scrollContextValue = useMemo<MessageScrollContextValue>(
     () => ({ scrollToIndex }),
     [scrollToIndex]
+  )
+
+  useEffect(() => {
+    if (!scrollApiRef) return
+    scrollApiRef.current = scrollContextValue
+    return () => {
+      scrollApiRef.current = null
+    }
+  }, [scrollApiRef, scrollContextValue])
+
+  const handleScroll = useCallback(
+    (offset: number) => {
+      if (!onVisibleStartIndexChange) return
+      const index = virtualizerHandleRef.current?.findItemIndex(
+        offset + ACTIVE_TOP_EPSILON_PX
+      )
+      if (typeof index === "number") onVisibleStartIndexChange(index)
+    },
+    [onVisibleStartIndexChange]
   )
 
   // Pre-compute the three possible padding styles so every render reuses
@@ -134,6 +173,7 @@ function VirtualizedMessageThreadImpl<T>({
             scrollRef={scrollRef as unknown as RefObject<HTMLElement | null>}
             itemSize={itemSize}
             bufferSize={bufferSize}
+            onScroll={onVisibleStartIndexChange ? handleScroll : undefined}
           >
             {items.map((item, index) => (
               <div

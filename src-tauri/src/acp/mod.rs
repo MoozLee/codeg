@@ -3,6 +3,7 @@ pub mod connection;
 pub mod delegation;
 pub mod error;
 pub mod event_stream;
+pub mod feedback;
 pub mod file_system_runtime;
 pub mod fork;
 pub mod idle_sweep;
@@ -11,6 +12,7 @@ pub mod lifecycle;
 pub mod manager;
 pub mod opencode_plugins;
 pub mod preflight;
+pub mod question;
 pub mod registry;
 pub mod session_state;
 pub mod terminal_runtime;
@@ -28,4 +30,6 @@ pub use session_state::{
     LiveContentBlock, LiveMessage, PendingPermissionState, ToolCallOutput, ToolCallState,
     ToolCallStatus, ToolKind, UsageInfo,
 };
-pub use types::{AcpEvent, EventEnvelope};
+pub use types::{
+    user_blocks_from_prompt, AcpEvent, ConversationConnectionInfo, EventEnvelope, UserMessageBlock,
+};

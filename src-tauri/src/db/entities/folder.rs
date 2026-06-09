@@ -18,6 +18,10 @@ pub struct Model {
     pub sort_order: i32,
     pub color: String,
     pub is_pinned: bool,
+    /// Root folder this one was created under (for worktree folders). NULL for
+    /// top-level folders. Flattened: a worktree of a worktree still points at the
+    /// original root, never an intermediate worktree.
+    pub parent_id: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

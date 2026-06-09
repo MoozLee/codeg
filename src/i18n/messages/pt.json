@@ -103,7 +103,23 @@
       "current": "Zoom atual: {zoom}%"
     },
     "resetToDefaults": "Restaurar padrões",
-    "resetHint": "Restaura a cor do tema, o zoom da janela e as fontes para os padrões."
+    "resetHint": "Restaura a cor do tema, o zoom da janela e as fontes para os padrões.",
+    "fonts": {
+      "sectionTitle": "Fontes",
+      "sectionDescription": "Escolha as fontes para a interface, o editor de código e o terminal. As fontes incluídas são carregadas sob demanda; selecione “Personalizada…” para usar qualquer fonte instalada no seu sistema.",
+      "interface": "Interface",
+      "editor": "Editor",
+      "terminal": "Terminal",
+      "groupSans": "Sem serifa",
+      "groupMono": "Monoespaçada",
+      "custom": "Personalizada…",
+      "customPlaceholder": "Nome da fonte, ex.: Fira Code",
+      "fontSize": "Tamanho da fonte",
+      "ligatures": "Ativar ligaduras",
+      "ligaturesUnavailable": "Esta fonte não tem ligaduras",
+      "terminalLigaturesHint": "As ligaduras do terminal aplicam-se apenas às fontes de programação incluídas.",
+      "preview": "Pré-visualização"
+    }
   },
   "SystemSettings": {
     "loading": "Carregando...",
@@ -178,7 +194,26 @@
       "downloadFailed": "Falha ao baixar o pacote de atualização. Tente novamente mais tarde.",
       "installFailed": "Falha ao instalar a atualização. Feche o app e tente novamente.",
       "unknown": "Falha na atualização. Tente novamente mais tarde."
-    }
+    },
+    "upgradeSuccess": "Atualização concluída. Recarregando...",
+    "restartTimeout": "O servidor não voltou a tempo. Verifique os logs do contêiner ou do serviço.",
+    "restartingIn": "Reiniciando em {seconds} s...",
+    "waitingForServer": "Aguardando o servidor voltar...",
+    "restartToUpdate": "Reiniciar para atualizar",
+    "updateReadyHint": "Atualização baixada — reinicie para aplicar.",
+    "restarting": "Reiniciando...",
+    "dockerUpgradeHint": "Isto atualiza o contêiner em execução agora. Perde-se se o contêiner for recriado — para mantê-lo, baixe ou crie uma imagem na nova versão e recrie o contêiner.",
+    "upgradeRolledBack": "Falha na atualização; o servidor reverteu para a versão anterior.",
+    "serverUnreachable": "Não foi possível acessar o servidor para iniciar a atualização. Verifique se ele está em execução e tente novamente.",
+    "rollbackButton": "Reverter",
+    "rollingBack": "Revertendo...",
+    "rollbackDescription": "Restaura a versão instalada antes da última atualização.",
+    "rollbackConfirmTitle": "Reverter para a versão anterior?",
+    "rollbackConfirmDescription": "O servidor será reiniciado na versão instalada antes da última atualização. Uma versão mais recente continua disponível para instalar novamente.",
+    "rollbackConfirm": "Reverter",
+    "rollbackCancel": "Cancelar",
+    "rollbackSuccess": "Revertido para a versão anterior. Recarregando...",
+    "rollbackFailed": "Falha ao reverter. Verifique os registros do servidor."
   },
   "VersionControlSettings": {
     "loading": "Carregando...",
@@ -312,6 +347,14 @@
       "newline_in_message": {
         "title": "Nova linha na mensagem",
         "description": "Inserir uma nova linha na caixa de entrada"
+      },
+      "next_tab": {
+        "title": "Próxima aba",
+        "description": "Mudar para a próxima aba de conversa ou arquivo"
+      },
+      "prev_tab": {
+        "title": "Aba anterior",
+        "description": "Mudar para a aba anterior de conversa ou arquivo"
       }
     }
   },
@@ -747,7 +790,8 @@
       "saveConfigManagementFailed": "Falha ao salvar o gerenciamento de configuração",
       "clineSaved": "Configuração do Cline salva",
       "saveClineFailed": "Falha ao salvar a configuração do Cline",
-      "modelProviderRequired": "Selecione um provedor de modelo antes de salvar."
+      "modelProviderRequired": "Selecione um provedor de modelo antes de salvar.",
+      "affectedRunningSessions": "{count, plural, one {# sessão ativa precisa reconectar para aplicar a alteração} other {# sessões ativas precisam reconectar para aplicar a alteração}}"
     },
     "version": {
       "statusLabel": "Status da versão",
@@ -922,7 +966,9 @@
         "reorderFoldersFailed": "Falha ao reordenar pastas: {message}",
         "changeFolderColorFailed": "Falha ao alterar a cor: {message}",
         "togglePinFailed": "Falha ao alternar a fixação: {message}",
-        "changeFolderDefaultAgentFailed": "Falha ao definir agente padrão: {message}"
+        "changeFolderDefaultAgentFailed": "Falha ao definir agente padrão: {message}",
+        "importedAndUpdated": "Importadas {imported, plural, one {# sessão} other {# sessões}}, atualizados {updated, plural, one {# título} other {# títulos}}, ignoradas {skipped}",
+        "updatedTitles": "Atualizados {updated, plural, one {# título} other {# títulos}}, ignoradas {skipped}"
       },
       "statsLabel": "{folders} pastas · {convos} conversas",
       "reorderHandle": "Arraste para reordenar",
@@ -951,8 +997,7 @@
         "setDefaultAgent": "Definir agente padrão",
         "defaultAgentNone": "Sem padrão (usar global)",
         "agentUnavailableSuffix": "(indisponível)",
-        "loadingAgents": "Carregando agentes…",
-        "removeFromWorkspace": "Remover do espaço de trabalho"
+        "loadingAgents": "Carregando agentes…"
       },
       "sections": {
         "pinned": "Fixados",
@@ -1276,7 +1321,10 @@
       "loadingEditor": "Carregando editor...",
       "imageZoomIn": "Ampliar",
       "imageZoomOut": "Reduzir",
-      "imageZoomReset": "Redefinir zoom"
+      "imageZoomReset": "Redefinir zoom",
+      "htmlPreviewTitle": "Visualização HTML",
+      "htmlPreviewTrust": "Ativar scripts",
+      "htmlPreviewTrustHint": "Executa os scripts deste arquivo e permite acesso à rede. Ative apenas para arquivos confiáveis."
     },
     "branchDropdown": {
       "toasts": {
@@ -1294,7 +1342,9 @@
         "upstreamSet": "A branch upstream foi definida",
         "upstreamSetAndPushed": "Branch upstream definida e {count, plural, one {# commit} other {# commits}} enviado(s)",
         "noCommitsToPush": "Não há commits para enviar",
-        "pushedCommits": "{count, plural, one {# commit enviado} other {# commits enviados}}"
+        "pushedCommits": "{count, plural, one {# commit enviado} other {# commits enviados}}",
+        "switchedToFolder": "Alternado para {name}",
+        "switchFailed": "Falha ao trocar de branch"
       },
       "tasks": {
         "newBranch": "Criar branch {name}",
@@ -1661,7 +1711,9 @@
         "createFailed": "Falha ao criar",
         "openInBrowserFailed": "Falha ao abrir no navegador",
         "downloadFailed": "Falha ao baixar {name}",
-        "downloadSaved": "{name} baixado"
+        "downloadSaved": "{name} baixado",
+        "pathCopied": "Caminho copiado",
+        "copyPathFailed": "Falha ao copiar o caminho"
       },
       "createDialog": {
         "newFile": "Novo arquivo",
@@ -1748,7 +1800,8 @@
         "descriptionWithTarget": "Reverter alterações locais do arquivo \"{name}\"?",
         "descriptionFallback": "Reverter alterações locais deste arquivo?"
       },
-      "terminalTitle": "Console · {name}"
+      "terminalTitle": "Console · {name}",
+      "copyPath": "Copiar caminho"
     },
     "commandDropdown": {
       "loading": "Carregando...",
@@ -1894,7 +1947,9 @@
         "attachUploadTooLarge": "{names} excede o limite de upload de {limit}MB e foi ignorado.",
         "attachUploadFailed": "Falha ao enviar {names}.",
         "attachUploadNotAFile": "{names} não é um arquivo regular (diretório ou arquivo especial) e foi ignorado.",
-        "attachUploadQuotaExceeded": "O servidor ficou sem espaço para uploads; {names} não pôde ser enviado."
+        "attachUploadQuotaExceeded": "O servidor ficou sem espaço para uploads; {names} não pôde ser enviado.",
+        "liveFeedback": "Feedback ao vivo",
+        "liveFeedbackDisabledHint": "Disponível enquanto o agente trabalha"
       },
       "messageQueue": {
         "addToQueue": "Adicionar à fila",
@@ -2078,7 +2133,11 @@
             "child_unknown": "subagente: erro",
             "unknown": "tarefa desconhecida"
           }
-        }
+        },
+        "resultPageOf": "{current} / {total}",
+        "prevResult": "Resultado anterior",
+        "nextResult": "Próximo resultado",
+        "noResultText": "Sem resultado nesta verificação."
       },
       "contentParts": {
         "showingTailOutput": "Mostrando a saída final durante o streaming para melhor desempenho.",
@@ -2203,6 +2262,44 @@
           "errorSuffix": "{count, plural, one {# falhou} other {# falharam}}",
           "joiner": " · "
         }
+      },
+      "subAgentOverlay": {
+        "title": "Subagentes",
+        "collapsedSummary": "Subagentes {count}",
+        "collapseAria": "Recolher subagentes"
+      },
+      "messageNav": {
+        "title": "Navegação de mensagens",
+        "expand": "Expandir navegação de mensagens",
+        "collapse": "Recolher navegação de mensagens",
+        "jumpToMessage": "Ir para: {label}",
+        "fileCount": "{count, plural, one {# arquivo} other {# arquivos}}",
+        "remove": "Remover",
+        "noDiffDataAvailable": "Nenhum dado de diff disponível para {filePath}"
+      },
+      "askQuestion": {
+        "title": "O agente precisa da sua escolha",
+        "subtitle": "Responda e envie. Você pode pular a qualquer momento.",
+        "recommended": "Recomendado",
+        "other": "Outro",
+        "otherPlaceholder": "Digite sua resposta…",
+        "singleSelect": "Única",
+        "multiSelect": "Múltipla",
+        "skip": "Pular",
+        "next": "Próxima",
+        "submit": "Enviar",
+        "submitError": "Falha ao enviar. Tente novamente."
+      },
+      "configStale": {
+        "agentConfigTitle": "Configurações do agente atualizadas",
+        "modelProviderTitle": "Provedor de modelo atualizado",
+        "description": "Esta sessão ainda está usando a configuração anterior. Reconecte para aplicar (o histórico da conversa é mantido).",
+        "reconnect": "Reconectar para aplicar",
+        "reconnecting": "Reconectando…",
+        "reconnectDisabledDuringTurn": "Disponível quando o turno atual terminar",
+        "dismiss": "Dispensar",
+        "reconnectFailed": "Falha ao reconectar a sessão",
+        "applied": "Nova configuração aplicada"
       }
     },
     "diffPreview": {
@@ -2354,7 +2451,11 @@
       "permissionDenied": "Permissão negada. Use uma porta acima de 1024 ou execute com privilégios mais altos.",
       "addressUnavailable": "O endereço não está disponível nesta máquina",
       "bindFailed": "Falha ao vincular o endereço"
-    }
+    },
+    "addressSwitchHint": "Alternar muda apenas o endereço mostrado e aberto aqui; o serviço escuta em todas as interfaces e continua acessível em cada endereço.",
+    "qrcode": "Código QR",
+    "qrcodeTitle": "Escanear para abrir",
+    "qrcodeHint": "Escaneie com seu telefone para abrir o Codeg no navegador"
   },
   "DirectoryBrowser": {
     "title": "Explorar diretório",
@@ -2451,7 +2552,34 @@
       "error": "Erro do agente",
       "errorDesc": "Quando um agente encontra um erro",
       "saved": "Filtro de eventos atualizado.",
-      "saveFailed": "Falha ao salvar o filtro de eventos."
+      "saveFailed": "Falha ao salvar o filtro de eventos.",
+      "permissionRequest": "Solicitação de permissão",
+      "permissionRequestDesc": "Quando um agente solicita permissão para agir",
+      "userPromptSent": "Mensagem do usuário",
+      "userPromptSentDesc": "Quando você envia uma mensagem (o texto da mensagem é incluído na notificação)",
+      "loadFailed": "Falha ao carregar as configurações.",
+      "retry": "Tentar novamente",
+      "webhooksTitle": "Webhooks",
+      "webhooksDescription": "Envia uma carga JSON via POST para uma ou mais URLs quando um evento ativado ocorre. O filtro de eventos acima também se aplica aos webhooks.",
+      "webhookUrlPlaceholder": "https://example.com/webhook",
+      "addWebhook": "Adicionar webhook",
+      "removeWebhook": "Remover webhook",
+      "webhookSave": "Salvar",
+      "webhooksSaved": "Webhooks salvos.",
+      "webhooksSaveFailed": "Falha ao salvar os webhooks.",
+      "webhookInvalidUrl": "Insira URLs http(s) válidas.",
+      "docsTitle": "Formato da requisição",
+      "docsMethod": "Método",
+      "docsContentType": "Content-Type",
+      "docsNote": "Cada evento ativado é entregue a todas as URLs. Os webhooks não têm debounce; o filtro de eventos acima continua valendo.",
+      "editWebhook": "Editar webhook",
+      "enableWebhook": "Ativar webhook",
+      "webhookDuplicate": "Esta URL já está configurada.",
+      "cancel": "Cancelar",
+      "webhooksEmpty": "Nenhum webhook configurado ainda.",
+      "deleteWebhookTitle": "Excluir webhook",
+      "deleteWebhookMessage": "Remover este webhook? Os eventos não serão mais entregues a esta URL.",
+      "delete": "Excluir"
     },
     "language": {
       "title": "Idioma das mensagens",
@@ -2512,7 +2640,8 @@
     "cancel": "Cancelar",
     "delete": "Excluir",
     "create": "Criar",
-    "save": "Salvar"
+    "save": "Salvar",
+    "affectedRunningSessions": "{count, plural, one {# sessão ativa precisa reconectar para aplicar a alteração} other {# sessões ativas precisam reconectar para aplicar a alteração}}"
   },
   "ProviderUsageQuerySettings": {
     "sectionTitle": "Provider Usage",
@@ -2791,6 +2920,19 @@
         "installFailed": "Falha ao instalar o pet",
         "alreadyInstalled": "O pet já existe localmente"
       }
+    },
+    "badge": {
+      "running": "{count} em execução",
+      "waiting": "{count} aguardando aprovação",
+      "error": "{count} com erro"
+    },
+    "panel": {
+      "title": "Sessões ativas",
+      "empty": "Nenhuma sessão ativa",
+      "emptyHint": "Agentes em execução e os que precisam de você aparecem aqui.",
+      "statusRunning": "Em execução",
+      "statusWaiting": "Aguardando",
+      "statusError": "Erro"
     }
   },
   "RemoteWorkspace": {
@@ -2836,5 +2978,130 @@
     "emptyDirectory": "Este diretório está vazio",
     "errorLoadingDir": "Falha ao carregar o diretório",
     "selectedCount": "{count} selecionado(s)"
+  },
+  "BackupSettings": {
+    "title": "Backup e restauração",
+    "description": "Exporte um backup portátil dos seus dados do codeg ou restaure a partir de um.",
+    "tabs": {
+      "backup": "Backup",
+      "restore": "Restauração"
+    },
+    "export": {
+      "includeExternal": "Incluir o conteúdo das conversas",
+      "includeExternalHint": "Também arquiva as transcrições das CLIs (Claude, Codex, Gemini, …). Aumenta o tamanho.",
+      "passphrase": "Senha (opcional)",
+      "passphrasePlaceholder": "Deixe em branco para um arquivo sem criptografia",
+      "passphraseConfirm": "Confirmar a senha",
+      "passphraseMismatch": "As senhas não coincidem.",
+      "noPassphraseWarning": "Este backup conterá segredos (chaves de API, tokens) em texto puro. Guarde-o em local seguro.",
+      "passphraseLossWarning": "Criptografado com esta senha. Se você perdê-la, o backup não poderá ser recuperado.",
+      "button": "Exportar backup",
+      "inProgress": "Criando backup…",
+      "success": "Backup criado.",
+      "started": "Download do backup iniciado."
+    },
+    "restore": {
+      "selectFile": "Selecionar arquivo de backup",
+      "passphrasePrompt": "Este backup está criptografado. Digite a senha dele.",
+      "unlock": "Desbloquear",
+      "preview": {
+        "title": "Detalhes do backup",
+        "encrypted": "Criptografado",
+        "compatible": "Compatível",
+        "incompatible": "Incompatível",
+        "createdAt": "Criado: {value}",
+        "appVersion": "Versão do app: {value}",
+        "incompatibleHint": "Este backup foi criado por uma versão mais recente do codeg e não pode ser restaurado."
+      },
+      "replaceWarning": "Restaurar substitui todos os dados atuais do codeg (banco de dados e uploads). Seus dados atuais são salvos em um snapshot primeiro, para que possam ser recuperados.",
+      "keyringNote": "Os tokens de GitHub/chat do desktop ficam no chaveiro do sistema e não são incluídos; insira-os novamente após restaurar.",
+      "button": "Restaurar",
+      "staging": "Preparando a restauração…",
+      "staged": "Restauração preparada. Reiniciando…",
+      "restarting": "Restauração preparada. Reiniciando o servidor…",
+      "restartTimeout": "O servidor não voltou a tempo. Recarregue a página quando ele estiver ativo.",
+      "externalSideLocation": "As transcrições de conversas foram restauradas em {path}",
+      "confirmTitle": "Substituir todos os dados?",
+      "confirmBody": "Isto substituirá seu banco de dados e uploads atuais do codeg pelo backup e, em seguida, reiniciará. Seus dados atuais são salvos em um snapshot primeiro.",
+      "cancel": "Cancelar",
+      "confirmAction": "Substituir e reiniciar",
+      "external": {
+        "title": "Conteúdo das conversas",
+        "hint": "Este backup inclui transcrições das CLIs. Escolha para onde restaurá-las.",
+        "modeSkip": "Não restaurar",
+        "modeSide": "Restaurar em uma pasta separada segura",
+        "modeOriginal": "Restaurar nos locais originais das CLIs",
+        "forceOverwrite": "Sobrescrever arquivos existentes",
+        "forceOverwriteHint": "Substitui os arquivos que já existem nas pastas das CLIs.",
+        "scanning": "Verificando conflitos…",
+        "noConflicts": "Nenhum arquivo existente será sobrescrito.",
+        "conflictCount": "{count} arquivo(s) existente(s) seriam afetados.",
+        "conflictSkipNote": "Os arquivos existentes são mantidos (ignorados) a menos que você ative a sobrescrita."
+      },
+      "restartFailed": "Restauração preparada, mas o servidor não conseguiu reiniciar. Reinicie-o manualmente para aplicá-la."
+    },
+    "remoteUnsupported": "O backup e a restauração atuam sobre os dados da máquina que executa o codeg. Você está conectado a um espaço de trabalho remoto — gerencie os backups dele diretamente nesse servidor."
+  },
+  "backup": {
+    "restore": {
+      "error": {
+        "badPassphrase": "Senha incorreta ou backup corrompido.",
+        "corrupted": "O arquivo de backup está corrompido.",
+        "unknownFormat": "Este arquivo não é um backup do codeg reconhecido.",
+        "newerVersion": "Este backup foi criado pelo codeg {backupVersion}, mais recente que esta versão ({appVersion}).",
+        "alreadyPending": "Já existe uma restauração preparada. Reinicie para aplicá-la antes de preparar outra."
+      }
+    },
+    "error": {
+      "diskSpace": "Espaço em disco insuficiente para concluir a operação.",
+      "cancelled": "A operação foi cancelada."
+    }
+  },
+  "WebConnection": {
+    "disconnectedTitle": "Conexão perdida",
+    "reconnectingDescription": "Tentando reconectar ao servidor. Normalmente isso se resolve sozinho em alguns segundos.",
+    "reconnectNow": "Reconectar agora",
+    "sessionExpiredTitle": "Sessão expirada",
+    "sessionExpiredDescription": "Sua sessão não é mais válida. Faça login novamente para continuar.",
+    "goToLogin": "Ir para o login"
+  },
+  "SessionFeedbackSettings": {
+    "title": "Feedback ao vivo",
+    "description": "Envie notas e correções a um agente enquanto ele trabalha. Quando ativado, o agente ganha uma ferramenta para verificar feedback ao vivo e as conversas mostram uma entrada de notas. Dica: o agente normalmente só verifica o feedback quando você menciona isso na mensagem — por exemplo, adicione \"verifique meu feedback ao vivo regularmente enquanto trabalha\".",
+    "enable": "Ativar feedback ao vivo",
+    "enableHint": "Injeta uma ferramenta de verificação de feedback nos agentes iniciados após a ativação. Desativado por padrão.",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "saved": "Configurações de feedback salvas",
+    "saveFailed": "Falha ao salvar as configurações de feedback",
+    "loadFailed": "Falha ao carregar: {detail}"
+  },
+  "LiveFeedback": {
+    "placeholder": "Envie uma nota para {agent} enquanto ele trabalha…",
+    "agentFallback": "o agente",
+    "ariaLabel": "Nota de feedback ao vivo",
+    "dialogTitle": "Feedback ao vivo",
+    "dialogDescription": "Envie uma nota ao agente enquanto ele trabalha. Ele a lerá na próxima verificação, sem interromper a etapa atual.",
+    "send": "Enviar",
+    "cancel": "Cancelar",
+    "pending": "aguardando",
+    "delivered": "recebida",
+    "turnEndedUnread": "O agente terminou antes de ler o seu feedback.",
+    "sendAsMessage": "Enviar como mensagem",
+    "dismiss": "Dispensar",
+    "turnEndedResent": "O turno terminou — enviado como nova mensagem.",
+    "turnEnded": "O turno já terminou.",
+    "submitFailed": "Não foi possível enviar a sua nota"
+  },
+  "AskQuestionSettings": {
+    "title": "Perguntar ao usuário",
+    "description": "Permite que os agentes pausem e façam uma pergunta de múltipla escolha que aparece acima da caixa de entrada da conversa. O agente aguarda até você responder (ou pular). Ativado por padrão.",
+    "enable": "Ativar perguntas ao usuário",
+    "enableHint": "Adiciona a ferramenta ask_user_question aos agentes iniciados após a ativação.",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "saved": "Configurações de pergunta salvas",
+    "saveFailed": "Falha ao salvar as configurações de pergunta",
+    "loadFailed": "Falha ao carregar: {detail}"
   }
 }

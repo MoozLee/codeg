@@ -9,13 +9,17 @@ import {
   type ConnectionState,
   type LiveMessage,
   type PendingPermission,
+  type PendingUserMessage,
   type PendingQuestion,
 } from "@/contexts/acp-connections-context"
 import type {
   AgentType,
   AvailableCommandInfo,
+  ConfigStaleKind,
   ConnectionStatus,
+  PendingQuestionState,
   PromptCapabilitiesInfo,
+  QuestionAnswer,
   SessionConfigOptionInfo,
   SessionModeStateInfo,
   PromptInputBlock,
@@ -29,6 +33,13 @@ const DEFAULT_PROMPT_CAPABILITIES: PromptCapabilitiesInfo = {
 
 export interface UseConnectionReturn {
   connectionId: string | null
+  /**
+   * True when this context attached to a connection another client owns
+   * (cross-client viewing). Viewers detach but never `acpDisconnect`, so the
+   * unmount cleanup must tear them down even mid-turn (the owner's agent is
+   * unaffected) — otherwise the attach subscription leaks past tab close.
+   */
+  isViewer: boolean
   status: ConnectionStatus | null
   promptCapabilities: PromptCapabilitiesInfo
   supportsFork: boolean
@@ -41,26 +52,50 @@ export interface UseConnectionReturn {
   contextManagement: ConnectionState["contextManagement"] | null
   liveMessage: LiveMessage | null
   pendingPermission: PendingPermission | null
+  pendingUserMessage: PendingUserMessage | null
   pendingQuestion: PendingQuestion | null
+  pendingAskQuestion: PendingQuestionState | null
   claudeApiRetry: ClaudeApiRetryState | null
   lastTurnStopReason: string | null
   error: string | null
   loadError: string | null
+  /** True when the running session is on stale (launch-time) config after a
+   *  later settings save. Drives the "restart to apply" banner. */
+  configStale: boolean
+  /** Which settings surface drifted, for the banner's wording. */
+  configStaleKind: ConfigStaleKind | null
+  /** Client-local: the user dismissed the stale banner for the current drift. */
+  configStaleDismissed: boolean
+  /** True for a delegation-spawned child connection (broker-owned). The stale
+   *  banner hides for these — the user can't restart a broker-owned process. */
+  isDelegationChild: boolean
   connect: (
     agentType: AgentType,
     workingDir?: string,
-    sessionId?: string
+    sessionId?: string,
+    conversationId?: number
   ) => Promise<void>
   disconnect: () => Promise<void>
   reconnect: () => Promise<void>
+  /** Restart the session (disconnect + resume same sessionId) so it picks up
+   *  current agent/model settings. Returns `true` if it actually restarted,
+   *  `false` on a no-op (viewer / delegation child / no connection). */
+  reapplyConfig: () => Promise<boolean>
+  /** Dismiss the stale banner for the current drift without restarting. */
+  dismissConfigStale: () => void
   sendPrompt: (
     blocks: PromptInputBlock[],
-    opts?: { folderId?: number | null; conversationId?: number | null }
+    opts?: {
+      folderId?: number | null
+      conversationId?: number | null
+      clientMessageId?: string | null
+    }
   ) => Promise<void>
   setMode: (modeId: string) => Promise<void>
   setConfigOption: (configId: string, value: string | boolean) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (requestId: string, optionId: string) => Promise<void>
+  answerQuestion: (questionId: string, answer: QuestionAnswer) => Promise<void>
 }
 
 function derive(conn: ConnectionState | undefined) {
@@ -83,6 +118,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const connection = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
   const connectionId = connection?.connectionId ?? null
+  const isViewer = connection?.isViewer ?? false
   const status = connection?.status ?? null
   const promptCapabilities =
     connection?.promptCapabilities ?? DEFAULT_PROMPT_CAPABILITIES
@@ -100,15 +136,32 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const contextManagement = connection?.contextManagement ?? null
   const liveMessage = connection?.liveMessage ?? null
   const pendingPermission = connection?.pendingPermission ?? null
+  const pendingUserMessage = connection?.pendingUserMessage ?? null
   const pendingQuestion = connection?.pendingQuestion ?? null
+  const pendingAskQuestion = connection?.pendingAskQuestion ?? null
   const claudeApiRetry = connection?.claudeApiRetry ?? null
   const lastTurnStopReason = connection?.lastTurnStopReason ?? null
   const error = connection?.error ?? null
   const loadError = connection?.loadError ?? null
+  const configStale = connection?.configStale ?? false
+  const configStaleKind = connection?.configStaleKind ?? null
+  const configStaleDismissed = connection?.configStaleDismissed ?? false
+  const isDelegationChild = connection?.isDelegationChild ?? false
 
   const connect = useCallback(
-    (agentType: AgentType, workingDir?: string, sessionId?: string) =>
-      actions.connect(contextKey, agentType, workingDir, sessionId),
+    (
+      agentType: AgentType,
+      workingDir?: string,
+      sessionId?: string,
+      conversationId?: number
+    ) =>
+      actions.connect(
+        contextKey,
+        agentType,
+        workingDir,
+        sessionId,
+        conversationId
+      ),
     [actions, contextKey]
   )
 
@@ -125,7 +178,11 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const sendPrompt = useCallback(
     (
       blocks: PromptInputBlock[],
-      opts?: { folderId?: number | null; conversationId?: number | null }
+      opts?: {
+        folderId?: number | null
+        conversationId?: number | null
+        clientMessageId?: string | null
+      }
     ) => actions.sendPrompt(contextKey, blocks, opts),
     [actions, contextKey]
   )
@@ -152,9 +209,26 @@ export function useConnection(contextKey: string): UseConnectionReturn {
     [actions, contextKey]
   )
 
+  const answerQuestion = useCallback(
+    (questionId: string, answer: QuestionAnswer) =>
+      actions.answerQuestion(contextKey, questionId, answer),
+    [actions, contextKey]
+  )
+
+  const reapplyConfig = useCallback(
+    () => actions.reapplyConfig(contextKey),
+    [actions, contextKey]
+  )
+
+  const dismissConfigStale = useCallback(
+    () => actions.dismissConfigStale(contextKey),
+    [actions, contextKey]
+  )
+
   return useMemo(
     () => ({
       connectionId,
+      isViewer,
       status,
       promptCapabilities,
       supportsFork,
@@ -167,22 +241,32 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       contextManagement,
       liveMessage,
       pendingPermission,
+      pendingUserMessage,
       pendingQuestion,
+      pendingAskQuestion,
       claudeApiRetry,
       lastTurnStopReason,
       error,
       loadError,
+      configStale,
+      configStaleKind,
+      configStaleDismissed,
+      isDelegationChild,
       connect,
       disconnect,
       reconnect,
+      reapplyConfig,
+      dismissConfigStale,
       sendPrompt,
       setMode,
       setConfigOption,
       cancel,
       respondPermission,
+      answerQuestion,
     }),
     [
       connectionId,
+      isViewer,
       status,
       promptCapabilities,
       supportsFork,
@@ -195,19 +279,28 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       contextManagement,
       liveMessage,
       pendingPermission,
+      pendingUserMessage,
       pendingQuestion,
+      pendingAskQuestion,
       claudeApiRetry,
       lastTurnStopReason,
       error,
       loadError,
+      configStale,
+      configStaleKind,
+      configStaleDismissed,
+      isDelegationChild,
       connect,
       disconnect,
       reconnect,
+      reapplyConfig,
+      dismissConfigStale,
       sendPrompt,
       setMode,
       setConfigOption,
       cancel,
       respondPermission,
+      answerQuestion,
     ]
   )
 }

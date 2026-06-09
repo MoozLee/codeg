@@ -1,10 +1,12 @@
 import type {
   ActiveDelegationState,
   AvailableCommandInfo,
+  ConfigStaleKind,
   ConnectionStatus,
   LiveContentBlock as WireLiveContentBlock,
   LiveMessage as WireLiveMessage,
   LiveSessionSnapshot,
+  PendingQuestionState,
   PromptCapabilitiesInfo,
   SessionConfigOptionInfo,
   SessionModeStateInfo,
@@ -16,6 +18,7 @@ import type {
   LiveContentBlock as LocalLiveContentBlock,
   LiveMessage as LocalLiveMessage,
   PendingPermission,
+  PendingUserMessage,
   ToolCallInfo,
 } from "@/contexts/acp-connections-context"
 
@@ -41,9 +44,23 @@ export interface SnapshotPatch {
   usage: SessionUsageUpdateInfo | null
   liveMessage: LocalLiveMessage | null
   pendingPermission: PendingPermission | null
+  /** Awaiting-answer multiple-choice `ask_user_question` carried by the
+   *  snapshot, so a client attaching mid-turn re-renders the card. `null` when
+   *  no question is pending. (Distinct from the frontend-only free-text
+   *  `pendingQuestion`, which is NOT in the snapshot.) */
+  pendingAskQuestion: PendingQuestionState | null
+  /** In-flight user prompt carried by the snapshot, so a client attaching
+   *  mid-turn can synthesize the user turn (Bug-2 / cross-client viewing).
+   *  `null` when no turn is in flight. */
+  pendingUserMessage: PendingUserMessage | null
   promptCapabilities: PromptCapabilitiesInfo | null
   selectorsReady: boolean
   supportsFork: boolean
+  /** Whether the running session is on stale (launch-time) config — recovered
+   *  from the snapshot so a reconnect/refresh/new tile sees the banner state
+   *  that the one-shot `session_config_stale` event won't replay. */
+  configStale: boolean
+  configStaleKind: ConfigStaleKind | null
   eventSeq: number
   /** Live sub-agent delegations carried by the snapshot. Consumed directly at
    *  the attach call sites to re-seed `DelegationProvider` bindings (see
@@ -87,9 +104,19 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
           options: wire.pending_permission.options,
         }
       : null,
+    // The snapshot shape already matches PendingQuestionState; pass through.
+    pendingAskQuestion: wire.pending_question ?? null,
+    pendingUserMessage: wire.pending_user_message
+      ? {
+          messageId: wire.pending_user_message.message_id,
+          blocks: wire.pending_user_message.blocks,
+        }
+      : null,
     promptCapabilities: wire.prompt_capabilities ?? DEFAULT_PROMPT_CAPS,
     selectorsReady: wire.selectors_ready,
     supportsFork: wire.fork_supported,
+    configStale: wire.config_stale ?? false,
+    configStaleKind: wire.config_stale_kind ?? null,
     eventSeq: wire.event_seq,
     activeDelegations: wire.active_delegations ?? [],
   }

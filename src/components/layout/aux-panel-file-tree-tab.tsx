@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { openPath, revealItemInDir } from "@/lib/platform"
+import { revealItemInDir } from "@/lib/platform"
 import ignore from "ignore"
 import { Check, ChevronRight } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -37,7 +37,6 @@ import {
   gitListAllBranches,
   gitRollbackFile,
   gitStatus,
-  openPathWithTarget,
   readFileForEdit,
   readFilePreview,
   openCommitWindow,
@@ -48,13 +47,6 @@ import {
 import { isDesktop, isRemoteDesktopMode } from "@/lib/transport"
 import { emitAttachFileToSession } from "@/lib/session-attachment-events"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { toErrorMessage } from "@/lib/app-error"
-import {
-  getFileTreeOpenTargetItems,
-  getFileTreeOpenTargetLabelKey,
-  isWebFilePath,
-  type OpenTargetRegistryItem,
-} from "@/lib/open-targets"
 import type {
   FileEditContent,
   FileTreeNode,
@@ -102,6 +94,8 @@ import {
 } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
 import { joinFsPath } from "@/lib/path-utils"
+import { toErrorMessage } from "@/lib/app-error"
+import { copyTextFromMenu } from "@/lib/utils"
 
 function parentDir(filePath: string): string {
   const slashIndex = filePath.lastIndexOf("/")
@@ -120,6 +114,20 @@ function parentDir(filePath: string): string {
 
 function baseName(path: string): string {
   return path.split(/[/\\]/).pop() || path
+}
+
+async function copyPathToClipboard(
+  absolutePath: string,
+  messages: { success: string; failure: string }
+) {
+  // copyTextFromMenu defers the write until this context menu has closed, so
+  // the execCommand clipboard fallback works in non-secure web contexts.
+  const ok = await copyTextFromMenu(absolutePath)
+  if (ok) {
+    toast.success(messages.success)
+  } else {
+    toast.error(messages.failure)
+  }
 }
 
 const FILE_TREE_ROOT_PATH = "__workspace_root__"
@@ -488,118 +496,6 @@ interface RenderNodeProps {
   onRefresh: () => void
 }
 
-interface OpenInSubmenuProps {
-  itemKind: "file" | "dir"
-  workspacePath: string
-  relativePath: string | null
-  absolutePath: string
-  terminalDirPath: string
-  terminalTitleName: string
-  showBrowserOpen: boolean
-  onOpenDirInTerminal: (dirPath: string, fileName: string) => Promise<void>
-}
-
-function OpenInSubmenu({
-  itemKind,
-  workspacePath,
-  relativePath,
-  absolutePath,
-  terminalDirPath,
-  terminalTitleName,
-  showBrowserOpen,
-  onOpenDirInTerminal,
-}: OpenInSubmenuProps) {
-  const t = useTranslations("Folder.fileTreeTab")
-  const targets = getFileTreeOpenTargetItems(itemKind)
-
-  const handleOpenBrowser = useCallback(async () => {
-    try {
-      await openPath(absolutePath)
-    } catch (error) {
-      toast.error(t("toasts.openInBrowserFailed"), {
-        description: toErrorMessage(error),
-      })
-    }
-  }, [absolutePath, t])
-
-  const handleOpenTarget = useCallback(
-    async (target: OpenTargetRegistryItem) => {
-      switch (target.id) {
-        case "vscode":
-          if (!relativePath) return
-          try {
-            await openPathWithTarget({
-              folderPath: workspacePath,
-              relativePath,
-              target: "vscode",
-            })
-          } catch (error) {
-            toast.error(t("toasts.openInEditorFailed"), {
-              description: toErrorMessage(error),
-            })
-          }
-          return
-        case "file_manager":
-          try {
-            await revealItemInDir(absolutePath)
-          } catch (error) {
-            const message =
-              error instanceof Error ? error.message : String(error)
-            toast.error(t("toasts.openDirectoryFailed"), {
-              description: message,
-            })
-          }
-          return
-        case "terminal":
-          await onOpenDirInTerminal(terminalDirPath, terminalTitleName)
-          return
-        default: {
-          const exhaustive: never = target.id
-          return exhaustive
-        }
-      }
-    },
-    [
-      absolutePath,
-      onOpenDirInTerminal,
-      relativePath,
-      t,
-      terminalDirPath,
-      terminalTitleName,
-      workspacePath,
-    ]
-  )
-
-  if (targets.length === 0 && !showBrowserOpen) return null
-
-  return (
-    <ContextMenuSub>
-      <ContextMenuSubTrigger>{t("openIn")}</ContextMenuSubTrigger>
-      <ContextMenuSubContent>
-        {showBrowserOpen && (
-          <ContextMenuItem
-            onSelect={() => {
-              void handleOpenBrowser()
-            }}
-          >
-            {t("openInBrowser")}
-          </ContextMenuItem>
-        )}
-        {targets.map((target) => (
-          <ContextMenuItem
-            key={target.id}
-            onSelect={() => {
-              void handleOpenTarget(target)
-            }}
-          >
-            {t(getFileTreeOpenTargetLabelKey(target))}
-          </ContextMenuItem>
-        ))}
-      </ContextMenuSubContent>
-    </ContextMenuSub>
-  )
-}
-
 function RenderNode({
   node,
   expandedPaths,
@@ -635,6 +531,17 @@ function RenderNode({
   const isGitignoreIgnored =
     ancestorGitignoreIgnored || gitignoreIgnoredPaths.has(node.path)
 
+  const systemExplorerLabel =
+    typeof navigator === "undefined"
+      ? t("openInFileManager")
+      : (() => {
+          const platform =
+            `${navigator.platform} ${navigator.userAgent}`.toLowerCase()
+          if (platform.includes("mac")) return t("openInFinder")
+          if (platform.includes("win")) return t("openInExplorer")
+          return t("openInFileManager")
+        })()
+
   if (node.kind === "file") {
     const gitStatusCode =
       gitStatusByPath.get(node.path) ?? (ancestorUntracked ? "??" : undefined)
@@ -648,6 +555,15 @@ function RenderNode({
         tabId: activeSessionTabId,
         path: absolutePath,
       })
+    }
+
+    const handleOpenInSystemExplorer = async () => {
+      try {
+        await revealItemInDir(absolutePath)
+      } catch (error) {
+        const message = toErrorMessage(error)
+        toast.error(t("toasts.openDirectoryFailed"), { description: message })
+      }
     }
 
     return (
@@ -735,16 +651,31 @@ function RenderNode({
           <ContextMenuItem onSelect={onRefresh}>
             {t("reloadFromDisk")}
           </ContextMenuItem>
-          <OpenInSubmenu
-            itemKind="file"
-            workspacePath={workspacePath}
-            relativePath={node.path}
-            absolutePath={absolutePath}
-            terminalDirPath={dirPath}
-            terminalTitleName={node.name}
-            showBrowserOpen={isDesktop() && isWebFilePath(node.path)}
-            onOpenDirInTerminal={onOpenDirInTerminal}
-          />
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>{t("openIn")}</ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <ContextMenuItem
+                onSelect={() => void handleOpenInSystemExplorer()}
+              >
+                {systemExplorerLabel}
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => void onOpenDirInTerminal(dirPath, node.name)}
+              >
+                {t("openInTerminal")}
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+          <ContextMenuItem
+            onSelect={() =>
+              void copyPathToClipboard(absolutePath, {
+                success: t("toasts.pathCopied"),
+                failure: t("toasts.copyPathFailed"),
+              })
+            }
+          >
+            {t("copyPath")}
+          </ContextMenuItem>
           {webMode && (
             <>
               <ContextMenuItem
@@ -783,6 +714,15 @@ function RenderNode({
       tabId: activeSessionTabId,
       path: absolutePath,
     })
+  }
+
+  const handleOpenDirInSystemExplorer = async () => {
+    try {
+      await revealItemInDir(absolutePath)
+    } catch (error) {
+      const message = toErrorMessage(error)
+      toast.error(t("toasts.openDirectoryFailed"), { description: message })
+    }
   }
 
   return (
@@ -898,16 +838,31 @@ function RenderNode({
         <ContextMenuItem onSelect={() => onRequestRename(node)}>
           {tCommon("rename")}
         </ContextMenuItem>
-        <OpenInSubmenu
-          itemKind="dir"
-          workspacePath={workspacePath}
-          relativePath={null}
-          absolutePath={absolutePath}
-          terminalDirPath={absolutePath}
-          terminalTitleName={node.name}
-          showBrowserOpen={false}
-          onOpenDirInTerminal={onOpenDirInTerminal}
-        />
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>{t("openIn")}</ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            <ContextMenuItem
+              onSelect={() => void handleOpenDirInSystemExplorer()}
+            >
+              {systemExplorerLabel}
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => void onOpenDirInTerminal(absolutePath, node.name)}
+            >
+              {t("openInTerminal")}
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuItem
+          onSelect={() =>
+            void copyPathToClipboard(absolutePath, {
+              success: t("toasts.pathCopied"),
+              failure: t("toasts.copyPathFailed"),
+            })
+          }
+        >
+          {t("copyPath")}
+        </ContextMenuItem>
         {webMode && (
           <>
             <ContextMenuItem onSelect={() => onRequestUpload(node.path)}>
@@ -2198,6 +2153,17 @@ export function FileTreeTab() {
     return baseName(folder.path)
   }, [folder?.path, t])
 
+  const systemExplorerLabel =
+    typeof navigator === "undefined"
+      ? t("openInFileManager")
+      : (() => {
+          const platform =
+            `${navigator.platform} ${navigator.userAgent}`.toLowerCase()
+          if (platform.includes("mac")) return t("openInFinder")
+          if (platform.includes("win")) return t("openInExplorer")
+          return t("openInFileManager")
+        })()
+
   const rootTarget: FileActionTarget = useMemo(
     () => ({ kind: "dir", path: "", name: rootNodeName }),
     [rootNodeName]
@@ -2690,16 +2656,40 @@ export function FileTreeTab() {
                     >
                       {t("reloadFromDisk")}
                     </ContextMenuItem>
-                    <OpenInSubmenu
-                      itemKind="dir"
-                      workspacePath={folder.path}
-                      relativePath={null}
-                      absolutePath={folder.path}
-                      terminalDirPath={folder.path}
-                      terminalTitleName={rootNodeName}
-                      showBrowserOpen={false}
-                      onOpenDirInTerminal={handleOpenDirInTerminal}
-                    />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger>
+                        {t("openIn")}
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent>
+                        <ContextMenuItem
+                          onSelect={() => {
+                            void revealItemInDir(folder.path)
+                          }}
+                        >
+                          {systemExplorerLabel}
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          onSelect={() => {
+                            void handleOpenDirInTerminal(
+                              folder.path,
+                              rootNodeName
+                            )
+                          }}
+                        >
+                          {t("openInTerminal")}
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuItem
+                      onSelect={() =>
+                        void copyPathToClipboard(folder.path, {
+                          success: t("toasts.pathCopied"),
+                          failure: t("toasts.copyPathFailed"),
+                        })
+                      }
+                    >
+                      {t("copyPath")}
+                    </ContextMenuItem>
                     {webMode && (
                       <>
                         <ContextMenuItem

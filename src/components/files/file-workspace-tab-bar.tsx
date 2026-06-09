@@ -15,21 +15,18 @@ import {
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { getSystemOpenTargetSettings, openPathWithTarget } from "@/lib/api"
+import { toErrorMessage } from "@/lib/app-error"
 import { isDesktop, openPath, revealItemInDir } from "@/lib/platform"
+import { isHtmlPreviewable } from "@/lib/language-detect"
 import { useActiveFolder } from "@/contexts/active-folder-context"
-import { useTerminalContext } from "@/contexts/terminal-context"
 import { useWorkspaceContext } from "@/contexts/workspace-context"
 import type { FileWorkspaceTab } from "@/contexts/workspace-context"
 import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useLongPressDrag } from "@/hooks/use-long-press-drag"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
-import { toErrorMessage } from "@/lib/app-error"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
-import { isWebFileLanguage } from "@/lib/open-targets"
-import { joinFsPath } from "@/lib/path-utils"
 import { cn } from "@/lib/utils"
-import type { SystemOpenTarget, SystemWebFileOpenMethod } from "@/lib/types"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -38,22 +35,8 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 
-function parentDir(filePath: string): string {
-  const slashIndex = filePath.lastIndexOf("/")
-  const backslashIndex = filePath.lastIndexOf("\\")
-  const splitIndex = Math.max(slashIndex, backslashIndex)
-  if (splitIndex < 0) return filePath
-  if (splitIndex === 0) return filePath.slice(0, 1)
-  return filePath.slice(0, splitIndex)
-}
-
-function baseName(path: string): string {
-  return path.split(/[/\\]/).pop() || path
-}
-
 export function FileWorkspaceTabBar() {
   const t = useTranslations("Folder.fileWorkspace")
-  const tFileTree = useTranslations("Folder.fileTreeTab")
   const {
     mode,
     activePane,
@@ -70,14 +53,11 @@ export function FileWorkspaceTabBar() {
     toggleFilesMaximized,
   } = useWorkspaceContext()
   const { activeFolder: folder } = useActiveFolder()
-  const { createTerminalInDirectory } = useTerminalContext()
   const { shortcuts } = useShortcutSettings()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isCoarsePointer = useIsCoarsePointer()
   const isMobile = useIsMobile()
   const [isHovered, setIsHovered] = useState(false)
-  const [webFileOpenMethod, setWebFileOpenMethod] =
-    useState<SystemWebFileOpenMethod>("browser")
   const [touchSortingTabId, setTouchSortingTabId] = useState<string | null>(
     null
   )
@@ -96,23 +76,6 @@ export function FileWorkspaceTabBar() {
     )
     el?.scrollIntoView({ block: "nearest", inline: "nearest" })
   }, [activeFileTabId])
-
-  useEffect(() => {
-    if (!isDesktop()) return
-
-    let cancelled = false
-    getSystemOpenTargetSettings()
-      .then((settings) => {
-        if (!cancelled) {
-          setWebFileOpenMethod(settings.web_file_open_method ?? "browser")
-        }
-      })
-      .catch(() => {})
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -165,13 +128,17 @@ export function FileWorkspaceTabBar() {
   const activeFilePath = activeTab?.path ?? null
   const activeFolderPath = folder?.path ?? null
   const canPreview =
-    activeTab?.kind === "file" && activeTab.language === "markdown"
+    activeTab?.kind === "file" &&
+    (activeTab.language === "markdown" || isHtmlPreviewable(activeTab.path))
+  const canOpenInBrowser =
+    activeTab?.kind === "file" && isHtmlPreviewable(activeTab.path)
   const canOpenWebFile =
     isDesktop() &&
     activeTab?.kind === "file" &&
     !activeTab.loading &&
-    isWebFileLanguage(activeTab.language)
-  const canOpenInEditor =
+    (activeTab.language === "html" || activeTab.language === "css") &&
+    Boolean(activeFilePath && activeFolderPath)
+  const canRevealInFolder =
     isDesktop() &&
     activeTab?.kind === "file" &&
     !activeTab.loading &&
@@ -181,115 +148,6 @@ export function FileWorkspaceTabBar() {
     canPreview && activeFileTabId
       ? previewFileTabIds.has(activeFileTabId)
       : false
-
-  const loadLatestOpenTargetSettings = useCallback(async () => {
-    const settings = await getSystemOpenTargetSettings()
-    const nextTarget = settings.target ?? "file_manager"
-    const nextWebFileOpenMethod = settings.web_file_open_method ?? "browser"
-    setWebFileOpenMethod(nextWebFileOpenMethod)
-    return {
-      target: nextTarget,
-      webFileOpenMethod: nextWebFileOpenMethod,
-    }
-  }, [])
-
-  const openFileWithTarget = useCallback(
-    async (params: {
-      folderPath: string
-      relativePath: string
-      target: SystemOpenTarget
-    }) => {
-      const fullPath = joinFsPath(params.folderPath, params.relativePath)
-
-      switch (params.target) {
-        case "vscode":
-          await openPathWithTarget({
-            folderPath: params.folderPath,
-            relativePath: params.relativePath,
-            target: "vscode",
-          })
-          return
-        case "file_manager":
-          await revealItemInDir(fullPath)
-          return
-        case "terminal": {
-          const terminalId = await createTerminalInDirectory(
-            parentDir(fullPath),
-            tFileTree("terminalTitle", { name: baseName(params.relativePath) })
-          )
-          if (!terminalId) {
-            throw new Error(tFileTree("toasts.openBuiltinTerminalFailed"))
-          }
-          return
-        }
-        default: {
-          const exhaustive: never = params.target
-          return exhaustive
-        }
-      }
-    },
-    [createTerminalInDirectory, tFileTree]
-  )
-
-  const handleOpenInEditor = useCallback(async () => {
-    if (!activeFilePath || !activeFolderPath) return
-
-    try {
-      const { target } = await loadLatestOpenTargetSettings()
-      await openFileWithTarget({
-        folderPath: activeFolderPath,
-        relativePath: activeFilePath,
-        target,
-      })
-    } catch (err) {
-      toast.error(t("openInEditorFailed", { message: toErrorMessage(err) }))
-    }
-  }, [
-    activeFilePath,
-    activeFolderPath,
-    loadLatestOpenTargetSettings,
-    openFileWithTarget,
-    t,
-  ])
-
-  const handleOpenWebFile = useCallback(async () => {
-    if (!activeFilePath || !activeFolderPath) return
-
-    let settings: Awaited<ReturnType<typeof loadLatestOpenTargetSettings>>
-    try {
-      settings = await loadLatestOpenTargetSettings()
-    } catch (err) {
-      toast.error(t("openInEditorFailed", { message: toErrorMessage(err) }))
-      return
-    }
-
-    const fullPath = joinFsPath(activeFolderPath, activeFilePath)
-
-    if (settings.webFileOpenMethod === "editor") {
-      try {
-        await openFileWithTarget({
-          folderPath: activeFolderPath,
-          relativePath: activeFilePath,
-          target: settings.target,
-        })
-      } catch (err) {
-        toast.error(t("openInEditorFailed", { message: toErrorMessage(err) }))
-      }
-      return
-    }
-
-    try {
-      await openPath(fullPath)
-    } catch (err) {
-      toast.error(t("openInBrowserFailed", { message: toErrorMessage(err) }))
-    }
-  }, [
-    activeFilePath,
-    activeFolderPath,
-    loadLatestOpenTargetSettings,
-    openFileWithTarget,
-    t,
-  ])
 
   if (fileTabs.length === 0) {
     return (
@@ -365,32 +223,44 @@ export function FileWorkspaceTabBar() {
           )}
         </button>
       )}
-      {canOpenInEditor && (
-        <button
-          type="button"
-          onClick={handleOpenInEditor}
-          className="shrink-0 flex items-center justify-center w-10 border-b border-border hover:bg-primary/8 transition-colors"
-          aria-label={t("openInEditor")}
-          title={t("openInEditor")}
-        >
-          <ExternalLink className="h-4 w-4" />
-        </button>
-      )}
-      {canOpenWebFile && activeFilePath && activeFolderPath && (
-        <button
-          type="button"
-          onClick={handleOpenWebFile}
-          className="shrink-0 flex items-center justify-center w-10 border-b border-border hover:bg-primary/8 transition-colors"
-          aria-label={
-            webFileOpenMethod === "editor" ? t("openInEditor") : t("preview")
-          }
-          title={
-            webFileOpenMethod === "editor" ? t("openInEditor") : t("preview")
-          }
-        >
-          <ExternalLink className="h-4 w-4" />
-        </button>
-      )}
+      {(canOpenInBrowser || canOpenWebFile || canRevealInFolder) &&
+        activeFilePath &&
+        activeFolderPath && (
+          <button
+            type="button"
+            onClick={() => {
+              const absolutePath = `${activeFolderPath}/${activeFilePath}`
+              if (canOpenWebFile) {
+                void getSystemOpenTargetSettings()
+                  .then((settings) => {
+                    if (settings.web_file_open_method === "browser") {
+                      return openPath(absolutePath)
+                    }
+                    return openPathWithTarget({
+                      folderPath: activeFolderPath,
+                      relativePath: activeFilePath,
+                      target: settings.target,
+                    })
+                  })
+                  .catch((error) => {
+                    console.error("[FileWorkspaceTabBar] open file failed:", error)
+                    toast.error(t("openInEditorFailed", { message: toErrorMessage(error) }))
+                  })
+                return
+              }
+              if (canRevealInFolder) {
+                revealItemInDir(absolutePath).catch(() => {})
+                return
+              }
+              openPath(absolutePath).catch(() => {})
+            }}
+            className="shrink-0 flex items-center justify-center w-10 border-b border-border hover:bg-primary/8 transition-colors"
+            aria-label={t("preview")}
+            title={t("preview")}
+          >
+            <ExternalLink className="h-4 w-4" />
+          </button>
+        )}
       {!isMobile && mode === "fusion" && (
         <button
           type="button"

@@ -21,10 +21,12 @@
 //!   * `call` — [`BrokerRequest`] for `delegate_to_agent`; returns a
 //!     [`BrokerResponse`] wrapping a `DelegationTaskReport` (a `Running` ack, or
 //!     a terminal report).
-//!   * `status` — [`BrokerStatusRequest`] for `get_delegation_status` (with an
-//!     optional `wait_ms` long-poll — omitted is an immediate snapshot, an
-//!     explicit `0` blocks until the task is terminal, a positive value is a
-//!     bounded wait); returns a task report.
+//!   * `status` — [`BrokerStatusRequest`] for `get_delegation_status`. Carries a
+//!     `task_ids` list (one or many) and an optional `wait_ms` long-poll —
+//!     omitted is an immediate snapshot, an explicit `0` blocks until a task is
+//!     terminal, a positive value is a bounded wait. Returns a `{ "tasks": [..] }`
+//!     envelope with one task report per requested id (in request order); a
+//!     batch wait wakes as soon as ANY requested task reaches a terminal state.
 //!   * `cancel_task` — [`BrokerCancelTaskRequest`] for `cancel_delegation`;
 //!     returns a task report.
 //!   * `cancel` — fire-and-forget [`BrokerCancelRequest`] from MCP
@@ -52,6 +54,8 @@ use std::io;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use crate::acp::question::QuestionSpec;
 
 /// One delegation call's worth of input forwarded from the companion to the
 /// main process. The main process re-validates `token` and maps
@@ -93,21 +97,25 @@ pub struct BrokerCancelRequest {
     pub reason: Option<String>,
 }
 
-/// Query the status (and, optionally, block briefly for the result) of a
-/// previously-issued delegation task by its broker `task_id`. Backs the
+/// Query the status (and, optionally, block briefly for the result) of one or
+/// more previously-issued delegation tasks by their broker `task_id`s. Backs the
 /// `get_delegation_status` MCP tool. Authenticated by the same per-launch
-/// `token`; the listener scopes the lookup to the token's parent connection
+/// `token`; the listener scopes each lookup to the token's parent connection
 /// so one parent can't read another's tasks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrokerStatusRequest {
     pub token: String,
-    pub task_id: String,
-    /// How long the listener may block waiting for the task to reach a terminal
-    /// state before returning the current (possibly still-running) status.
+    /// One or many task ids to resolve. The companion forwards the MCP
+    /// `task_ids` array into this list (trimmed, de-duplicated, order-preserving).
+    /// The listener returns one report per id, in this order.
+    pub task_ids: Vec<String>,
+    /// How long the listener may block waiting for a task to reach a terminal
+    /// state before returning the current (possibly still-running) snapshot.
     /// `None` (omitted) returns an immediate snapshot; an explicit `0` blocks
-    /// with no timeout until the task finishes (long-running children); any
+    /// with no timeout until a task finishes (long-running children); any
     /// positive value is a long-poll the listener clamps to a hard ceiling so a
-    /// single bounded call can't hang unbounded.
+    /// single bounded call can't hang unbounded. For a batch the wait resolves as
+    /// soon as ANY requested task reaches a terminal state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_ms: Option<u64>,
 }
@@ -123,6 +131,40 @@ pub struct BrokerCancelTaskRequest {
     pub task_id: String,
 }
 
+/// Pull the pending live-feedback notes for the parent session. Backs the
+/// `check_user_feedback` MCP tool. Authenticated by the same per-launch
+/// `token`; the listener resolves the parent connection from it and scopes the
+/// drain to that connection so one parent can't read another's feedback.
+/// Always returns an immediate snapshot — no blocking wait.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerFeedbackRequest {
+    pub token: String,
+}
+
+/// Confirm delivery of feedback notes, marking them `Delivered`. Sent by the
+/// companion AFTER its `check_user_feedback` round-trip wins (i.e. it is
+/// returning the result to the agent), NOT by the listener at UDS-write time —
+/// so a per-request cancel that suppresses the agent-facing response (the agent
+/// staying alive) leaves the notes pending for the next check (at-least-once).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerCommitFeedbackRequest {
+    pub token: String,
+    pub ids: Vec<String>,
+}
+
+/// Ask the user one or more multiple-choice questions and BLOCK until they
+/// answer. Backs the `ask_user_question` MCP tool. Authenticated by the same
+/// per-launch `token`; the listener resolves the parent connection from it,
+/// registers the questions (broadcasting the card to every attached client),
+/// and parks the response until the user answers (or the tool call is canceled,
+/// detected via peer-close on this connection). The companion has already
+/// validated the schema, so `questions` is well-formed and carries stable ids.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerAskRequest {
+    pub token: String,
+    pub questions: Vec<QuestionSpec>,
+}
+
 /// Tagged top-level message dispatched by the listener. Adding new variants
 /// is the wire-stable way to grow the broker protocol without touching the
 /// frame layer.
@@ -133,12 +175,16 @@ pub enum BrokerMessage {
     Cancel(BrokerCancelRequest),
     Status(BrokerStatusRequest),
     CancelTask(BrokerCancelTaskRequest),
+    Feedback(BrokerFeedbackRequest),
+    CommitFeedback(BrokerCommitFeedbackRequest),
+    Ask(BrokerAskRequest),
 }
 
 /// The wrapped outcome the main process returns over the same socket.
 /// `outcome` is a serialized [`super::types::DelegationTaskReport`] for `Call`
-/// / `Status` / `CancelTask` messages and `Value::Null` for `Cancel`
-/// acknowledgements.
+/// / `CancelTask` messages, a `{ "tasks": [report, ...] }` envelope (one report
+/// per requested id, in request order) for `Status`, and `Value::Null` for
+/// `Cancel` acknowledgements.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrokerResponse {
     pub outcome: Value,
@@ -219,7 +265,9 @@ pub async fn client_round_trip(
     message_round_trip(socket_path, &BrokerMessage::Call(req.clone())).await
 }
 
-/// Dispatch a `get_delegation_status` query and read back the task report.
+/// Dispatch a `get_delegation_status` query and read back the
+/// `{ "tasks": [report, ...] }` envelope (one report per requested id, in
+/// request order).
 pub async fn client_status_round_trip(
     socket_path: &str,
     req: &BrokerStatusRequest,
@@ -233,6 +281,40 @@ pub async fn client_cancel_task_round_trip(
     req: &BrokerCancelTaskRequest,
 ) -> io::Result<BrokerResponse> {
     message_round_trip(socket_path, &BrokerMessage::CancelTask(req.clone())).await
+}
+
+/// Dispatch a `check_user_feedback` query and read back the
+/// `{ "feedback": [..], "count": N }` envelope (the pending notes drained for
+/// the parent session, possibly empty).
+pub async fn client_feedback_round_trip(
+    socket_path: &str,
+    req: &BrokerFeedbackRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::Feedback(req.clone())).await
+}
+
+/// Confirm delivery of feedback notes (fire-and-forget). Reads the empty ack so
+/// the listener can flush before the socket drops; the body carries nothing.
+pub async fn client_commit_feedback(
+    socket_path: &str,
+    req: &BrokerCommitFeedbackRequest,
+) -> io::Result<()> {
+    let _ = message_round_trip(socket_path, &BrokerMessage::CommitFeedback(req.clone())).await?;
+    Ok(())
+}
+
+/// Dispatch an `ask_user_question` request and BLOCK reading the response until
+/// the user answers (or the question is canceled). The listener holds this
+/// connection open for the whole wait — there is no `wait_ms`, the block is
+/// inherent (waiting on a human). If the tool call is canceled, the companion
+/// drops this future, closing the socket; the listener observes the peer-close
+/// and tears the pending question down. Returns a `{ answers, declined }`
+/// envelope.
+pub async fn client_ask_round_trip(
+    socket_path: &str,
+    req: &BrokerAskRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::Ask(req.clone())).await
 }
 
 /// Total budget for `open()` retries on Windows named pipes. Has to be

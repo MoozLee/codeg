@@ -9,6 +9,22 @@ export const STORAGE_KEY_ZOOM_LEVEL = "codeg-zoom-level"
 export const STORAGE_KEY_UI_FONT_FAMILY = "codeg-ui-font-family"
 export const STORAGE_KEY_CODE_FONT_FAMILY = "codeg-code-font-family"
 
+// 字体偏好（界面 / 编辑器 / 终端）。
+// *_STACK 保存「已解析的 CSS font-family 栈」，供 inline 脚本零依赖地预水合写入
+// CSS 变量；*_FONT 保存 id、*_CUSTOM 保存自定义族名，供设置界面回显选中态。
+export const STORAGE_KEY_UI_FONT = "codeg-ui-font"
+export const STORAGE_KEY_UI_FONT_CUSTOM = "codeg-ui-font-custom"
+export const STORAGE_KEY_UI_FONT_STACK = "codeg-ui-font-stack"
+export const STORAGE_KEY_EDITOR_FONT = "codeg-editor-font"
+export const STORAGE_KEY_EDITOR_FONT_CUSTOM = "codeg-editor-font-custom"
+export const STORAGE_KEY_EDITOR_FONT_STACK = "codeg-editor-font-stack"
+export const STORAGE_KEY_EDITOR_FONT_SIZE = "codeg-editor-font-size"
+export const STORAGE_KEY_EDITOR_LIGATURES = "codeg-editor-ligatures"
+export const STORAGE_KEY_TERMINAL_FONT = "codeg-terminal-font"
+export const STORAGE_KEY_TERMINAL_FONT_CUSTOM = "codeg-terminal-font-custom"
+export const STORAGE_KEY_TERMINAL_FONT_SIZE = "codeg-terminal-font-size"
+export const STORAGE_KEY_TERMINAL_LIGATURES = "codeg-terminal-ligatures"
+
 /**
  * 同步执行的 inline 脚本，由 layout.tsx 通过 dangerouslySetInnerHTML 注入。
  *
@@ -68,21 +84,22 @@ const SCRIPT = `
     var zoom = VALID_ZOOMS.indexOf(storedZoom) >= 0 ? storedZoom : 100;
     document.documentElement.style.fontSize = (16 * zoom / 100) + "px";
 
-    var uiFont = normalizeFontFamily(localStorage.getItem("${STORAGE_KEY_UI_FONT_FAMILY}"));
-    var codeFont = normalizeFontFamily(localStorage.getItem("${STORAGE_KEY_CODE_FONT_FAMILY}"));
-    if (uiFont) {
-      document.documentElement.dataset.uiFontFamily = uiFont;
-      document.documentElement.style.setProperty("--codeg-ui-font-family", fontFamilyStack(uiFont, UI_FALLBACK));
-    } else {
-      document.documentElement.removeAttribute("data-ui-font-family");
-      document.documentElement.style.setProperty("--codeg-ui-font-family", UI_FALLBACK);
+    var applyFontVar = function(key, prop) {
+      var v = localStorage.getItem(key);
+      if (v && v.length < 512 && !/[;{}<>]/.test(v)) {
+        document.documentElement.style.setProperty(prop, v);
+        return true;
+      }
+      return false;
+    };
+
+    if (!applyFontVar("${STORAGE_KEY_UI_FONT_STACK}", "--font-sans")) {
+      var uiFont = normalizeFontFamily(localStorage.getItem("${STORAGE_KEY_UI_FONT_FAMILY}"));
+      if (uiFont) document.documentElement.style.setProperty("--font-sans", fontFamilyStack(uiFont, UI_FALLBACK));
     }
-    if (codeFont) {
-      document.documentElement.dataset.codeFontFamily = codeFont;
-      document.documentElement.style.setProperty("--codeg-code-font-family", fontFamilyStack(codeFont, CODE_FALLBACK));
-    } else {
-      document.documentElement.removeAttribute("data-code-font-family");
-      document.documentElement.style.setProperty("--codeg-code-font-family", CODE_FALLBACK);
+    if (!applyFontVar("${STORAGE_KEY_EDITOR_FONT_STACK}", "--font-mono")) {
+      var codeFont = normalizeFontFamily(localStorage.getItem("${STORAGE_KEY_CODE_FONT_FAMILY}"));
+      if (codeFont) document.documentElement.style.setProperty("--font-mono", fontFamilyStack(codeFont, CODE_FALLBACK));
     }
 
     // 在 next-themes 水合之前同步检测暗色模式，防止白色闪屏。

@@ -5,13 +5,14 @@ use axum::{extract::Extension, Json};
 use serde::Deserialize;
 
 use crate::acp::connection::SessionConfigCommandValue;
+use crate::acp::error::AcpError;
 use crate::acp::opencode_plugins::PluginCheckSummary;
 use crate::acp::preflight::PreflightResult;
 use crate::acp::types::{
     AcpAgentInfo, AcpAgentStatus, AgentSkillContent, AgentSkillLayout, AgentSkillScope,
     AgentSkillsListResult, ConnectionInfo, ForkResultInfo,
 };
-use crate::app_error::AppCommandError;
+use crate::app_error::{AppCommandError, AppErrorCode};
 use crate::app_state::AppState;
 use crate::commands::acp as acp_commands;
 use crate::models::agent::AgentType;
@@ -134,7 +135,10 @@ pub struct AcpPromptParams {
     pub blocks: Vec<crate::acp::types::PromptInputBlock>,
     pub folder_id: Option<i32>,
     pub conversation_id: Option<i32>,
+    #[serde(default)]
     pub origin_client_id: Option<String>,
+    #[serde(default)]
+    pub client_message_id: Option<String>,
 }
 
 pub async fn acp_prompt(
@@ -143,7 +147,7 @@ pub async fn acp_prompt(
 ) -> Result<Json<()>, AppCommandError> {
     state
         .connection_manager
-        .send_prompt_linked(
+        .send_prompt_linked_with_message_id(
             &state.db,
             &params.connection_id,
             params.blocks,
@@ -151,9 +155,21 @@ pub async fn acp_prompt(
             params.conversation_id,
             params.origin_client_id,
             None,
+            params.client_message_id,
         )
         .await
-        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+        .map_err(|e| {
+            let message = e.to_string();
+            // A concurrent send while a turn is in flight is an expected,
+            // recoverable condition (409), not a server fault (500). The
+            // frontend re-queues the draft. Other errors stay 500.
+            match e {
+                AcpError::TurnInProgress => {
+                    AppCommandError::new(AppErrorCode::TurnInProgress, message)
+                }
+                _ => AppCommandError::task_execution_failed(message),
+            }
+        })?;
     Ok(Json(()))
 }
 
@@ -374,7 +390,18 @@ pub async fn acp_fork(
     let result = manager
         .fork_session(&state.db, &params.connection_id)
         .await
-        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+        .map_err(|e| {
+            let message = e.to_string();
+            // A fork requested while a turn is in flight is an expected,
+            // recoverable condition (409) — the frontend re-queues — not a
+            // server fault (500). Mirror `acp_prompt`. Other errors stay 500.
+            match e {
+                AcpError::TurnInProgress => {
+                    AppCommandError::new(AppErrorCode::TurnInProgress, message)
+                }
+                _ => AppCommandError::task_execution_failed(message),
+            }
+        })?;
     Ok(Json(result))
 }
 
@@ -393,6 +420,26 @@ pub async fn acp_respond_permission(
     let manager = &state.connection_manager;
     manager
         .respond_permission(&params.connection_id, &params.request_id, &params.option_id)
+        .await
+        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpAnswerQuestionParams {
+    pub connection_id: String,
+    pub question_id: String,
+    pub answer: crate::acp::question::QuestionAnswer,
+}
+
+pub async fn acp_answer_question(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpAnswerQuestionParams>,
+) -> Result<Json<()>, AppCommandError> {
+    let manager = &state.connection_manager;
+    manager
+        .answer_question(&params.connection_id, &params.question_id, params.answer)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
@@ -444,6 +491,33 @@ pub async fn acp_get_session_snapshot_by_conversation(
     Ok(Json(snap))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpFindConnectionForConversationParams {
+    pub conversation_id: i32,
+    /// Optional session id (`external_id`) fallback, matched (with `agent_type`)
+    /// when no live connection is bound to `conversation_id` yet (pre-first-
+    /// prompt window).
+    #[serde(default)]
+    pub session_id: Option<String>,
+    pub agent_type: AgentType,
+}
+
+pub async fn acp_find_connection_for_conversation(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpFindConnectionForConversationParams>,
+) -> Result<Json<Option<crate::acp::ConversationConnectionInfo>>, AppCommandError> {
+    let info = acp_commands::acp_find_connection_for_conversation_core(
+        &state.connection_manager,
+        params.conversation_id,
+        params.session_id.as_deref(),
+        params.agent_type,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(info))
+}
+
 // --- Pattern B+: Core function handlers ---
 
 #[derive(Deserialize)]
@@ -461,10 +535,10 @@ pub struct AcpUpdateAgentPreferencesParams {
 pub async fn acp_update_agent_preferences(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpUpdateAgentPreferencesParams>,
-) -> Result<Json<()>, AppCommandError> {
+) -> Result<Json<usize>, AppCommandError> {
     let db = &state.db;
     let emitter = state.emitter.clone();
-    acp_commands::acp_update_agent_preferences_core(
+    let affected = acp_commands::acp_update_agent_preferences_and_refresh(
         params.agent_type,
         params.enabled,
         params.env,
@@ -473,11 +547,13 @@ pub async fn acp_update_agent_preferences(
         params.codex_auth_json,
         params.codex_config_toml,
         db,
+        &state.connection_manager,
+        &state.data_dir,
         &emitter,
     )
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
-    Ok(Json(()))
+    Ok(Json(affected))
 }
 
 #[derive(Deserialize)]
@@ -492,20 +568,22 @@ pub struct AcpUpdateAgentEnvParams {
 pub async fn acp_update_agent_env(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpUpdateAgentEnvParams>,
-) -> Result<Json<()>, AppCommandError> {
+) -> Result<Json<usize>, AppCommandError> {
     let db = &state.db;
     let emitter = state.emitter.clone();
-    acp_commands::acp_update_agent_env_core(
+    let affected = acp_commands::acp_update_agent_env_and_refresh(
         params.agent_type,
         params.enabled,
         params.env,
         params.model_provider_id,
         db,
+        &state.connection_manager,
+        &state.data_dir,
         &emitter,
     )
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
-    Ok(Json(()))
+    Ok(Json(affected))
 }
 
 #[derive(Deserialize)]
@@ -521,19 +599,22 @@ pub struct AcpUpdateAgentConfigParams {
 pub async fn acp_update_agent_config(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpUpdateAgentConfigParams>,
-) -> Result<Json<()>, AppCommandError> {
+) -> Result<Json<usize>, AppCommandError> {
     let emitter = state.emitter.clone();
-    acp_commands::acp_update_agent_config_core(
+    let affected = acp_commands::acp_update_agent_config_and_refresh(
         params.agent_type,
         params.config_json,
         params.opencode_auth_json,
         params.codex_auth_json,
         params.codex_config_toml,
+        &state.db,
+        &state.connection_manager,
+        &state.data_dir,
         &emitter,
     )
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
-    Ok(Json(()))
+    Ok(Json(affected))
 }
 
 #[derive(Deserialize)]

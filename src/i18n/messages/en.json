@@ -103,7 +103,23 @@
       "current": "Current zoom: {zoom}%"
     },
     "resetToDefaults": "Reset to defaults",
-    "resetHint": "Reset theme color, window zoom, and fonts to defaults."
+    "resetHint": "Reset theme color, window zoom, and fonts to defaults.",
+    "fonts": {
+      "sectionTitle": "Fonts",
+      "sectionDescription": "Choose fonts for the interface, code editor, and terminal. Bundled fonts load on demand; pick “Custom…” to use any font installed on your system.",
+      "interface": "Interface",
+      "editor": "Editor",
+      "terminal": "Terminal",
+      "groupSans": "Sans-serif",
+      "groupMono": "Monospace",
+      "custom": "Custom…",
+      "customPlaceholder": "Font family, e.g. Fira Code",
+      "fontSize": "Font size",
+      "ligatures": "Enable font ligatures",
+      "ligaturesUnavailable": "This font has no ligatures",
+      "terminalLigaturesHint": "Terminal ligatures apply only to bundled coding fonts.",
+      "preview": "Preview"
+    }
   },
   "SystemSettings": {
     "loading": "Loading...",
@@ -178,7 +194,26 @@
       "downloadFailed": "Failed to download update package. Please try again later.",
       "installFailed": "Failed to install update. Please close the app and try again.",
       "unknown": "Update failed. Please try again later."
-    }
+    },
+    "upgradeSuccess": "Upgrade complete. Reloading...",
+    "restartTimeout": "The server didn't come back in time. Check the container or service logs.",
+    "restartingIn": "Restarting in {seconds}s...",
+    "waitingForServer": "Waiting for the server to come back...",
+    "restartToUpdate": "Restart to update",
+    "updateReadyHint": "Update downloaded — restart to apply.",
+    "restarting": "Restarting...",
+    "dockerUpgradeHint": "This upgrades the running container now. It's lost if the container is recreated — to keep it, pull or build an image at the new version and recreate.",
+    "upgradeRolledBack": "Upgrade failed; the server rolled back to the previous version.",
+    "serverUnreachable": "Couldn't reach the server to start the upgrade. Check that it's running and try again.",
+    "rollbackButton": "Roll back",
+    "rollingBack": "Rolling back...",
+    "rollbackDescription": "Restore the version installed before the last upgrade.",
+    "rollbackConfirmTitle": "Roll back to the previous version?",
+    "rollbackConfirmDescription": "The server will restart on the version installed before the last upgrade. A newer release stays available to install again.",
+    "rollbackConfirm": "Roll back",
+    "rollbackCancel": "Cancel",
+    "rollbackSuccess": "Rolled back to the previous version. Reloading...",
+    "rollbackFailed": "Rollback failed. Check the server logs."
   },
   "VersionControlSettings": {
     "loading": "Loading...",
@@ -312,6 +347,14 @@
       "newline_in_message": {
         "title": "Newline in Message",
         "description": "Insert a newline in the message input box"
+      },
+      "next_tab": {
+        "title": "Next Tab",
+        "description": "Switch to the next conversation or file tab"
+      },
+      "prev_tab": {
+        "title": "Previous Tab",
+        "description": "Switch to the previous conversation or file tab"
       }
     }
   },
@@ -747,7 +790,8 @@
       "saveConfigManagementFailed": "Failed to save config management",
       "clineSaved": "Cline config saved",
       "saveClineFailed": "Failed to save Cline config",
-      "modelProviderRequired": "Please select a model provider before saving."
+      "modelProviderRequired": "Please select a model provider before saving.",
+      "affectedRunningSessions": "{count, plural, one {# running session needs to reconnect to apply the change} other {# running sessions need to reconnect to apply the change}}"
     },
     "version": {
       "statusLabel": "Version Status",
@@ -922,7 +966,9 @@
         "reorderFoldersFailed": "Failed to reorder folders: {message}",
         "changeFolderColorFailed": "Failed to change folder color: {message}",
         "togglePinFailed": "Failed to toggle folder pin: {message}",
-        "changeFolderDefaultAgentFailed": "Failed to set default agent: {message}"
+        "changeFolderDefaultAgentFailed": "Failed to set default agent: {message}",
+        "importedAndUpdated": "Imported {imported, plural, one {# session} other {# sessions}}, updated {updated, plural, one {# title} other {# titles}}, skipped {skipped}",
+        "updatedTitles": "Updated {updated, plural, one {# title} other {# titles}}, skipped {skipped}"
       },
       "statsLabel": "{folders} folders · {convos} conversations",
       "reorderHandle": "Drag to reorder",
@@ -951,8 +997,7 @@
         "setDefaultAgent": "Set default agent",
         "defaultAgentNone": "No default (use global)",
         "agentUnavailableSuffix": "(unavailable)",
-        "loadingAgents": "Loading agents…",
-        "removeFromWorkspace": "Remove from workspace"
+        "loadingAgents": "Loading agents…"
       },
       "sections": {
         "pinned": "Pinned",
@@ -1276,7 +1321,10 @@
       "loadingEditor": "Loading editor...",
       "imageZoomIn": "Zoom in",
       "imageZoomOut": "Zoom out",
-      "imageZoomReset": "Reset zoom"
+      "imageZoomReset": "Reset zoom",
+      "htmlPreviewTitle": "HTML preview",
+      "htmlPreviewTrust": "Enable scripts",
+      "htmlPreviewTrustHint": "Run this file's scripts and allow network access. Enable only for files you trust."
     },
     "branchDropdown": {
       "toasts": {
@@ -1294,7 +1342,9 @@
         "upstreamSet": "Upstream branch has been set",
         "upstreamSetAndPushed": "Upstream branch set and pushed {count, plural, one {# commit} other {# commits}}",
         "noCommitsToPush": "No commits to push",
-        "pushedCommits": "Pushed {count, plural, one {# commit} other {# commits}}"
+        "pushedCommits": "Pushed {count, plural, one {# commit} other {# commits}}",
+        "switchedToFolder": "Switched to {name}",
+        "switchFailed": "Failed to switch branch"
       },
       "tasks": {
         "newBranch": "Create branch {name}",
@@ -1661,7 +1711,9 @@
         "createFailed": "Failed to create",
         "openInBrowserFailed": "Failed to open in browser",
         "downloadFailed": "Failed to download {name}",
-        "downloadSaved": "Downloaded {name}"
+        "downloadSaved": "Downloaded {name}",
+        "pathCopied": "Path copied",
+        "copyPathFailed": "Failed to copy path"
       },
       "createDialog": {
         "newFile": "New file",
@@ -1748,7 +1800,8 @@
         "descriptionWithTarget": "Rollback local changes for file \"{name}\"?",
         "descriptionFallback": "Rollback local changes for this file?"
       },
-      "terminalTitle": "Terminal · {name}"
+      "terminalTitle": "Terminal · {name}",
+      "copyPath": "Copy path"
     },
     "commandDropdown": {
       "loading": "Loading...",
@@ -1894,7 +1947,9 @@
         "attachUploadTooLarge": "{names} exceeds the {limit}MB upload limit and was skipped.",
         "attachUploadFailed": "Failed to upload {names}.",
         "attachUploadNotAFile": "{names} isn't a regular file (directory or special file) and was skipped.",
-        "attachUploadQuotaExceeded": "The server is out of upload storage; {names} couldn't be uploaded."
+        "attachUploadQuotaExceeded": "The server is out of upload storage; {names} couldn't be uploaded.",
+        "liveFeedback": "Live feedback",
+        "liveFeedbackDisabledHint": "Available while the agent is working"
       },
       "messageQueue": {
         "addToQueue": "Queue message",
@@ -2078,7 +2133,11 @@
             "child_unknown": "subagent unknown error",
             "unknown": "unknown task"
           }
-        }
+        },
+        "resultPageOf": "{current} / {total}",
+        "prevResult": "Previous result",
+        "nextResult": "Next result",
+        "noResultText": "No result captured for this check."
       },
       "contentParts": {
         "showingTailOutput": "Showing tail output while streaming for performance.",
@@ -2203,6 +2262,44 @@
           "errorSuffix": "{count, plural, one {# failed} other {# failed}}",
           "joiner": " · "
         }
+      },
+      "subAgentOverlay": {
+        "title": "Sub-agents",
+        "collapsedSummary": "Sub-agents {count}",
+        "collapseAria": "Collapse sub-agents"
+      },
+      "messageNav": {
+        "title": "Message navigation",
+        "expand": "Expand message navigation",
+        "collapse": "Collapse message navigation",
+        "jumpToMessage": "Jump to: {label}",
+        "fileCount": "{count, plural, one {# file} other {# files}}",
+        "remove": "Remove",
+        "noDiffDataAvailable": "No diff data available for {filePath}"
+      },
+      "askQuestion": {
+        "title": "The agent needs your input",
+        "subtitle": "Answer below, then submit. You can skip anytime.",
+        "recommended": "Recommended",
+        "other": "Other",
+        "otherPlaceholder": "Type your answer…",
+        "singleSelect": "Single",
+        "multiSelect": "Multiple",
+        "skip": "Skip",
+        "next": "Next",
+        "submit": "Submit",
+        "submitError": "Couldn't submit. Please try again."
+      },
+      "configStale": {
+        "agentConfigTitle": "Agent settings updated",
+        "modelProviderTitle": "Model provider updated",
+        "description": "This session is still using its previous configuration. Reconnect to apply — your conversation history is kept.",
+        "reconnect": "Reconnect to apply",
+        "reconnecting": "Reconnecting…",
+        "reconnectDisabledDuringTurn": "Available once the current turn finishes",
+        "dismiss": "Dismiss",
+        "reconnectFailed": "Failed to reconnect session",
+        "applied": "New configuration applied"
       }
     },
     "diffPreview": {
@@ -2354,7 +2451,11 @@
       "permissionDenied": "Permission denied. Try a port above 1024 or run with higher privileges.",
       "addressUnavailable": "The address is not available on this machine",
       "bindFailed": "Failed to bind address"
-    }
+    },
+    "addressSwitchHint": "Switching only changes the address shown and opened here — the service listens on all interfaces and stays reachable at every address.",
+    "qrcode": "QR Code",
+    "qrcodeTitle": "Scan to Open",
+    "qrcodeHint": "Scan with your phone to open Codeg in a browser"
   },
   "DirectoryBrowser": {
     "title": "Browse Directory",
@@ -2463,7 +2564,34 @@
       "error": "Agent Error",
       "errorDesc": "When an agent encounters an error",
       "saved": "Event filter updated.",
-      "saveFailed": "Failed to save event filter."
+      "saveFailed": "Failed to save event filter.",
+      "permissionRequest": "Permission Request",
+      "permissionRequestDesc": "When an agent requests permission to act",
+      "userPromptSent": "User Message",
+      "userPromptSentDesc": "When you send a message — the message text is included in the notification",
+      "loadFailed": "Failed to load settings.",
+      "retry": "Retry",
+      "webhooksTitle": "Webhooks",
+      "webhooksDescription": "POST a JSON payload to one or more URLs when an enabled event fires. The event filter above also applies to webhooks.",
+      "webhookUrlPlaceholder": "https://example.com/webhook",
+      "addWebhook": "Add Webhook",
+      "removeWebhook": "Remove webhook",
+      "webhookSave": "Save",
+      "webhooksSaved": "Webhooks saved.",
+      "webhooksSaveFailed": "Failed to save webhooks.",
+      "webhookInvalidUrl": "Enter valid http(s) URLs.",
+      "docsTitle": "Request Format",
+      "docsMethod": "Method",
+      "docsContentType": "Content-Type",
+      "docsNote": "Each enabled event is delivered to every URL. Webhooks are not debounced; the event filter above still applies.",
+      "editWebhook": "Edit Webhook",
+      "enableWebhook": "Enable webhook",
+      "webhookDuplicate": "This URL is already configured.",
+      "cancel": "Cancel",
+      "webhooksEmpty": "No webhooks configured yet.",
+      "deleteWebhookTitle": "Delete Webhook",
+      "deleteWebhookMessage": "Remove this webhook? Events will no longer be delivered to this URL.",
+      "delete": "Delete"
     },
     "language": {
       "title": "Message Language",
@@ -2524,7 +2652,8 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "create": "Create",
-    "save": "Save"
+    "save": "Save",
+    "affectedRunningSessions": "{count, plural, one {# running session needs to reconnect to apply the change} other {# running sessions need to reconnect to apply the change}}"
   },
   "ProviderUsageQuerySettings": {
     "sectionTitle": "Provider Usage",
@@ -2803,6 +2932,19 @@
         "installFailed": "Failed to install pet",
         "alreadyInstalled": "Pet already exists locally"
       }
+    },
+    "badge": {
+      "running": "{count} running",
+      "waiting": "{count} awaiting approval",
+      "error": "{count} errored"
+    },
+    "panel": {
+      "title": "Active sessions",
+      "empty": "No active sessions",
+      "emptyHint": "Running agents and ones that need you appear here.",
+      "statusRunning": "Running",
+      "statusWaiting": "Waiting",
+      "statusError": "Error"
     }
   },
   "RemoteWorkspace": {
@@ -2836,5 +2978,130 @@
     "openFailed": "Failed to open remote workspace",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
+  },
+  "BackupSettings": {
+    "title": "Backup & Restore",
+    "description": "Export a portable backup of your codeg data, or restore from one.",
+    "tabs": {
+      "backup": "Backup",
+      "restore": "Restore"
+    },
+    "export": {
+      "includeExternal": "Include conversation content",
+      "includeExternalHint": "Also archive agent CLI transcripts (Claude, Codex, Gemini, …). Increases size.",
+      "passphrase": "Passphrase (optional)",
+      "passphrasePlaceholder": "Leave empty for an unencrypted archive",
+      "passphraseConfirm": "Confirm passphrase",
+      "passphraseMismatch": "Passphrases do not match.",
+      "noPassphraseWarning": "This backup will contain secrets (API keys, tokens) in plaintext. Store it somewhere safe.",
+      "passphraseLossWarning": "Encrypted with this passphrase. If you lose it, the backup cannot be recovered.",
+      "button": "Export backup",
+      "inProgress": "Creating backup…",
+      "success": "Backup created.",
+      "started": "Backup download started."
+    },
+    "restore": {
+      "selectFile": "Select backup file",
+      "passphrasePrompt": "This backup is encrypted. Enter its passphrase.",
+      "unlock": "Unlock",
+      "preview": {
+        "title": "Backup details",
+        "encrypted": "Encrypted",
+        "compatible": "Compatible",
+        "incompatible": "Incompatible",
+        "createdAt": "Created: {value}",
+        "appVersion": "App version: {value}",
+        "incompatibleHint": "This backup was created by a newer version of codeg and cannot be restored."
+      },
+      "replaceWarning": "Restoring replaces all current codeg data (database and uploads). Your current data is snapshotted first so it can be recovered.",
+      "keyringNote": "Desktop GitHub/chat tokens live in your OS keychain and are not included; re-enter them after restoring.",
+      "button": "Restore",
+      "staging": "Preparing restore…",
+      "staged": "Restore staged. Restarting…",
+      "restarting": "Restore staged. Restarting the server…",
+      "restartTimeout": "The server did not come back in time. Reload the page once it is up.",
+      "externalSideLocation": "Conversation transcripts were restored to {path}",
+      "confirmTitle": "Replace all data?",
+      "confirmBody": "This will replace your current codeg database and uploads with the backup, then restart. Your current data is snapshotted first.",
+      "cancel": "Cancel",
+      "confirmAction": "Replace & restart",
+      "external": {
+        "title": "Conversation content",
+        "hint": "This backup includes agent CLI transcripts. Choose where to restore them.",
+        "modeSkip": "Don't restore",
+        "modeSide": "Restore to a safe side folder",
+        "modeOriginal": "Restore to original CLI locations",
+        "forceOverwrite": "Overwrite existing files",
+        "forceOverwriteHint": "Replace files that already exist in the agent CLI folders.",
+        "scanning": "Checking for conflicts…",
+        "noConflicts": "No existing files would be overwritten.",
+        "conflictCount": "{count} existing file(s) would be affected.",
+        "conflictSkipNote": "Existing files are kept (skipped) unless you enable overwrite."
+      },
+      "restartFailed": "Restore staged, but the server couldn't restart. Restart it manually to apply the restore."
+    },
+    "remoteUnsupported": "Backup & restore acts on the data of the machine running codeg. You're connected to a remote workspace — manage its backups from that server directly."
+  },
+  "backup": {
+    "restore": {
+      "error": {
+        "badPassphrase": "Incorrect passphrase or corrupted backup.",
+        "corrupted": "The backup archive is corrupted.",
+        "unknownFormat": "This file is not a recognized codeg backup.",
+        "newerVersion": "This backup was created by codeg {backupVersion}, newer than this version ({appVersion}).",
+        "alreadyPending": "A restore is already staged. Restart to apply it before staging another."
+      }
+    },
+    "error": {
+      "diskSpace": "Not enough disk space to complete the operation.",
+      "cancelled": "The operation was cancelled."
+    }
+  },
+  "WebConnection": {
+    "disconnectedTitle": "Connection lost",
+    "reconnectingDescription": "Trying to reconnect to the server. This usually recovers on its own within a few seconds.",
+    "reconnectNow": "Reconnect now",
+    "sessionExpiredTitle": "Session expired",
+    "sessionExpiredDescription": "Your session is no longer valid. Please sign in again to continue.",
+    "goToLogin": "Go to login"
+  },
+  "SessionFeedbackSettings": {
+    "title": "Live Feedback",
+    "description": "Send notes and corrections to an agent while it's working. When enabled, the agent gets a tool to check for your mid-task feedback, and conversations show a note input. Tip: agents typically only check for feedback when you mention it in your prompt — for example, add \"check my live feedback regularly\" to your message so the agent knows to look.",
+    "enable": "Enable live feedback",
+    "enableHint": "Adds a check-for-feedback tool to agents started after this is turned on. Off by default.",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Feedback settings saved",
+    "saveFailed": "Failed to save feedback settings",
+    "loadFailed": "Failed to load: {detail}"
+  },
+  "LiveFeedback": {
+    "placeholder": "Send a note to {agent} while it works…",
+    "agentFallback": "the agent",
+    "ariaLabel": "Live feedback note",
+    "dialogTitle": "Live feedback",
+    "dialogDescription": "Send a note to the agent while it works. It reads your note the next time it checks — without interrupting the current step.",
+    "send": "Send",
+    "cancel": "Cancel",
+    "pending": "waiting",
+    "delivered": "received",
+    "turnEndedUnread": "The agent finished before reading your feedback.",
+    "sendAsMessage": "Send as message",
+    "dismiss": "Dismiss",
+    "turnEndedResent": "The turn ended — sent as a new message instead.",
+    "turnEnded": "The turn already ended.",
+    "submitFailed": "Couldn't send your note"
+  },
+  "AskQuestionSettings": {
+    "title": "Ask user question",
+    "description": "Let agents pause and ask you a multiple-choice question that appears above the conversation input box. The agent waits until you answer (or skip). On by default.",
+    "enable": "Enable ask user question",
+    "enableHint": "Adds the ask_user_question tool to agents started after this is turned on.",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Question settings saved",
+    "saveFailed": "Failed to save question settings",
+    "loadFailed": "Failed to load: {detail}"
   }
 }

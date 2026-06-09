@@ -3006,6 +3006,32 @@ export function AcpAgentSettings() {
     })
   }, [sortedAgents])
 
+  // A settings save (env or native config) only takes effect on the NEXT agent
+  // start, so any running session of that agent stays on its launch-time config
+  // until restarted. The backend returns how many running sessions were left
+  // stale; surface that as one info toast. Debounced + max-coalesced so a button
+  // that saves env AND config together (e.g. Codex, Gemini) shows a single toast
+  // rather than one per call.
+  const affectedReportRef = useRef<{
+    max: number
+    timer: ReturnType<typeof setTimeout> | null
+  }>({ max: 0, timer: null })
+  const reportAffectedSessions = useCallback(
+    (affected: number) => {
+      const r = affectedReportRef.current
+      r.max = Math.max(r.max, affected)
+      if (r.timer) clearTimeout(r.timer)
+      r.timer = setTimeout(() => {
+        const count = affectedReportRef.current.max
+        affectedReportRef.current = { max: 0, timer: null }
+        if (count > 0) {
+          toast.info(t("toasts.affectedRunningSessions", { count }))
+        }
+      }, 150)
+    },
+    [t]
+  )
+
   const persistEnv = useCallback(
     async (
       agentType: AgentType,
@@ -3016,7 +3042,7 @@ export function AcpAgentSettings() {
       const parsedEnv = parseEnvText(envText)
       setSavingEnv((prev) => ({ ...prev, [agentType]: true }))
       try {
-        await acpUpdateAgentEnv(agentType, {
+        const affected = await acpUpdateAgentEnv(agentType, {
           enabled,
           env: parsedEnv,
           modelProviderId: modelProviderId ?? null,
@@ -3033,11 +3059,12 @@ export function AcpAgentSettings() {
               : agent
           )
         )
+        reportAffectedSessions(affected)
       } finally {
         setSavingEnv((prev) => ({ ...prev, [agentType]: false }))
       }
     },
-    []
+    [reportAffectedSessions]
   )
 
   const persistConfig = useCallback(
@@ -3087,7 +3114,7 @@ export function AcpAgentSettings() {
       }
       setSavingConfig((prev) => ({ ...prev, [agentType]: true }))
       try {
-        await acpUpdateAgentConfig(agentType, {
+        const affected = await acpUpdateAgentConfig(agentType, {
           config_json: configForPersist || null,
           opencode_auth_json:
             typeof options?.openCodeAuthJsonText === "string"
@@ -3100,6 +3127,7 @@ export function AcpAgentSettings() {
               ? options.codexConfigTomlText
               : null,
         })
+        reportAffectedSessions(affected)
         setAgents((prev) =>
           prev.map((agent) =>
             agent.agent_type === agentType
@@ -3126,7 +3154,7 @@ export function AcpAgentSettings() {
         setSavingConfig((prev) => ({ ...prev, [agentType]: false }))
       }
     },
-    [agents]
+    [agents, reportAffectedSessions]
   )
 
   const runBinaryAction = useCallback(

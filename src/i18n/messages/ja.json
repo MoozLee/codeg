@@ -103,7 +103,23 @@
       "current": "現在のズーム：{zoom}%"
     },
     "resetToDefaults": "デフォルトに戻す",
-    "resetHint": "テーマカラー、ウィンドウズーム、フォントをデフォルトに戻します。"
+    "resetHint": "テーマカラー、ウィンドウズーム、フォントをデフォルトに戻します。",
+    "fonts": {
+      "sectionTitle": "フォント",
+      "sectionDescription": "インターフェース、コードエディター、ターミナルのフォントをそれぞれ選択します。内蔵フォントは必要に応じて読み込まれます。「カスタム…」を選ぶと、システムにインストールされた任意のフォントを使用できます。",
+      "interface": "インターフェース",
+      "editor": "エディター",
+      "terminal": "ターミナル",
+      "groupSans": "サンセリフ",
+      "groupMono": "等幅",
+      "custom": "カスタム…",
+      "customPlaceholder": "フォント名（例：Fira Code）",
+      "fontSize": "フォントサイズ",
+      "ligatures": "合字を有効にする",
+      "ligaturesUnavailable": "このフォントには合字がありません",
+      "terminalLigaturesHint": "ターミナルの合字は内蔵のコーディングフォントにのみ適用されます。",
+      "preview": "プレビュー"
+    }
   },
   "SystemSettings": {
     "loading": "読み込み中...",
@@ -178,7 +194,26 @@
       "downloadFailed": "更新パッケージのダウンロードに失敗しました。しばらくしてから再試行してください。",
       "installFailed": "更新のインストールに失敗しました。アプリを閉じて再試行してください。",
       "unknown": "更新に失敗しました。しばらくしてから再試行してください。"
-    }
+    },
+    "upgradeSuccess": "アップグレードが完了しました。再読み込みしています...",
+    "restartTimeout": "サーバーが時間内に復帰しませんでした。コンテナまたはサービスのログを確認してください。",
+    "restartingIn": "{seconds} 秒後に再起動します...",
+    "waitingForServer": "サーバーの復帰を待っています...",
+    "restartToUpdate": "再起動して更新",
+    "updateReadyHint": "アップデートをダウンロードしました。再起動して適用してください。",
+    "restarting": "再起動しています…",
+    "dockerUpgradeHint": "いま実行中のコンテナを更新します。コンテナを再作成すると失われます。維持するには、新しいバージョンのイメージを取得またはビルドしてコンテナを再作成してください。",
+    "upgradeRolledBack": "アップグレードに失敗しました。サーバーは前のバージョンにロールバックしました。",
+    "serverUnreachable": "アップグレードを開始するためにサーバーに接続できませんでした。サーバーが稼働中であることを確認して再試行してください。",
+    "rollbackButton": "ロールバック",
+    "rollingBack": "ロールバック中...",
+    "rollbackDescription": "前回のアップグレード前にインストールされていたバージョンに戻します。",
+    "rollbackConfirmTitle": "以前のバージョンにロールバックしますか？",
+    "rollbackConfirmDescription": "サーバーは前回のアップグレード前のバージョンで再起動します。新しいリリースは引き続き再インストールできます。",
+    "rollbackConfirm": "ロールバック",
+    "rollbackCancel": "キャンセル",
+    "rollbackSuccess": "以前のバージョンにロールバックしました。再読み込みしています...",
+    "rollbackFailed": "ロールバックに失敗しました。サーバーのログを確認してください。"
   },
   "VersionControlSettings": {
     "loading": "読み込み中...",
@@ -312,6 +347,14 @@
       "newline_in_message": {
         "title": "メッセージ内で改行",
         "description": "入力欄で改行を挿入する"
+      },
+      "next_tab": {
+        "title": "次のタブ",
+        "description": "次の会話またはファイルタブに切り替える"
+      },
+      "prev_tab": {
+        "title": "前のタブ",
+        "description": "前の会話またはファイルタブに切り替える"
       }
     }
   },
@@ -747,7 +790,8 @@
       "saveConfigManagementFailed": "設定管理の保存に失敗しました",
       "clineSaved": "Cline設定を保存しました",
       "saveClineFailed": "Cline設定の保存に失敗しました",
-      "modelProviderRequired": "保存する前にモデルプロバイダーを選択してください。"
+      "modelProviderRequired": "保存する前にモデルプロバイダーを選択してください。",
+      "affectedRunningSessions": "{count} 件の実行中セッションは再接続すると変更が適用されます"
     },
     "version": {
       "statusLabel": "バージョン状態",
@@ -922,7 +966,9 @@
         "reorderFoldersFailed": "フォルダの並べ替えに失敗しました: {message}",
         "changeFolderColorFailed": "色の変更に失敗しました: {message}",
         "togglePinFailed": "ピン留めの切り替えに失敗しました: {message}",
-        "changeFolderDefaultAgentFailed": "デフォルトエージェントの設定に失敗しました: {message}"
+        "changeFolderDefaultAgentFailed": "デフォルトエージェントの設定に失敗しました: {message}",
+        "importedAndUpdated": "{imported, plural, one {# 件のセッション} other {# 件のセッション}} をインポートし、{updated, plural, one {# 件のタイトル} other {# 件のタイトル}} を更新し、{skipped} 件をスキップしました",
+        "updatedTitles": "{updated, plural, one {# 件のタイトル} other {# 件のタイトル}} を更新し、{skipped} 件をスキップしました"
       },
       "statsLabel": "{folders} フォルダ · {convos} 会話",
       "reorderHandle": "ドラッグして並べ替え",
@@ -951,8 +997,7 @@
         "setDefaultAgent": "デフォルトエージェントを設定",
         "defaultAgentNone": "設定なし（グローバルを使用）",
         "agentUnavailableSuffix": "（利用不可）",
-        "loadingAgents": "エージェントを読み込み中…",
-        "removeFromWorkspace": "ワークスペースから削除"
+        "loadingAgents": "エージェントを読み込み中…"
       },
       "sections": {
         "pinned": "ピン留め",
@@ -1276,7 +1321,10 @@
       "loadingEditor": "エディターを読み込み中...",
       "imageZoomIn": "拡大",
       "imageZoomOut": "縮小",
-      "imageZoomReset": "ズームをリセット"
+      "imageZoomReset": "ズームをリセット",
+      "htmlPreviewTitle": "HTML プレビュー",
+      "htmlPreviewTrust": "スクリプトを有効化",
+      "htmlPreviewTrustHint": "このファイルのスクリプトを実行し、ネットワークアクセスを許可します。信頼できるファイルでのみ有効にしてください。"
     },
     "branchDropdown": {
       "toasts": {
@@ -1294,7 +1342,9 @@
         "upstreamSet": "アップストリームブランチを設定しました",
         "upstreamSetAndPushed": "アップストリームブランチを設定し、{count, plural, one {# 件のコミット} other {# 件のコミット}}をプッシュしました",
         "noCommitsToPush": "プッシュするコミットはありません",
-        "pushedCommits": "{count, plural, one {# 件のコミットをプッシュ} other {# 件のコミットをプッシュ}}"
+        "pushedCommits": "{count, plural, one {# 件のコミットをプッシュ} other {# 件のコミットをプッシュ}}",
+        "switchedToFolder": "{name} に切り替えました",
+        "switchFailed": "ブランチの切り替えに失敗しました"
       },
       "tasks": {
         "newBranch": "ブランチ {name} を作成",
@@ -1661,7 +1711,9 @@
         "createFailed": "作成に失敗しました",
         "openInBrowserFailed": "ブラウザーで開けませんでした",
         "downloadFailed": "{name} のダウンロードに失敗しました",
-        "downloadSaved": "{name} をダウンロードしました"
+        "downloadSaved": "{name} をダウンロードしました",
+        "pathCopied": "パスをコピーしました",
+        "copyPathFailed": "パスのコピーに失敗しました"
       },
       "createDialog": {
         "newFile": "新規ファイル",
@@ -1748,7 +1800,8 @@
         "descriptionWithTarget": "ファイル \"{name}\" のローカル変更をロールバックしますか？",
         "descriptionFallback": "このファイルのローカル変更をロールバックしますか？"
       },
-      "terminalTitle": "ターミナル · {name}"
+      "terminalTitle": "ターミナル · {name}",
+      "copyPath": "パスをコピー"
     },
     "commandDropdown": {
       "loading": "読み込み中...",
@@ -1894,7 +1947,9 @@
         "attachUploadTooLarge": "{names} は {limit}MB のアップロード上限を超えたためスキップしました。",
         "attachUploadFailed": "{names} のアップロードに失敗しました。",
         "attachUploadNotAFile": "{names} は通常ファイルではなく（ディレクトリまたは特殊ファイル）、スキップされました。",
-        "attachUploadQuotaExceeded": "サーバーのアップロード容量が不足しているため、{names} をアップロードできませんでした。"
+        "attachUploadQuotaExceeded": "サーバーのアップロード容量が不足しているため、{names} をアップロードできませんでした。",
+        "liveFeedback": "ライブフィードバック",
+        "liveFeedbackDisabledHint": "エージェントの作業中に送信できます"
       },
       "messageQueue": {
         "addToQueue": "キューに追加",
@@ -2078,7 +2133,11 @@
             "child_unknown": "サブエージェント: エラー",
             "unknown": "不明なタスク"
           }
-        }
+        },
+        "resultPageOf": "{current} / {total}",
+        "prevResult": "前の結果",
+        "nextResult": "次の結果",
+        "noResultText": "このチェックでは結果がありません"
       },
       "contentParts": {
         "showingTailOutput": "パフォーマンスのため、ストリーミング中は末尾出力を表示しています。",
@@ -2203,6 +2262,44 @@
           "errorSuffix": "{count} 件失敗",
           "joiner": " · "
         }
+      },
+      "subAgentOverlay": {
+        "title": "サブエージェント",
+        "collapsedSummary": "サブエージェント {count}",
+        "collapseAria": "サブエージェントを折りたたむ"
+      },
+      "messageNav": {
+        "title": "メッセージナビ",
+        "expand": "メッセージナビを開く",
+        "collapse": "メッセージナビを閉じる",
+        "jumpToMessage": "移動: {label}",
+        "fileCount": "{count, plural, one {# 個のファイル} other {# 個のファイル}}",
+        "remove": "削除",
+        "noDiffDataAvailable": "{filePath} の差分データがありません"
+      },
+      "askQuestion": {
+        "title": "エージェントが選択を求めています",
+        "subtitle": "回答したら送信してください。いつでもスキップできます",
+        "recommended": "推奨",
+        "other": "その他",
+        "otherPlaceholder": "回答を入力…",
+        "singleSelect": "単一選択",
+        "multiSelect": "複数選択",
+        "skip": "スキップ",
+        "next": "次へ",
+        "submit": "送信",
+        "submitError": "送信できませんでした。もう一度お試しください。"
+      },
+      "configStale": {
+        "agentConfigTitle": "エージェント設定が更新されました",
+        "modelProviderTitle": "モデルプロバイダーが更新されました",
+        "description": "このセッションは以前の設定のままです。再接続すると適用されます（会話履歴は保持されます）。",
+        "reconnect": "再接続して適用",
+        "reconnecting": "再接続中…",
+        "reconnectDisabledDuringTurn": "現在のターンが完了すると再接続できます",
+        "dismiss": "閉じる",
+        "reconnectFailed": "セッションの再接続に失敗しました",
+        "applied": "新しい設定を適用しました"
       }
     },
     "diffPreview": {
@@ -2354,7 +2451,11 @@
       "permissionDenied": "権限が不足しています。1024 以上のポートを使用するか、より高い権限で実行してください",
       "addressUnavailable": "このアドレスはこの端末では利用できません",
       "bindFailed": "アドレスのバインドに失敗しました"
-    }
+    },
+    "addressSwitchHint": "切り替えても、ここに表示され開くアドレスが変わるだけです。サービスはすべてのインターフェースで待ち受けており、どのアドレスからもアクセスできます。",
+    "qrcode": "QRコード",
+    "qrcodeTitle": "スキャンして開く",
+    "qrcodeHint": "スマートフォンでスキャンして、ブラウザで Codeg を開きます"
   },
   "DirectoryBrowser": {
     "title": "ディレクトリを参照",
@@ -2451,7 +2552,34 @@
       "error": "エージェントエラー",
       "errorDesc": "エージェントがエラーに遭遇した時",
       "saved": "イベントフィルターを更新しました。",
-      "saveFailed": "イベントフィルターの保存に失敗しました。"
+      "saveFailed": "イベントフィルターの保存に失敗しました。",
+      "permissionRequest": "権限リクエスト",
+      "permissionRequestDesc": "エージェントが操作の権限を要求した時",
+      "userPromptSent": "ユーザーメッセージ",
+      "userPromptSentDesc": "メッセージを送信したとき（通知に本文が含まれます）",
+      "loadFailed": "設定の読み込みに失敗しました。",
+      "retry": "再試行",
+      "webhooksTitle": "Webhook",
+      "webhooksDescription": "有効なイベントの発生時に、1 つ以上の URL へ JSON を POST します。上のイベントフィルターは Webhook にも適用されます。",
+      "webhookUrlPlaceholder": "https://example.com/webhook",
+      "addWebhook": "Webhook を追加",
+      "removeWebhook": "Webhook を削除",
+      "webhookSave": "保存",
+      "webhooksSaved": "Webhook を保存しました。",
+      "webhooksSaveFailed": "Webhook の保存に失敗しました。",
+      "webhookInvalidUrl": "有効な http(s) URL を入力してください。",
+      "docsTitle": "リクエスト形式",
+      "docsMethod": "メソッド",
+      "docsContentType": "Content-Type",
+      "docsNote": "有効な各イベントはすべての URL に配信されます。Webhook はデバウンスされず、上のイベントフィルターが適用されます。",
+      "editWebhook": "Webhook を編集",
+      "enableWebhook": "Webhook を有効化",
+      "webhookDuplicate": "この URL は既に設定されています。",
+      "cancel": "キャンセル",
+      "webhooksEmpty": "Webhook はまだ設定されていません。",
+      "deleteWebhookTitle": "Webhook を削除",
+      "deleteWebhookMessage": "この Webhook を削除しますか？このURLにイベントは配信されなくなります。",
+      "delete": "削除"
     },
     "language": {
       "title": "メッセージ言語",
@@ -2512,7 +2640,8 @@
     "cancel": "キャンセル",
     "delete": "削除",
     "create": "作成",
-    "save": "保存"
+    "save": "保存",
+    "affectedRunningSessions": "{count} 件の実行中セッションは再接続すると変更が適用されます"
   },
   "ProviderUsageQuerySettings": {
     "sectionTitle": "Provider Usage",
@@ -2791,6 +2920,19 @@
         "installFailed": "インストールに失敗しました",
         "alreadyInstalled": "そのペットは既に存在します"
       }
+    },
+    "badge": {
+      "running": "実行中 {count} 件",
+      "waiting": "承認待ち {count} 件",
+      "error": "エラー {count} 件"
+    },
+    "panel": {
+      "title": "アクティブなセッション",
+      "empty": "アクティブなセッションはありません",
+      "emptyHint": "実行中、または対応が必要なセッションがここに表示されます。",
+      "statusRunning": "実行中",
+      "statusWaiting": "待機中",
+      "statusError": "エラー"
     }
   },
   "RemoteWorkspace": {
@@ -2836,5 +2978,130 @@
     "emptyDirectory": "このディレクトリは空です",
     "errorLoadingDir": "ディレクトリの読み込みに失敗しました",
     "selectedCount": "{count} 件選択中"
+  },
+  "BackupSettings": {
+    "title": "バックアップと復元",
+    "description": "codeg データのポータブルなバックアップを書き出すか、バックアップから復元します。",
+    "tabs": {
+      "backup": "バックアップ",
+      "restore": "復元"
+    },
+    "export": {
+      "includeExternal": "会話内容を含める",
+      "includeExternalHint": "各 CLI の会話履歴（Claude、Codex、Gemini など）も保存します。サイズが増えます。",
+      "passphrase": "パスフレーズ（任意）",
+      "passphrasePlaceholder": "空欄の場合は暗号化されません",
+      "passphraseConfirm": "パスフレーズの確認",
+      "passphraseMismatch": "パスフレーズが一致しません。",
+      "noPassphraseWarning": "このバックアップには秘密情報（API キー、トークン）が平文で含まれます。安全に保管してください。",
+      "passphraseLossWarning": "このパスフレーズで暗号化します。紛失するとバックアップは復元できません。",
+      "button": "バックアップを書き出す",
+      "inProgress": "バックアップを作成中…",
+      "success": "バックアップを作成しました。",
+      "started": "バックアップのダウンロードを開始しました。"
+    },
+    "restore": {
+      "selectFile": "バックアップファイルを選択",
+      "passphrasePrompt": "このバックアップは暗号化されています。パスフレーズを入力してください。",
+      "unlock": "ロック解除",
+      "preview": {
+        "title": "バックアップの詳細",
+        "encrypted": "暗号化済み",
+        "compatible": "互換あり",
+        "incompatible": "互換なし",
+        "createdAt": "作成日時: {value}",
+        "appVersion": "アプリのバージョン: {value}",
+        "incompatibleHint": "このバックアップは新しいバージョンの codeg で作成されており、復元できません。"
+      },
+      "replaceWarning": "復元すると現在の codeg データ（データベースとアップロード）がすべて置き換えられます。現在のデータは先にスナップショットされ、復旧できます。",
+      "keyringNote": "デスクトップの GitHub/チャットのトークンは OS のキーチェーンに保存され、含まれません。復元後に再入力してください。",
+      "button": "復元",
+      "staging": "復元を準備中…",
+      "staged": "復元を準備しました。再起動します…",
+      "restarting": "復元を準備しました。サーバーを再起動します…",
+      "restartTimeout": "サーバーが時間内に復帰しませんでした。起動後にページを再読み込みしてください。",
+      "externalSideLocation": "会話履歴を {path} に復元しました",
+      "confirmTitle": "すべてのデータを置き換えますか？",
+      "confirmBody": "現在の codeg データベースとアップロードをバックアップで置き換えてから再起動します。現在のデータは先にスナップショットされます。",
+      "cancel": "キャンセル",
+      "confirmAction": "置き換えて再起動",
+      "external": {
+        "title": "会話内容",
+        "hint": "このバックアップには CLI の会話履歴が含まれます。復元先を選択してください。",
+        "modeSkip": "復元しない",
+        "modeSide": "安全な別フォルダーに復元",
+        "modeOriginal": "CLI の元の場所に復元",
+        "forceOverwrite": "既存のファイルを上書き",
+        "forceOverwriteHint": "CLI フォルダー内の既存ファイルを置き換えます。",
+        "scanning": "競合を確認中…",
+        "noConflicts": "既存のファイルは上書きされません。",
+        "conflictCount": "既存のファイル {count} 件が影響を受けます。",
+        "conflictSkipNote": "上書きを有効にしない限り、既存ファイルは保持（スキップ）されます。"
+      },
+      "restartFailed": "復元は準備できましたが、サーバーを再起動できませんでした。手動で再起動して復元を適用してください。"
+    },
+    "remoteUnsupported": "バックアップと復元は codeg を実行しているマシンのデータを対象とします。現在リモートワークスペースに接続中です。そのサーバー上で直接バックアップを管理してください。"
+  },
+  "backup": {
+    "restore": {
+      "error": {
+        "badPassphrase": "パスフレーズが正しくないか、バックアップが破損しています。",
+        "corrupted": "バックアップアーカイブが破損しています。",
+        "unknownFormat": "このファイルは認識可能な codeg バックアップではありません。",
+        "newerVersion": "このバックアップは codeg {backupVersion} で作成されており、現在のバージョン（{appVersion}）より新しいです。",
+        "alreadyPending": "適用待ちの復元が既にあります。先に再起動して適用してから、新しい復元を準備してください。"
+      }
+    },
+    "error": {
+      "diskSpace": "操作を完了するためのディスク容量が足りません。",
+      "cancelled": "操作はキャンセルされました。"
+    }
+  },
+  "WebConnection": {
+    "disconnectedTitle": "接続が切断されました",
+    "reconnectingDescription": "サーバーへの再接続を試みています。通常は数秒で自動的に復旧します。",
+    "reconnectNow": "今すぐ再接続",
+    "sessionExpiredTitle": "セッションの有効期限が切れました",
+    "sessionExpiredDescription": "セッションが無効になりました。続行するには再度サインインしてください。",
+    "goToLogin": "ログインへ移動"
+  },
+  "SessionFeedbackSettings": {
+    "title": "ライブフィードバック",
+    "description": "作業中のエージェントにメモや修正を送信できます。有効にすると、エージェントはライブフィードバックを確認するツールを取得し、会話にメモ入力が表示されます。ヒント：エージェントは通常、プロンプトで言及した場合にのみフィードバックを確認します。例えば「作業中に定期的にライブフィードバックを確認して」とメッセージに追加してください。",
+    "enable": "ライブフィードバックを有効にする",
+    "enableHint": "有効化後に起動したエージェントに、フィードバック確認ツールを注入します。既定はオフです。",
+    "save": "保存",
+    "saving": "保存中…",
+    "saved": "フィードバック設定を保存しました",
+    "saveFailed": "フィードバック設定の保存に失敗しました",
+    "loadFailed": "読み込みに失敗しました: {detail}"
+  },
+  "LiveFeedback": {
+    "placeholder": "{agent} の作業中にメモを送る…",
+    "agentFallback": "エージェント",
+    "ariaLabel": "ライブフィードバックのメモ",
+    "dialogTitle": "ライブフィードバック",
+    "dialogDescription": "エージェントの作業中にメモを送ります。現在のステップを中断せず、次の確認時に読み取られます。",
+    "send": "送信",
+    "cancel": "キャンセル",
+    "pending": "待機中",
+    "delivered": "受領済み",
+    "turnEndedUnread": "エージェントはフィードバックを読む前にターンを終了しました。",
+    "sendAsMessage": "新しいメッセージとして送信",
+    "dismiss": "閉じる",
+    "turnEndedResent": "ターンが終了したため、新しいメッセージとして送信しました。",
+    "turnEnded": "ターンはすでに終了しています。",
+    "submitFailed": "メモを送信できませんでした"
+  },
+  "AskQuestionSettings": {
+    "title": "ユーザーに質問",
+    "description": "エージェントが処理を一時停止し、会話の入力欄の上に表示される選択式の質問をできるようにします。回答（またはスキップ）するまでエージェントは待機します。デフォルトで有効。",
+    "enable": "ユーザーへの質問を有効化",
+    "enableHint": "有効化後に開始したエージェントに ask_user_question ツールを追加します。",
+    "save": "保存",
+    "saving": "保存中…",
+    "saved": "質問設定を保存しました",
+    "saveFailed": "質問設定の保存に失敗しました",
+    "loadFailed": "読み込みに失敗しました：{detail}"
   }
 }

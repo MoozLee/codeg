@@ -1,7 +1,15 @@
 "use client"
 
 import { memo, useState, useCallback } from "react"
-import { Pencil, Trash2, Circle, Plus, ExternalLink } from "lucide-react"
+import {
+  Pencil,
+  Trash2,
+  Circle,
+  Plus,
+  ExternalLink,
+  Loader2,
+  XCircle,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { DbConversationSummary, ConversationStatus } from "@/lib/types"
 import { STATUS_ORDER } from "@/lib/types"
@@ -43,13 +51,13 @@ interface SidebarConversationCardProps {
   isSelected: boolean
   isOpenInTab?: boolean
   timeLabel?: string
-  onSelect: (id: number, agentType: string) => void
-  onDoubleClick?: (id: number, agentType: string) => void
+  onSelect: (id: number, agentType: string, folderId: number) => void
+  onDoubleClick?: (id: number, agentType: string, folderId: number) => void
   onRename: (id: number, newTitle: string) => Promise<void>
-  onDelete: (id: number, agentType: string) => Promise<void>
+  onDelete: (id: number, agentType: string, folderId: number) => Promise<void>
   onStatusChange: (id: number, status: ConversationStatus) => Promise<void>
-  onOpenInWindow?: (id: number, agentType: string) => void
-  onNewConversation?: () => void
+  onOpenInWindow?: (id: number, agentType: string, folderId: number) => void
+  onNewConversation?: (folderId: number) => void
 }
 
 export const SidebarConversationCard = memo(function SidebarConversationCard({
@@ -74,12 +82,26 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const [renameValue, setRenameValue] = useState("")
 
   const handleClick = useCallback(() => {
-    onSelect(conversation.id, conversation.agent_type)
-  }, [onSelect, conversation.id, conversation.agent_type])
+    onSelect(conversation.id, conversation.agent_type, conversation.folder_id)
+  }, [
+    onSelect,
+    conversation.id,
+    conversation.agent_type,
+    conversation.folder_id,
+  ])
 
   const handleDblClick = useCallback(() => {
-    onDoubleClick?.(conversation.id, conversation.agent_type)
-  }, [onDoubleClick, conversation.id, conversation.agent_type])
+    onDoubleClick?.(
+      conversation.id,
+      conversation.agent_type,
+      conversation.folder_id
+    )
+  }, [
+    onDoubleClick,
+    conversation.id,
+    conversation.agent_type,
+    conversation.folder_id,
+  ])
 
   const handleRenameOpen = useCallback(() => {
     setRenameValue(conversation.title || "")
@@ -95,9 +117,18 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   }, [renameValue, conversation.id, conversation.title, onRename])
 
   const handleDeleteConfirm = useCallback(async () => {
-    await onDelete(conversation.id, conversation.agent_type)
+    await onDelete(
+      conversation.id,
+      conversation.agent_type,
+      conversation.folder_id
+    )
     setDeleteOpen(false)
-  }, [conversation.id, conversation.agent_type, onDelete])
+  }, [
+    conversation.id,
+    conversation.agent_type,
+    conversation.folder_id,
+    onDelete,
+  ])
 
   const status = conversation.status as ConversationStatus
   const isRunning = status === "in_progress"
@@ -170,25 +201,29 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
 
               {isRunning ? (
                 <span
-                  className={cn(
-                    "relative inline-flex shrink-0 items-center justify-center",
-                    "h-[0.9375rem] rounded-[0.3125rem] px-[0.25rem]",
-                    "text-[0.625rem] font-semibold leading-none tracking-[0.01875rem]",
-                    "bg-amber-500/20 text-amber-600 dark:bg-amber-400/20 dark:text-amber-400"
-                  )}
+                  className="relative inline-flex shrink-0 items-center justify-center"
+                  title={tSidebar("statusRunningBadge")}
                 >
-                  {tSidebar("statusRunningBadge")}
+                  <Loader2
+                    className="h-3.5 w-3.5 animate-spin text-amber-600 dark:text-amber-400"
+                    aria-hidden
+                  />
+                  <span className="sr-only">
+                    {tSidebar("statusRunningBadge")}
+                  </span>
                 </span>
               ) : isCancelled ? (
                 <span
-                  className={cn(
-                    "relative inline-flex shrink-0 items-center justify-center",
-                    "h-[0.9375rem] rounded-[0.3125rem] px-[0.25rem]",
-                    "text-[0.625rem] font-semibold leading-none tracking-[0.01875rem]",
-                    "bg-destructive/20 text-destructive"
-                  )}
+                  className="relative inline-flex shrink-0 items-center justify-center"
+                  title={tSidebar("statusCancelledBadge")}
                 >
-                  {tSidebar("statusCancelledBadge")}
+                  <XCircle
+                    className="h-3.5 w-3.5 text-destructive"
+                    aria-hidden
+                  />
+                  <span className="sr-only">
+                    {tSidebar("statusCancelledBadge")}
+                  </span>
                 </span>
               ) : timeLabel ? (
                 <span
@@ -209,7 +244,9 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
         <ContextMenuContent>
           {onNewConversation && (
             <>
-              <ContextMenuItem onSelect={onNewConversation}>
+              <ContextMenuItem
+                onSelect={() => onNewConversation(conversation.folder_id)}
+              >
                 <Plus className="h-4 w-4" />
                 {t("newConversation")}
               </ContextMenuItem>
@@ -220,7 +257,11 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
             <>
               <ContextMenuItem
                 onSelect={() =>
-                  onOpenInWindow(conversation.id, conversation.agent_type)
+                  onOpenInWindow(
+                    conversation.id,
+                    conversation.agent_type,
+                    conversation.folder_id
+                  )
                 }
               >
                 <ExternalLink className="h-4 w-4" />

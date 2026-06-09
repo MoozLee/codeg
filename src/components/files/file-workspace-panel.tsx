@@ -11,6 +11,8 @@ import {
   type FileWorkspaceTab,
 } from "@/contexts/workspace-context"
 import { ImagePreview } from "@/components/files/image-preview"
+import { HtmlPreview } from "@/components/files/html-preview"
+import { isHtmlPreviewable } from "@/lib/language-detect"
 import { DiffViewer } from "@/components/diff/diff-viewer"
 import { UnifiedDiffPreview } from "@/components/diff/unified-diff-preview"
 import {
@@ -27,10 +29,9 @@ import { Streamdown } from "streamdown"
 import { readFileBase64 } from "@/lib/api"
 import { normalizeMathDelimiters } from "@/components/ai-elements/message"
 import { defineMonacoThemes, useMonacoThemeSync } from "@/lib/monaco-themes"
-import { useCodeFontFamily, useZoomLevel } from "@/hooks/use-appearance"
+import { useZoomLevel, useEditorFont } from "@/hooks/use-appearance"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
-const EDITOR_BASE_FONT_SIZE = 13
 import "@/lib/monaco-local"
 
 const math = createMathPlugin({ singleDollarTextMath: true })
@@ -791,7 +792,7 @@ export function FileWorkspacePanel() {
   const gitChangeDecorationsRef = useRef<string[]>([])
   const editorTheme = useMonacoThemeSync()
   const { zoomLevel } = useZoomLevel()
-  const { codeFontFamilyStack } = useCodeFontFamily()
+  const { editorFontStack, editorFontSize, editorLigatures } = useEditorFont()
   const [editorMountVersion, setEditorMountVersion] = useState(0)
   const [cursorLine, setCursorLine] = useState(1)
   const [collapsedFiles, setCollapsedFiles] = useState<Record<string, boolean>>(
@@ -1401,6 +1402,22 @@ export function FileWorkspacePanel() {
     return <ImagePreview key={activeFileTab.id} tab={activeFileTab} />
   }
 
+  // HTML preview (sandboxed iframe)
+  if (
+    isFileTab &&
+    activeFileTab &&
+    previewFileTabIds.has(activeFileTab.id) &&
+    isHtmlPreviewable(activeFileTab.path)
+  ) {
+    return (
+      <HtmlPreview
+        key={activeFileTab.id}
+        tab={activeFileTab}
+        folderPath={folderPath}
+      />
+    )
+  }
+
   if (isPreviewMode && activeFileTab) {
     const absFilePath =
       activeFileTab.path && folderPath
@@ -1662,8 +1679,9 @@ export function FileWorkspacePanel() {
                 readOnly: !canEdit || activeFileTab.loading,
                 minimap: { enabled: false },
                 automaticLayout: true,
-                fontFamily: codeFontFamilyStack,
-                fontSize: (EDITOR_BASE_FONT_SIZE * zoomLevel) / 100,
+                fontSize: (editorFontSize * zoomLevel) / 100,
+                fontFamily: editorFontStack,
+                fontLigatures: editorLigatures,
                 lineNumbersMinChars,
                 lineDecorationsWidth: 10,
                 wordWrap: "off",

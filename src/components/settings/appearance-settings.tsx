@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
 import { Monitor, Moon, RotateCcw, Sun, Type } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
@@ -13,93 +12,50 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useAppearance, useThemeColor, useZoomLevel } from "@/hooks/use-appearance"
 import {
-  useAppearanceFontList,
-  useCodeFontFamily,
-  useThemeColor,
-  useUiFontFamily,
-  useZoomLevel,
-} from "@/hooks/use-appearance"
+  DEFAULT_EDITOR_FONT_ID,
+  DEFAULT_EDITOR_FONT_SIZE,
+  DEFAULT_TERMINAL_FONT_ID,
+  DEFAULT_TERMINAL_FONT_SIZE,
+  DEFAULT_UI_FONT_ID,
+} from "@/lib/font-presets"
 import { cn } from "@/lib/utils"
 import {
-  buildCodeFontOptions,
-  DEFAULT_CODE_FONT_FAMILY,
   DEFAULT_THEME_COLOR,
-  DEFAULT_UI_FONT_FAMILY,
   DEFAULT_ZOOM_LEVEL,
-  isKnownCodeFontFamily,
-  isKnownFontFamily,
   THEME_COLOR_PREVIEW,
   THEME_COLORS,
   ZOOM_LEVELS,
-  normalizeFontFamilyPreference,
-  type FontFamilyPreference,
   type ThemeColor,
   type ZoomLevel,
 } from "@/lib/theme-presets"
 import { PetManagerSection } from "./pet-manager-section"
+import { FontSettingsSection } from "./font-settings-section"
 
 type ThemeMode = "system" | "light" | "dark"
-type FontSelectValue = string
-
-const DEFAULT_FONT_SELECT_VALUE = "__default__"
-
-function toSelectValue(fontFamily: FontFamilyPreference): FontSelectValue {
-  return fontFamily ?? DEFAULT_FONT_SELECT_VALUE
-}
-
-function fromSelectValue(value: FontSelectValue): FontFamilyPreference {
-  return value === DEFAULT_FONT_SELECT_VALUE
-    ? null
-    : normalizeFontFamilyPreference(value)
-}
 
 export function AppearanceSettings() {
   const t = useTranslations("AppearanceSettings")
   const { theme, resolvedTheme, setTheme } = useTheme()
   const { themeColor, setThemeColor } = useThemeColor()
   const { zoomLevel, setZoomLevel } = useZoomLevel()
-  const { uiFontFamily, setUiFontFamily } = useUiFontFamily()
-  const { codeFontFamily, setCodeFontFamily } = useCodeFontFamily()
-  const { fontList, fontListLoaded, fontListError } = useAppearanceFontList()
-
-  const uiFontOptions = fontList.families
-  const codeFontOptions = useMemo(
-    () => buildCodeFontOptions(fontList.families),
-    [fontList.families]
-  )
-
-  useEffect(() => {
-    if (!fontListLoaded || fontListError || fontList.source === "fallback") {
-      return
-    }
-    if (!isKnownFontFamily(uiFontFamily, uiFontOptions)) {
-      setUiFontFamily(DEFAULT_UI_FONT_FAMILY)
-    }
-  }, [
-    fontList.source,
-    fontListError,
-    fontListLoaded,
-    setUiFontFamily,
-    uiFontFamily,
-    uiFontOptions,
-  ])
-
-  useEffect(() => {
-    if (!fontListLoaded || fontListError || fontList.source === "fallback") {
-      return
-    }
-    if (!isKnownCodeFontFamily(codeFontFamily, codeFontOptions)) {
-      setCodeFontFamily(DEFAULT_CODE_FONT_FAMILY)
-    }
-  }, [
-    codeFontFamily,
-    codeFontOptions,
-    fontList.source,
-    fontListError,
-    fontListLoaded,
-    setCodeFontFamily,
-  ])
+  const {
+    uiFont,
+    setUiFont,
+    editorFont,
+    setEditorFont,
+    terminalFont,
+    setTerminalFont,
+    editorFontSize,
+    setEditorFontSize,
+    terminalFontSize,
+    setTerminalFontSize,
+    editorLigatures,
+    setEditorLigatures,
+    terminalLigatures,
+    setTerminalLigatures,
+  } = useAppearance()
 
   const resolvedThemeLabel =
     resolvedTheme === "dark"
@@ -111,14 +67,27 @@ export function AppearanceSettings() {
   const isAtDefaults =
     themeColor === DEFAULT_THEME_COLOR &&
     zoomLevel === DEFAULT_ZOOM_LEVEL &&
-    uiFontFamily === DEFAULT_UI_FONT_FAMILY &&
-    codeFontFamily === DEFAULT_CODE_FONT_FAMILY
+    uiFont.id === DEFAULT_UI_FONT_ID &&
+    uiFont.custom === "" &&
+    editorFont.id === DEFAULT_EDITOR_FONT_ID &&
+    editorFont.custom === "" &&
+    terminalFont.id === DEFAULT_TERMINAL_FONT_ID &&
+    terminalFont.custom === "" &&
+    editorFontSize === DEFAULT_EDITOR_FONT_SIZE &&
+    terminalFontSize === DEFAULT_TERMINAL_FONT_SIZE &&
+    !editorLigatures &&
+    !terminalLigatures
 
   const handleResetToDefaults = () => {
     setThemeColor(DEFAULT_THEME_COLOR)
     setZoomLevel(DEFAULT_ZOOM_LEVEL)
-    setUiFontFamily(DEFAULT_UI_FONT_FAMILY)
-    setCodeFontFamily(DEFAULT_CODE_FONT_FAMILY)
+    setUiFont(DEFAULT_UI_FONT_ID)
+    setEditorFont(DEFAULT_EDITOR_FONT_ID)
+    setTerminalFont(DEFAULT_TERMINAL_FONT_ID)
+    setEditorFontSize(DEFAULT_EDITOR_FONT_SIZE)
+    setTerminalFontSize(DEFAULT_TERMINAL_FONT_SIZE)
+    setEditorLigatures(false)
+    setTerminalLigatures(false)
   }
 
   return (
@@ -238,85 +207,6 @@ export function AppearanceSettings() {
           </p>
         </section>
 
-        {/* ===== Fonts ===== */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
-          <div className="flex items-center gap-2">
-            <Type className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">
-              {t("fontFamily.sectionTitle")}
-            </h2>
-          </div>
-
-          <p className="text-xs text-muted-foreground leading-5">
-            {t("fontFamily.sectionDescription")}
-          </p>
-
-          <div className="space-y-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <label className="text-xs font-medium text-muted-foreground">
-                {t("fontFamily.uiFont")}
-              </label>
-              <Select
-                value={toSelectValue(uiFontFamily)}
-                onValueChange={(value) =>
-                  setUiFontFamily(fromSelectValue(value))
-                }
-              >
-                <SelectTrigger className="w-full sm:w-64">
-                  <SelectValue placeholder={t("fontFamily.placeholder")} />
-                </SelectTrigger>
-                <SelectContent align="end" className="max-h-72">
-                  <SelectItem value={DEFAULT_FONT_SELECT_VALUE}>
-                    {t("fontFamily.default")}
-                  </SelectItem>
-                  {uiFontOptions.map((font) => (
-                    <SelectItem key={font.family} value={font.family}>
-                      {font.family}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <label className="text-xs font-medium text-muted-foreground">
-                {t("fontFamily.codeFont")}
-              </label>
-              <Select
-                value={toSelectValue(codeFontFamily)}
-                onValueChange={(value) =>
-                  setCodeFontFamily(fromSelectValue(value))
-                }
-              >
-                <SelectTrigger className="w-full sm:w-64">
-                  <SelectValue placeholder={t("fontFamily.placeholder")} />
-                </SelectTrigger>
-                <SelectContent align="end" className="max-h-72">
-                  <SelectItem value={DEFAULT_FONT_SELECT_VALUE}>
-                    {t("fontFamily.default")}
-                  </SelectItem>
-                  {codeFontOptions.map((font) => (
-                    <SelectItem key={font.family} value={font.family}>
-                      {font.family}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {fontList.source === "fallback" && !fontListError && (
-            <p className="text-[11px] leading-5 text-muted-foreground">
-              {t("fontFamily.systemFallbackHint")}
-            </p>
-          )}
-          {fontListError && (
-            <p className="text-[11px] text-muted-foreground">
-              {t("fontFamily.loadFailed", { message: fontListError })}
-            </p>
-          )}
-        </section>
-
         {/* ===== Zoom Level ===== */}
         <section className="rounded-xl border bg-card p-4 space-y-4">
           <div className="flex items-center gap-2">
@@ -356,6 +246,9 @@ export function AppearanceSettings() {
             </p>
           </div>
         </section>
+
+        {/* ===== Fonts ===== */}
+        <FontSettingsSection />
 
         <div className="flex justify-end">
           <Button

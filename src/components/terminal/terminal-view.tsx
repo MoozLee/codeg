@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useTranslations } from "next-intl"
 import { subscribe } from "@/lib/platform"
 import {
   terminalSpawn,
@@ -9,15 +8,52 @@ import {
   terminalResize,
   terminalKill,
 } from "@/lib/api"
-import { useCodeFontFamily, useZoomLevel } from "@/hooks/use-appearance"
+import { createWriteQueue } from "@/lib/terminal/write-queue"
+import { useZoomLevel, useTerminalFont } from "@/hooks/use-appearance"
 import { detectPlatform } from "@/hooks/use-platform"
 import type { TerminalEvent } from "@/lib/types"
-import type { ITheme, Terminal as XTermTerminal } from "@xterm/xterm"
+import type {
+  ITerminalAddon,
+  ITheme,
+  Terminal as XTermTerminal,
+} from "@xterm/xterm"
 
-const TERMINAL_BASE_FONT_SIZE = 13
+function computeTerminalFontSize(base: number, zoomLevel: number): number {
+  return Math.round((base * zoomLevel) / 100)
+}
 
-function computeTerminalFontSize(zoomLevel: number): number {
-  return Math.round((TERMINAL_BASE_FONT_SIZE * zoomLevel) / 100)
+type DisposableAddon = ITerminalAddon & { dispose: () => void }
+
+/** 惰性加载 @xterm/addon-ligatures（仅终端连字需要，且对系统字体可能无效）。 */
+async function enableTerminalLigatures(
+  term: XTermTerminal,
+  ref: { current: DisposableAddon | null },
+  isCurrent: () => boolean
+) {
+  if (ref.current) return
+  try {
+    const { LigaturesAddon } = await import("@xterm/addon-ligatures")
+    // 动态 import resolve 后重新校验三件事，否则会有竞态：
+    // 1) isCurrent()：终端仍是当前实例且连字仍需开启（覆盖「import 期间被销毁/重建」
+    //    以及「import 期间用户又关掉连字」两种情况）；
+    // 2) ref.current 仍为空：覆盖「并发两次 enable 都通过了 await 前检查」——
+    //    校验到赋值之间无 await，先到者占位后，后到者在此返回，避免重复挂载。
+    if (!isCurrent() || ref.current) return
+    const addon = new LigaturesAddon() as unknown as DisposableAddon
+    term.loadAddon(addon)
+    ref.current = addon
+  } catch {
+    // 加载失败时静默降级
+  }
+}
+
+function disableTerminalLigatures(ref: { current: DisposableAddon | null }) {
+  try {
+    ref.current?.dispose()
+  } catch {
+    // ignore
+  }
+  ref.current = null
 }
 
 const DARK_THEME: ITheme = {
@@ -98,29 +134,6 @@ function getTerminalTheme(container: HTMLDivElement | null): ITheme {
   }
 }
 
-function refitTerminalAfterMetricsChange({
-  container,
-  fit,
-  refresh,
-}: {
-  container: HTMLDivElement | null
-  fit: (() => void) | undefined
-  refresh?: () => void
-}) {
-  requestAnimationFrame(() => {
-    refresh?.()
-    requestAnimationFrame(() => {
-      if (
-        container &&
-        container.clientWidth > 0 &&
-        container.clientHeight > 0
-      ) {
-        fit?.()
-      }
-    })
-  })
-}
-
 interface TerminalViewProps {
   terminalId: string
   workingDir: string
@@ -140,35 +153,31 @@ export function TerminalView({
   isVisible,
   onProcessExited,
 }: TerminalViewProps) {
-  const t = useTranslations("Folder.terminal")
   const containerRef = useRef<HTMLDivElement>(null)
   const fitAddonRef = useRef<{ fit: () => void } | null>(null)
   const termRef = useRef<XTermTerminal | null>(null)
   const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null)
+  const isActiveRef = useRef(isActive)
   const isVisibleRef = useRef(isVisible)
   const onProcessExitedRef = useRef(onProcessExited)
-  const processExitedLabelRef = useRef(t("processExited"))
-  const startFailedLabelRef = useRef(
-    t("startFailed", { message: "__MESSAGE__" })
-  )
   const { zoomLevel } = useZoomLevel()
-  const { codeFontFamilyStack } = useCodeFontFamily()
+  const { terminalFontStack, terminalFontSize, terminalLigatures } =
+    useTerminalFont()
   const zoomLevelRef = useRef(zoomLevel)
-  const codeFontFamilyStackRef = useRef(codeFontFamilyStack)
+  const terminalFontRef = useRef(terminalFontStack)
+  const terminalSizeRef = useRef(terminalFontSize)
+  const terminalLigaturesRef = useRef(terminalLigatures)
+  const ligaturesAddonRef = useRef<DisposableAddon | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    isActiveRef.current = isActive
     isVisibleRef.current = isVisible
-  }, [isVisible])
+  }, [isActive, isVisible])
 
   useEffect(() => {
     onProcessExitedRef.current = onProcessExited
   }, [onProcessExited])
-
-  useEffect(() => {
-    processExitedLabelRef.current = t("processExited")
-    startFailedLabelRef.current = t("startFailed", { message: "__MESSAGE__" })
-  }, [t])
 
   useEffect(() => {
     let cancelled = false
@@ -186,8 +195,11 @@ export function TerminalView({
 
       const term = new Terminal({
         cursorBlink: true,
-        fontSize: computeTerminalFontSize(zoomLevelRef.current),
-        fontFamily: codeFontFamilyStackRef.current,
+        fontSize: computeTerminalFontSize(
+          terminalSizeRef.current,
+          zoomLevelRef.current
+        ),
+        fontFamily: terminalFontRef.current,
         theme: getTerminalTheme(containerRef.current),
         allowProposedApi: true,
       })
@@ -199,15 +211,41 @@ export function TerminalView({
       fitAddonRef.current = fitAddon
       termRef.current = term
 
+      if (terminalLigaturesRef.current) {
+        enableTerminalLigatures(
+          term,
+          ligaturesAddonRef,
+          () => termRef.current === term && terminalLigaturesRef.current
+        )
+      }
+
+      // Ordered single-flight pump for terminal input. Both onData (typed
+      // bytes) and the custom-key escape sequences below feed this one queue,
+      // so input reaches the PTY in exact type order regardless of transport
+      // reordering, and fast bursts coalesce into fewer round-trips. A failed
+      // send is dropped, not retried — re-sending an ambiguous write could
+      // duplicate already-delivered bytes, worse than a drop in a shell. See
+      // lib/terminal/write-queue.ts.
+      const writeQueue = createWriteQueue((d) => terminalWrite(terminalId, d))
+
+      // Shell line-editing shortcuts. Sends readline/zle bindings so they
+      // work regardless of terminfo.
+      //   Alt/Option + ←/→ / Backspace: word-level moves & delete
+      //   macOS Cmd + ←/→ / Backspace : line-level moves & clear
+      // Uses `e.code` (physical key) to be robust against dead-key layouts on
+      // macOS where Option can turn some keys into `key: "Dead"`.
+      // AltGr on Windows/Linux is reported as ctrlKey+altKey and is excluded
+      // by the `!ctrlKey` guard below.
       const isMac = detectPlatform() === "macos"
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== "keydown") return true
+        // Skip during IME composition to avoid corrupting candidate buffer.
         if (e.isComposing) return true
 
         const { code, altKey, metaKey, ctrlKey, shiftKey } = e
 
         const writeSeq = (seq: string) => {
-          terminalWrite(terminalId, seq).catch(() => {})
+          writeQueue.enqueue(seq)
           e.preventDefault()
           return false
         }
@@ -227,6 +265,7 @@ export function TerminalView({
         return true
       })
 
+      // Watch <html> class changes for theme switching
       const themeObserver = new MutationObserver(() => {
         term.options.theme = getTerminalTheme(containerRef.current)
       })
@@ -235,11 +274,15 @@ export function TerminalView({
         attributeFilter: ["class"],
       })
 
+      // Send input to PTY
       const onDataDisposable = term.onData((data: string) => {
+        // Some apps toggle focus reporting; don't leak focus in/out sequences
+        // into the shell prompt when tabs are switched.
         if (data === "\x1b[I" || data === "\x1b[O") return
-        terminalWrite(terminalId, data).catch(() => {})
+        writeQueue.enqueue(data)
       })
 
+      // Debounced resize — avoid flooding IPC during drag
       let resizeTimer: ReturnType<typeof setTimeout> | null = null
       const onResizeDisposable = term.onResize(
         ({ cols, rows }: { cols: number; rows: number }) => {
@@ -253,6 +296,7 @@ export function TerminalView({
         }
       )
 
+      // Subscribe to events BEFORE spawning so no initial output is lost
       const unlisten = await subscribe<TerminalEvent>(
         `terminal://output/${terminalId}`,
         (payload) => {
@@ -263,14 +307,16 @@ export function TerminalView({
       const unlistenExit = await subscribe<TerminalEvent>(
         `terminal://exit/${terminalId}`,
         () => {
+          // PTY is gone — stop the input pump (the reliable terminal-gone
+          // signal; the queue's error-string match is only a fast-path).
+          writeQueue.dispose()
           onProcessExitedRef.current?.(terminalId)
-          term.write(
-            `\r\n\x1b[90m[${processExitedLabelRef.current}]\x1b[0m\r\n`
-          )
+          term.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n")
         }
       )
 
       if (cancelled) {
+        writeQueue.dispose()
         themeObserver.disconnect()
         onDataDisposable.dispose()
         onResizeDisposable.dispose()
@@ -280,18 +326,19 @@ export function TerminalView({
         return
       }
 
+      // Spawn the terminal AFTER subscribing to events
       try {
         await terminalSpawn(workingDir, shell, initialCommand, terminalId)
       } catch (err) {
         onProcessExitedRef.current?.(terminalId)
-        term.write(
-          `\r\n\x1b[31m[${startFailedLabelRef.current.replace("__MESSAGE__", String(err))}]\x1b[0m\r\n`
-        )
+        term.write(`\r\n\x1b[31m[Failed to start terminal: ${err}]\x1b[0m\r\n`)
       } finally {
         if (!cancelled) setLoading(false)
       }
 
+      // If unmounted while spawn was in flight, clean up the spawned PTY
       if (cancelled) {
+        writeQueue.dispose()
         terminalKill(terminalId).catch(() => {})
         themeObserver.disconnect()
         onDataDisposable.dispose()
@@ -305,15 +352,17 @@ export function TerminalView({
       const fitIfReady = () => {
         const el = containerRef.current
         if (!el) return
-        if (!isVisibleRef.current) return
+        if (!isActiveRef.current || !isVisibleRef.current) return
         if (el.clientWidth <= 0 || el.clientHeight <= 0) return
         fitAddon.fit()
       }
 
+      // Only fit when terminal is actually visible/active.
       requestAnimationFrame(() => {
         if (!cancelled) fitIfReady()
       })
 
+      // Debounced fit on container resize while active
       let fitTimer: ReturnType<typeof setTimeout> | null = null
       const resizeObserver = new ResizeObserver(() => {
         if (fitTimer) clearTimeout(fitTimer)
@@ -324,6 +373,7 @@ export function TerminalView({
       resizeObserver.observe(containerRef.current)
 
       cleanup = () => {
+        writeQueue.dispose()
         if (resizeTimer) clearTimeout(resizeTimer)
         if (fitTimer) clearTimeout(fitTimer)
         themeObserver.disconnect()
@@ -335,6 +385,7 @@ export function TerminalView({
         term.dispose()
         fitAddonRef.current = null
         termRef.current = null
+        ligaturesAddonRef.current = null
         lastResizeRef.current = null
       }
     }
@@ -347,56 +398,69 @@ export function TerminalView({
     }
   }, [terminalId, workingDir, shell, initialCommand])
 
+  // Refit and focus when becoming active or panel becomes visible
   useEffect(() => {
-    if (!isVisible) return
-    requestAnimationFrame(() => {
-      const el = containerRef.current
-      if (el && el.clientWidth > 0 && el.clientHeight > 0) {
-        fitAddonRef.current?.fit()
-      }
-      if (isActive) {
+    if (isActive && isVisible) {
+      requestAnimationFrame(() => {
+        const el = containerRef.current
+        if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+          fitAddonRef.current?.fit()
+        }
         termRef.current?.focus()
-      }
-    })
+      })
+    }
   }, [isActive, isVisible])
 
+  // React to zoom / font-family / font-size changes. Updates refs synchronously so
+  // async init() always reads the latest values, and pushes them to already-mounted
+  // terminals. Double rAF ensures xterm's renderer has recomputed cell metrics
+  // before we refit.
   useEffect(() => {
     zoomLevelRef.current = zoomLevel
+    terminalFontRef.current = terminalFontStack
+    terminalSizeRef.current = terminalFontSize
     const term = termRef.current
     if (!term) return
-    term.options.fontSize = computeTerminalFontSize(zoomLevel)
-    refitTerminalAfterMetricsChange({
-      container: containerRef.current,
-      fit: () => fitAddonRef.current?.fit(),
-      refresh: () => term.refresh(0, Math.max(term.rows - 1, 0)),
+    term.options.fontFamily = terminalFontStack
+    term.options.fontSize = computeTerminalFontSize(terminalFontSize, zoomLevel)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = containerRef.current
+        if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+          fitAddonRef.current?.fit()
+        }
+      })
     })
-  }, [zoomLevel])
+  }, [zoomLevel, terminalFontStack, terminalFontSize])
 
-  // React to code font changes. xterm needs its font option updated explicitly;
-  // CSS variables alone do not update mounted canvas/DOM renderer metrics.
+  // React to the ligature toggle. Lazily loads @xterm/addon-ligatures on enable,
+  // disposes it on disable.
   useEffect(() => {
-    codeFontFamilyStackRef.current = codeFontFamilyStack
+    terminalLigaturesRef.current = terminalLigatures
     const term = termRef.current
     if (!term) return
-    term.options.fontFamily = codeFontFamilyStack
-    refitTerminalAfterMetricsChange({
-      container: containerRef.current,
-      fit: () => fitAddonRef.current?.fit(),
-      refresh: () => term.refresh(0, Math.max(term.rows - 1, 0)),
-    })
-  }, [codeFontFamilyStack])
+    if (terminalLigatures) {
+      enableTerminalLigatures(
+        term,
+        ligaturesAddonRef,
+        () => termRef.current === term && terminalLigaturesRef.current
+      )
+    } else {
+      disableTerminalLigatures(ligaturesAddonRef)
+    }
+  }, [terminalLigatures])
 
   return (
     <div
       className="absolute inset-0 h-full w-full p-2"
       style={{
-        visibility: isVisible ? "visible" : "hidden",
-        pointerEvents: isVisible && isActive ? "auto" : "none",
+        visibility: isActive ? "visible" : "hidden",
+        pointerEvents: isActive ? "auto" : "none",
       }}
-      aria-hidden={!isVisible}
+      aria-hidden={!isActive}
     >
       <div ref={containerRef} className="h-full w-full" />
-      {loading && isVisible && (
+      {loading && isActive && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <svg
@@ -418,7 +482,7 @@ export function TerminalView({
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
               />
             </svg>
-            <span>{t("startingTerminal")}</span>
+            <span>Starting terminal...</span>
           </div>
         </div>
       )}

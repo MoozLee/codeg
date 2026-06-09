@@ -2,6 +2,7 @@
 
 import { useContext } from "react"
 import { AppearanceContext } from "@/components/appearance-provider"
+import { resolveFontStack } from "@/lib/font-presets"
 
 export function useAppearance() {
   const ctx = useContext(AppearanceContext)
@@ -23,20 +24,82 @@ export function useZoomLevel() {
   return { zoomLevel, setZoomLevel }
 }
 
-/** 语义化包装：只关心 UI 字体的调用点用这个 */
+/** 界面字体（普通组件）。stack 已解析，可直接用于 style 或 CSS 变量。 */
+export function useUiFont() {
+  const { uiFont, setUiFont } = useAppearance()
+  return {
+    uiFont,
+    setUiFont,
+    uiFontStack: resolveFontStack(uiFont.id, uiFont.custom, "sans"),
+  }
+}
+
+/** 编辑器字体（Monaco）：含字号与连字。stack 已解析。 */
+export function useEditorFont() {
+  const {
+    editorFont,
+    setEditorFont,
+    editorFontSize,
+    setEditorFontSize,
+    editorLigatures,
+    setEditorLigatures,
+  } = useAppearance()
+  return {
+    editorFont,
+    setEditorFont,
+    editorFontStack: resolveFontStack(editorFont.id, editorFont.custom, "mono"),
+    editorFontSize,
+    setEditorFontSize,
+    editorLigatures,
+    setEditorLigatures,
+  }
+}
+
+/** 终端字体（xterm）：含字号与连字。stack 已解析。 */
+export function useTerminalFont() {
+  const {
+    terminalFont,
+    setTerminalFont,
+    terminalFontSize,
+    setTerminalFontSize,
+    terminalLigatures,
+    setTerminalLigatures,
+  } = useAppearance()
+  return {
+    terminalFont,
+    setTerminalFont,
+    terminalFontStack: resolveFontStack(
+      terminalFont.id,
+      terminalFont.custom,
+      "mono"
+    ),
+    terminalFontSize,
+    setTerminalFontSize,
+    terminalLigatures,
+    setTerminalLigatures,
+  }
+}
+
 export function useUiFontFamily() {
-  const { uiFontFamily, setUiFontFamily, uiFontFamilyStack } = useAppearance()
-  return { uiFontFamily, setUiFontFamily, uiFontFamilyStack }
+  const { uiFont, setUiFont, uiFontStack } = useUiFont()
+  return {
+    uiFontFamily: uiFont.custom || uiFont.id,
+    setUiFontFamily: (fontFamily: string | null) =>
+      fontFamily ? setUiFont("custom", fontFamily) : setUiFont("jetbrains-mono"),
+    uiFontFamilyStack: uiFontStack,
+  }
 }
 
-/** 语义化包装：只关心代码字体的调用点用这个 */
 export function useCodeFontFamily() {
-  const { codeFontFamily, setCodeFontFamily, codeFontFamilyStack } =
-    useAppearance()
-  return { codeFontFamily, setCodeFontFamily, codeFontFamilyStack }
+  const { editorFont, setEditorFont, editorFontStack } = useEditorFont()
+  return {
+    codeFontFamily: editorFont.custom || editorFont.id,
+    setCodeFontFamily: (fontFamily: string | null) =>
+      fontFamily ? setEditorFont("custom", fontFamily) : setEditorFont("system-mono"),
+    codeFontFamilyStack: editorFontStack,
+  }
 }
 
-/** 字体设置页使用：共享 Provider 已加载的字体列表状态 */
 export function useAppearanceFontList() {
   const { fontList, fontListLoaded, fontListError } = useAppearance()
   return { fontList, fontListLoaded, fontListError }

@@ -1,13 +1,6 @@
 "use client"
 
-import {
-  createContext,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { createContext, useCallback, useEffect, useRef, useState } from "react"
 import {
   getSystemFontSettings,
   listSystemFontFamilies,
@@ -17,28 +10,46 @@ import { toErrorMessage } from "@/lib/app-error"
 import {
   THEME_COLORS,
   DEFAULT_THEME_COLOR,
-  DEFAULT_CODE_FONT_FAMILY,
-  DEFAULT_UI_FONT_FAMILY,
   DEFAULT_ZOOM_LEVEL,
   FALLBACK_SYSTEM_FONT_FAMILY_LIST,
   ZOOM_LEVELS,
-  buildCodeFontFamilyStack,
-  buildUiFontFamilyStack,
-  isKnownCodeFontFamily,
-  isKnownFontFamily,
   normalizeFontFamilyPreference,
   normalizeSystemFontFamilyList,
-  type FontFamilyPreference,
   type ThemeColor,
   type ZoomLevel,
 } from "@/lib/theme-presets"
+import {
+  CUSTOM_FONT_ID,
+  resolveFontStack,
+  isValidFontId,
+  isValidFontSize,
+  systemFontFamilyFromId,
+  DEFAULT_UI_FONT_ID,
+  DEFAULT_EDITOR_FONT_ID,
+  DEFAULT_TERMINAL_FONT_ID,
+  DEFAULT_EDITOR_FONT_SIZE,
+  DEFAULT_TERMINAL_FONT_SIZE,
+  type FontSize,
+} from "@/lib/font-presets"
 import {
   STORAGE_KEY_CODE_FONT_FAMILY,
   STORAGE_KEY_THEME_COLOR,
   STORAGE_KEY_UI_FONT_FAMILY,
   STORAGE_KEY_ZOOM_LEVEL,
+  STORAGE_KEY_UI_FONT,
+  STORAGE_KEY_UI_FONT_CUSTOM,
+  STORAGE_KEY_UI_FONT_STACK,
+  STORAGE_KEY_EDITOR_FONT,
+  STORAGE_KEY_EDITOR_FONT_CUSTOM,
+  STORAGE_KEY_EDITOR_FONT_STACK,
+  STORAGE_KEY_EDITOR_FONT_SIZE,
+  STORAGE_KEY_EDITOR_LIGATURES,
+  STORAGE_KEY_TERMINAL_FONT,
+  STORAGE_KEY_TERMINAL_FONT_CUSTOM,
+  STORAGE_KEY_TERMINAL_FONT_SIZE,
+  STORAGE_KEY_TERMINAL_LIGATURES,
 } from "@/lib/appearance-script"
-import type { SystemFontFamilyList, SystemFontSettings } from "@/lib/types"
+import type { SystemFontFamilyList } from "@/lib/types"
 
 const FONT_PERSIST_DELAY_MS = 200
 
@@ -62,133 +73,27 @@ function syncAppearanceMode(mode: string) {
   )
 }
 
-function applyUiFontFamily(fontFamily: FontFamilyPreference) {
-  const normalized = normalizeFontFamilyPreference(fontFamily)
-  const root = document.documentElement
-  root.style.setProperty(
-    "--codeg-ui-font-family",
-    buildUiFontFamilyStack(normalized)
-  )
-
-  if (normalized) {
-    root.dataset.uiFontFamily = normalized
-  } else {
-    root.removeAttribute("data-ui-font-family")
-  }
-}
-
-function applyCodeFontFamily(fontFamily: FontFamilyPreference) {
-  const normalized = normalizeFontFamilyPreference(fontFamily)
-  const root = document.documentElement
-  root.style.setProperty(
-    "--codeg-code-font-family",
-    buildCodeFontFamilyStack(normalized)
-  )
-
-  if (normalized) {
-    root.dataset.codeFontFamily = normalized
-  } else {
-    root.removeAttribute("data-code-font-family")
-  }
-}
-
-function readFontFamilyFromDataset(
-  key: "uiFontFamily" | "codeFontFamily"
-): FontFamilyPreference {
-  if (typeof document === "undefined") return null
-  return normalizeFontFamilyPreference(document.documentElement.dataset[key])
-}
-
-function writeFontFamilyToStorage(
-  key: string,
-  fontFamily: FontFamilyPreference
-) {
-  if (typeof window === "undefined") return
-
-  const normalized = normalizeFontFamilyPreference(fontFamily)
-  try {
-    if (normalized) {
-      localStorage.setItem(key, normalized)
-    } else {
-      localStorage.removeItem(key)
-    }
-  } catch {
-    // Keep the in-session value when localStorage is unavailable.
-  }
-}
-
-function readFontFamilyStorageState(key: string): {
-  hasStoredValue: boolean
-  fontFamily: FontFamilyPreference
-} {
-  if (typeof window === "undefined") {
-    return { hasStoredValue: false, fontFamily: null }
-  }
-
-  try {
-    const raw = localStorage.getItem(key)
-    return {
-      hasStoredValue: raw !== null,
-      fontFamily: normalizeFontFamilyPreference(raw),
-    }
-  } catch {
-    return { hasStoredValue: false, fontFamily: null }
-  }
-}
-
-function normalizeSystemFontSettings(settings: SystemFontSettings): {
-  uiFontFamily: FontFamilyPreference
-  codeFontFamily: FontFamilyPreference
-} {
-  return {
-    uiFontFamily: normalizeFontFamilyPreference(settings.ui_font_family),
-    codeFontFamily: normalizeFontFamilyPreference(settings.code_font_family),
-  }
-}
-
-function resolveUiFontFamily(
-  fontFamily: FontFamilyPreference,
-  fontList: SystemFontFamilyList
-): FontFamilyPreference {
-  const normalized = normalizeFontFamilyPreference(fontFamily)
-  if (!normalized) {
-    return DEFAULT_UI_FONT_FAMILY
-  }
-  if (fontList.source === "fallback") {
-    return normalized
-  }
-  return isKnownFontFamily(normalized, fontList.families)
-    ? normalized
-    : DEFAULT_UI_FONT_FAMILY
-}
-
-function resolveCodeFontFamily(
-  fontFamily: FontFamilyPreference,
-  fontList: SystemFontFamilyList
-): FontFamilyPreference {
-  const normalized = normalizeFontFamilyPreference(fontFamily)
-  if (!normalized) {
-    return DEFAULT_CODE_FONT_FAMILY
-  }
-  if (fontList.source === "fallback") {
-    return normalized
-  }
-  return isKnownCodeFontFamily(normalized, fontList.families)
-    ? normalized
-    : DEFAULT_CODE_FONT_FAMILY
-}
+export type FontSelection = { id: string; custom: string }
 
 type AppearanceContextValue = {
   themeColor: ThemeColor
   setThemeColor: (color: ThemeColor) => void
   zoomLevel: ZoomLevel
   setZoomLevel: (zoom: ZoomLevel) => void
-  uiFontFamily: FontFamilyPreference
-  setUiFontFamily: (fontFamily: FontFamilyPreference) => void
-  codeFontFamily: FontFamilyPreference
-  setCodeFontFamily: (fontFamily: FontFamilyPreference) => void
-  uiFontFamilyStack: string
-  codeFontFamilyStack: string
+  uiFont: FontSelection
+  setUiFont: (id: string, custom?: string) => void
+  editorFont: FontSelection
+  setEditorFont: (id: string, custom?: string) => void
+  terminalFont: FontSelection
+  setTerminalFont: (id: string, custom?: string) => void
+  editorFontSize: FontSize
+  setEditorFontSize: (size: FontSize) => void
+  terminalFontSize: FontSize
+  setTerminalFontSize: (size: FontSize) => void
+  editorLigatures: boolean
+  setEditorLigatures: (on: boolean) => void
+  terminalLigatures: boolean
+  setTerminalLigatures: (on: boolean) => void
   fontList: SystemFontFamilyList
   fontListLoaded: boolean
   fontListError: string | null
@@ -198,11 +103,89 @@ export const AppearanceContext = createContext<AppearanceContextValue | null>(
   null
 )
 
+function persist(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // 隐私模式 / 禁用 storage 时静默忽略，本次会话内仍然生效
+  }
+}
+
+function removeStored(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // 隐私模式 / 禁用 storage 时静默忽略，本次会话内仍然生效
+  }
+}
+
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeLegacyFontFamily(key: string, value: string | null) {
+  if (value) {
+    persist(key, value)
+  } else {
+    removeStored(key)
+  }
+}
+
+function legacyFontFamilyFromSelection({
+  id,
+  custom,
+}: FontSelection): string | null {
+  if (id === CUSTOM_FONT_ID) {
+    return normalizeFontFamilyPreference(custom)
+  }
+  return systemFontFamilyFromId(id)
+}
+
+function readFontSelection(
+  idKey: string,
+  customKey: string,
+  def: string
+): FontSelection {
+  if (typeof document === "undefined") return { id: def, custom: "" }
+  try {
+    const id = localStorage.getItem(idKey)
+    const custom = localStorage.getItem(customKey) ?? ""
+    return { id: isValidFontId(id) ? (id as string) : def, custom }
+  } catch {
+    return { id: def, custom: "" }
+  }
+}
+
+function readFontSize(key: string, def: FontSize): FontSize {
+  if (typeof document === "undefined") return def
+  try {
+    const n = parseInt(localStorage.getItem(key) ?? "", 10)
+    return isValidFontSize(n) ? n : def
+  } catch {
+    return def
+  }
+}
+
+function readBool(key: string, def: boolean): boolean {
+  if (typeof document === "undefined") return def
+  try {
+    const v = localStorage.getItem(key)
+    return v === null ? def : v === "1"
+  } catch {
+    return def
+  }
+}
+
 /**
- * AppearanceProvider 管理 themeColor、zoomLevel、UI 字体和代码字体。
+ * AppearanceProvider 管理 themeColor、zoomLevel 与字体偏好。
  *
  * 与 next-themes 完全正交：next-themes 负责 <html class="dark/light">，
- * 这里负责 <html data-theme="...">、<html style="font-size: ..."> 和字体 CSS 变量。
+ * 这里负责 <html data-theme="...">、<html style="font-size: ...">
+ * 以及 --font-sans / --font-mono 两个字体变量。
  */
 export function AppearanceProvider({
   children,
@@ -211,11 +194,9 @@ export function AppearanceProvider({
 }) {
   const [themeColor, setThemeColorState] = useState<ThemeColor>(() => {
     if (typeof document === "undefined") return DEFAULT_THEME_COLOR
-
     const attr = document.documentElement.getAttribute(
       "data-theme"
     ) as ThemeColor | null
-
     return attr && (THEME_COLORS as readonly string[]).includes(attr)
       ? attr
       : DEFAULT_THEME_COLOR
@@ -223,22 +204,46 @@ export function AppearanceProvider({
 
   const [zoomLevel, setZoomLevelState] = useState<ZoomLevel>(() => {
     if (typeof document === "undefined") return DEFAULT_ZOOM_LEVEL
-
     const px = parseFloat(document.documentElement.style.fontSize || "16")
     const level = Math.round((px / 16) * 100) as ZoomLevel
-
     return (ZOOM_LEVELS as readonly number[]).includes(level)
       ? level
       : DEFAULT_ZOOM_LEVEL
   })
 
-  const [uiFontFamily, setUiFontFamilyState] = useState<FontFamilyPreference>(
-    () => readFontFamilyFromDataset("uiFontFamily")
-  )
-  const [codeFontFamily, setCodeFontFamilyState] =
-    useState<FontFamilyPreference>(() =>
-      readFontFamilyFromDataset("codeFontFamily")
+  const [uiFont, setUiFontState] = useState<FontSelection>(() =>
+    readFontSelection(
+      STORAGE_KEY_UI_FONT,
+      STORAGE_KEY_UI_FONT_CUSTOM,
+      DEFAULT_UI_FONT_ID
     )
+  )
+  const [editorFont, setEditorFontState] = useState<FontSelection>(() =>
+    readFontSelection(
+      STORAGE_KEY_EDITOR_FONT,
+      STORAGE_KEY_EDITOR_FONT_CUSTOM,
+      DEFAULT_EDITOR_FONT_ID
+    )
+  )
+  const [terminalFont, setTerminalFontState] = useState<FontSelection>(() =>
+    readFontSelection(
+      STORAGE_KEY_TERMINAL_FONT,
+      STORAGE_KEY_TERMINAL_FONT_CUSTOM,
+      DEFAULT_TERMINAL_FONT_ID
+    )
+  )
+  const [editorFontSize, setEditorFontSizeState] = useState<FontSize>(() =>
+    readFontSize(STORAGE_KEY_EDITOR_FONT_SIZE, DEFAULT_EDITOR_FONT_SIZE)
+  )
+  const [terminalFontSize, setTerminalFontSizeState] = useState<FontSize>(() =>
+    readFontSize(STORAGE_KEY_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE)
+  )
+  const [editorLigatures, setEditorLigaturesState] = useState<boolean>(() =>
+    readBool(STORAGE_KEY_EDITOR_LIGATURES, false)
+  )
+  const [terminalLigatures, setTerminalLigaturesState] = useState<boolean>(() =>
+    readBool(STORAGE_KEY_TERMINAL_LIGATURES, false)
+  )
   const [fontList, setFontList] = useState<SystemFontFamilyList>(() =>
     normalizeSystemFontFamilyList(FALLBACK_SYSTEM_FONT_FAMILY_LIST)
   )
@@ -246,202 +251,163 @@ export function AppearanceProvider({
   const [fontListError, setFontListError] = useState<string | null>(null)
 
   const persistTimerRef = useRef<number | null>(null)
-  const fontSettingsRef = useRef({
-    uiFontFamily: normalizeFontFamilyPreference(uiFontFamily),
-    codeFontFamily: normalizeFontFamilyPreference(codeFontFamily),
+  const legacyFontSettingsRef = useRef({
+    uiFontFamily: legacyFontFamilyFromSelection(uiFont),
+    codeFontFamily: legacyFontFamilyFromSelection(editorFont),
   })
-
-  const applyFontSettings = useCallback(
-    (settings: {
-      uiFontFamily: FontFamilyPreference
-      codeFontFamily: FontFamilyPreference
-      writeStorage: boolean
-    }) => {
-      const normalizedUiFont = normalizeFontFamilyPreference(
-        settings.uiFontFamily
-      )
-      const normalizedCodeFont = normalizeFontFamilyPreference(
-        settings.codeFontFamily
-      )
-
-      fontSettingsRef.current = {
-        uiFontFamily: normalizedUiFont,
-        codeFontFamily: normalizedCodeFont,
-      }
-
-      setUiFontFamilyState(normalizedUiFont)
-      setCodeFontFamilyState(normalizedCodeFont)
-      applyUiFontFamily(normalizedUiFont)
-      applyCodeFontFamily(normalizedCodeFont)
-
-      if (settings.writeStorage) {
-        writeFontFamilyToStorage(STORAGE_KEY_UI_FONT_FAMILY, normalizedUiFont)
-        writeFontFamilyToStorage(
-          STORAGE_KEY_CODE_FONT_FAMILY,
-          normalizedCodeFont
-        )
-      }
-    },
-    []
-  )
 
   const schedulePersistFontSettings = useCallback(() => {
     if (typeof window === "undefined") return
-
     if (persistTimerRef.current !== null) {
       window.clearTimeout(persistTimerRef.current)
     }
 
     persistTimerRef.current = window.setTimeout(() => {
       persistTimerRef.current = null
-      const settings = fontSettingsRef.current
       updateSystemFontSettings({
-        ui_font_family: settings.uiFontFamily,
-        code_font_family: settings.codeFontFamily,
-      }).catch(() => {
-        // Keep localStorage/current session values when backend persistence fails.
-      })
+        ui_font_family: legacyFontSettingsRef.current.uiFontFamily,
+        code_font_family: legacyFontSettingsRef.current.codeFontFamily,
+      }).catch(() => {})
     }, FONT_PERSIST_DELAY_MS)
   }, [])
 
   const setThemeColor = useCallback((color: ThemeColor) => {
     setThemeColorState(color)
     document.documentElement.setAttribute("data-theme", color)
-
-    try {
-      localStorage.setItem(STORAGE_KEY_THEME_COLOR, color)
-    } catch {
-      // Keep the in-session value when localStorage is unavailable.
-    }
+    persist(STORAGE_KEY_THEME_COLOR, color)
   }, [])
 
   const setZoomLevel = useCallback((zoom: ZoomLevel) => {
     setZoomLevelState(zoom)
     document.documentElement.style.fontSize = `${(16 * zoom) / 100}px`
     syncTrafficLightPosition(zoom)
-
-    try {
-      localStorage.setItem(STORAGE_KEY_ZOOM_LEVEL, String(zoom))
-    } catch {
-      // Keep the in-session value when localStorage is unavailable.
-    }
+    persist(STORAGE_KEY_ZOOM_LEVEL, String(zoom))
   }, [])
 
-  const setUiFontFamily = useCallback(
-    (fontFamily: FontFamilyPreference) => {
-      applyFontSettings({
-        uiFontFamily: fontFamily,
-        codeFontFamily: fontSettingsRef.current.codeFontFamily,
-        writeStorage: true,
-      })
+  const setUiFont = useCallback(
+    (id: string, custom = "") => {
+      setUiFontState({ id, custom })
+      const stack = resolveFontStack(id, custom, "sans")
+      const legacyFontFamily = legacyFontFamilyFromSelection({ id, custom })
+      document.documentElement.style.setProperty("--font-sans", stack)
+      persist(STORAGE_KEY_UI_FONT, id)
+      persist(STORAGE_KEY_UI_FONT_CUSTOM, custom)
+      persist(STORAGE_KEY_UI_FONT_STACK, stack)
+      writeLegacyFontFamily(STORAGE_KEY_UI_FONT_FAMILY, legacyFontFamily)
+      legacyFontSettingsRef.current = {
+        ...legacyFontSettingsRef.current,
+        uiFontFamily: legacyFontFamily,
+      }
       schedulePersistFontSettings()
     },
-    [applyFontSettings, schedulePersistFontSettings]
+    [schedulePersistFontSettings]
   )
 
-  const setCodeFontFamily = useCallback(
-    (fontFamily: FontFamilyPreference) => {
-      applyFontSettings({
-        uiFontFamily: fontSettingsRef.current.uiFontFamily,
-        codeFontFamily: fontFamily,
-        writeStorage: true,
-      })
+  const setEditorFont = useCallback(
+    (id: string, custom = "") => {
+      setEditorFontState({ id, custom })
+      const stack = resolveFontStack(id, custom, "mono")
+      const legacyFontFamily = legacyFontFamilyFromSelection({ id, custom })
+      document.documentElement.style.setProperty("--font-mono", stack)
+      persist(STORAGE_KEY_EDITOR_FONT, id)
+      persist(STORAGE_KEY_EDITOR_FONT_CUSTOM, custom)
+      persist(STORAGE_KEY_EDITOR_FONT_STACK, stack)
+      writeLegacyFontFamily(STORAGE_KEY_CODE_FONT_FAMILY, legacyFontFamily)
+      legacyFontSettingsRef.current = {
+        ...legacyFontSettingsRef.current,
+        codeFontFamily: legacyFontFamily,
+      }
       schedulePersistFontSettings()
     },
-    [applyFontSettings, schedulePersistFontSettings]
+    [schedulePersistFontSettings]
   )
+
+  const setTerminalFont = useCallback((id: string, custom = "") => {
+    setTerminalFontState({ id, custom })
+    persist(STORAGE_KEY_TERMINAL_FONT, id)
+    persist(STORAGE_KEY_TERMINAL_FONT_CUSTOM, custom)
+  }, [])
+
+  const setEditorFontSize = useCallback((size: FontSize) => {
+    setEditorFontSizeState(size)
+    persist(STORAGE_KEY_EDITOR_FONT_SIZE, String(size))
+  }, [])
+
+  const setTerminalFontSize = useCallback((size: FontSize) => {
+    setTerminalFontSizeState(size)
+    persist(STORAGE_KEY_TERMINAL_FONT_SIZE, String(size))
+  }, [])
+
+  const setEditorLigatures = useCallback((on: boolean) => {
+    setEditorLigaturesState(on)
+    persist(STORAGE_KEY_EDITOR_LIGATURES, on ? "1" : "0")
+  }, [])
+
+  const setTerminalLigatures = useCallback((on: boolean) => {
+    setTerminalLigaturesState(on)
+    persist(STORAGE_KEY_TERMINAL_LIGATURES, on ? "1" : "0")
+  }, [])
 
   useEffect(() => {
     let cancelled = false
 
-    const bootstrapFonts = async () => {
-      const settings = await getSystemFontSettings().catch(
-        (): SystemFontSettings => ({
-          ui_font_family: null,
-          code_font_family: null,
-        })
-      )
-
-      try {
-        const loadedFontList = await listSystemFontFamilies()
+    void listSystemFontFamilies()
+      .then((loadedFontList) => {
         if (cancelled) return
-
-        const normalizedFontList = normalizeSystemFontFamilyList(loadedFontList)
-        setFontList(normalizedFontList)
+        setFontList(normalizeSystemFontFamilyList(loadedFontList))
         setFontListError(null)
-
-        const currentStoredUiFont = readFontFamilyStorageState(
-          STORAGE_KEY_UI_FONT_FAMILY
-        )
-        const currentStoredCodeFont = readFontFamilyStorageState(
-          STORAGE_KEY_CODE_FONT_FAMILY
-        )
-        const persistedSettings = normalizeSystemFontSettings(settings)
-
-        const nextUiFont = currentStoredUiFont.hasStoredValue
-          ? currentStoredUiFont.fontFamily
-          : persistedSettings.uiFontFamily
-        const nextCodeFont = currentStoredCodeFont.hasStoredValue
-          ? currentStoredCodeFont.fontFamily
-          : persistedSettings.codeFontFamily
-
-        applyFontSettings({
-          uiFontFamily: resolveUiFontFamily(nextUiFont, normalizedFontList),
-          codeFontFamily: resolveCodeFontFamily(
-            nextCodeFont,
-            normalizedFontList
-          ),
-          writeStorage: true,
-        })
-      } catch (error) {
+      })
+      .catch((error) => {
         if (cancelled) return
-
-        const fallbackFontList = normalizeSystemFontFamilyList(
-          FALLBACK_SYSTEM_FONT_FAMILY_LIST
-        )
-        setFontList(fallbackFontList)
+        setFontList(normalizeSystemFontFamilyList(FALLBACK_SYSTEM_FONT_FAMILY_LIST))
         setFontListError(toErrorMessage(error))
-
-        const currentStoredUiFont = readFontFamilyStorageState(
-          STORAGE_KEY_UI_FONT_FAMILY
-        )
-        const currentStoredCodeFont = readFontFamilyStorageState(
-          STORAGE_KEY_CODE_FONT_FAMILY
-        )
-        const persistedSettings = normalizeSystemFontSettings(settings)
-        const nextUiFont = currentStoredUiFont.hasStoredValue
-          ? currentStoredUiFont.fontFamily
-          : persistedSettings.uiFontFamily
-        const nextCodeFont = currentStoredCodeFont.hasStoredValue
-          ? currentStoredCodeFont.fontFamily
-          : persistedSettings.codeFontFamily
-
-        applyFontSettings({
-          uiFontFamily: resolveUiFontFamily(nextUiFont, fallbackFontList),
-          codeFontFamily: resolveCodeFontFamily(nextCodeFont, fallbackFontList),
-          writeStorage: true,
-        })
-      } finally {
-        if (!cancelled) {
-          setFontListLoaded(true)
-        }
-      }
-    }
-
-    void bootstrapFonts()
+      })
+      .finally(() => {
+        if (!cancelled) setFontListLoaded(true)
+      })
 
     return () => {
       cancelled = true
-      if (persistTimerRef.current !== null) {
-        window.clearTimeout(persistTimerRef.current)
-        persistTimerRef.current = null
-      }
     }
-  }, [applyFontSettings])
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    void (async () => {
+      const hasNewUiFont = readStored(STORAGE_KEY_UI_FONT) !== null
+      const hasNewEditorFont = readStored(STORAGE_KEY_EDITOR_FONT) !== null
+      const hasNewTerminalFont = readStored(STORAGE_KEY_TERMINAL_FONT) !== null
+      if (hasNewUiFont && hasNewEditorFont && hasNewTerminalFont) return
+
+      const settings = await getSystemFontSettings().catch(() => null)
+      if (cancelled) return
+
+      const legacyUiFont = normalizeFontFamilyPreference(
+        readStored(STORAGE_KEY_UI_FONT_FAMILY) ?? settings?.ui_font_family
+      )
+      const legacyCodeFont = normalizeFontFamilyPreference(
+        readStored(STORAGE_KEY_CODE_FONT_FAMILY) ?? settings?.code_font_family
+      )
+
+      if (!hasNewUiFont && legacyUiFont) {
+        setUiFont(CUSTOM_FONT_ID, legacyUiFont)
+      }
+      if (!hasNewEditorFont && legacyCodeFont) {
+        setEditorFont(CUSTOM_FONT_ID, legacyCodeFont)
+      }
+      if (!hasNewTerminalFont && legacyCodeFont) {
+        setTerminalFont(CUSTOM_FONT_ID, legacyCodeFont)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [setEditorFont, setTerminalFont, setUiFont])
 
   useEffect(() => {
     syncTrafficLightPosition(zoomLevel)
-
     try {
       syncAppearanceMode(localStorage.getItem("theme") ?? "system")
     } catch {
@@ -451,17 +417,87 @@ export function AppearanceProvider({
   }, [])
 
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY_THEME_COLOR && e.newValue) {
-        const color = e.newValue as ThemeColor
+    const root = document.documentElement
+    const sans = resolveFontStack(uiFont.id, uiFont.custom, "sans")
+    if (readStored(STORAGE_KEY_UI_FONT_STACK) !== sans) {
+      root.style.setProperty("--font-sans", sans)
+      persist(STORAGE_KEY_UI_FONT_STACK, sans)
+    }
+    const mono = resolveFontStack(editorFont.id, editorFont.custom, "mono")
+    if (readStored(STORAGE_KEY_EDITOR_FONT_STACK) !== mono) {
+      root.style.setProperty("--font-mono", mono)
+      persist(STORAGE_KEY_EDITOR_FONT_STACK, mono)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const FONT_KEYS = new Set<string>([
+      STORAGE_KEY_UI_FONT,
+      STORAGE_KEY_UI_FONT_CUSTOM,
+      STORAGE_KEY_UI_FONT_STACK,
+      STORAGE_KEY_EDITOR_FONT,
+      STORAGE_KEY_EDITOR_FONT_CUSTOM,
+      STORAGE_KEY_EDITOR_FONT_STACK,
+      STORAGE_KEY_EDITOR_FONT_SIZE,
+      STORAGE_KEY_EDITOR_LIGATURES,
+      STORAGE_KEY_TERMINAL_FONT,
+      STORAGE_KEY_TERMINAL_FONT_CUSTOM,
+      STORAGE_KEY_TERMINAL_FONT_SIZE,
+      STORAGE_KEY_TERMINAL_LIGATURES,
+    ])
+    const rehydrateFonts = () => {
+      const ui = readFontSelection(
+        STORAGE_KEY_UI_FONT,
+        STORAGE_KEY_UI_FONT_CUSTOM,
+        DEFAULT_UI_FONT_ID
+      )
+      const ed = readFontSelection(
+        STORAGE_KEY_EDITOR_FONT,
+        STORAGE_KEY_EDITOR_FONT_CUSTOM,
+        DEFAULT_EDITOR_FONT_ID
+      )
+      const tm = readFontSelection(
+        STORAGE_KEY_TERMINAL_FONT,
+        STORAGE_KEY_TERMINAL_FONT_CUSTOM,
+        DEFAULT_TERMINAL_FONT_ID
+      )
+      setUiFontState(ui)
+      setEditorFontState(ed)
+      setTerminalFontState(tm)
+      setEditorFontSizeState(
+        readFontSize(STORAGE_KEY_EDITOR_FONT_SIZE, DEFAULT_EDITOR_FONT_SIZE)
+      )
+      setTerminalFontSizeState(
+        readFontSize(STORAGE_KEY_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE)
+      )
+      setEditorLigaturesState(readBool(STORAGE_KEY_EDITOR_LIGATURES, false))
+      setTerminalLigaturesState(readBool(STORAGE_KEY_TERMINAL_LIGATURES, false))
+      legacyFontSettingsRef.current = {
+        uiFontFamily: legacyFontFamilyFromSelection(ui),
+        codeFontFamily: legacyFontFamilyFromSelection(ed),
+      }
+      document.documentElement.style.setProperty(
+        "--font-sans",
+        resolveFontStack(ui.id, ui.custom, "sans")
+      )
+      document.documentElement.style.setProperty(
+        "--font-mono",
+        resolveFontStack(ed.id, ed.custom, "mono")
+      )
+    }
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === STORAGE_KEY_THEME_COLOR && event.newValue) {
+        const color = event.newValue as ThemeColor
         if ((THEME_COLORS as readonly string[]).includes(color)) {
           setThemeColorState(color)
           document.documentElement.setAttribute("data-theme", color)
         }
       }
 
-      if (e.key === STORAGE_KEY_ZOOM_LEVEL && e.newValue) {
-        const zoom = parseInt(e.newValue, 10) as ZoomLevel
+      if (event.key === STORAGE_KEY_ZOOM_LEVEL && event.newValue) {
+        const zoom = parseInt(event.newValue, 10) as ZoomLevel
         if ((ZOOM_LEVELS as readonly number[]).includes(zoom)) {
           setZoomLevelState(zoom)
           document.documentElement.style.fontSize = `${(16 * zoom) / 100}px`
@@ -469,64 +505,54 @@ export function AppearanceProvider({
         }
       }
 
-      if (e.key === STORAGE_KEY_UI_FONT_FAMILY) {
-        applyFontSettings({
-          uiFontFamily: e.newValue,
-          codeFontFamily: fontSettingsRef.current.codeFontFamily,
-          writeStorage: false,
-        })
+      if (event.key && FONT_KEYS.has(event.key)) {
+        rehydrateFonts()
       }
 
-      if (e.key === STORAGE_KEY_CODE_FONT_FAMILY) {
-        applyFontSettings({
-          uiFontFamily: fontSettingsRef.current.uiFontFamily,
-          codeFontFamily: e.newValue,
-          writeStorage: false,
-        })
-      }
-
-      if (e.key === "theme") {
-        syncAppearanceMode(e.newValue ?? "system")
+      if (event.key === "theme") {
+        syncAppearanceMode(event.newValue ?? "system")
       }
     }
 
     window.addEventListener("storage", onStorage)
     return () => window.removeEventListener("storage", onStorage)
-  }, [applyFontSettings])
+  }, [])
 
-  const value = useMemo(
-    () => ({
-      themeColor,
-      setThemeColor,
-      zoomLevel,
-      setZoomLevel,
-      uiFontFamily,
-      setUiFontFamily,
-      codeFontFamily,
-      setCodeFontFamily,
-      uiFontFamilyStack: buildUiFontFamilyStack(uiFontFamily),
-      codeFontFamilyStack: buildCodeFontFamilyStack(codeFontFamily),
-      fontList,
-      fontListLoaded,
-      fontListError,
-    }),
-    [
-      codeFontFamily,
-      fontList,
-      fontListError,
-      fontListLoaded,
-      setCodeFontFamily,
-      setThemeColor,
-      setUiFontFamily,
-      setZoomLevel,
-      themeColor,
-      uiFontFamily,
-      zoomLevel,
-    ]
-  )
+  useEffect(() => {
+    return () => {
+      if (persistTimerRef.current !== null) {
+        window.clearTimeout(persistTimerRef.current)
+        persistTimerRef.current = null
+      }
+    }
+  }, [])
 
   return (
-    <AppearanceContext.Provider value={value}>
+    <AppearanceContext.Provider
+      value={{
+        themeColor,
+        setThemeColor,
+        zoomLevel,
+        setZoomLevel,
+        uiFont,
+        setUiFont,
+        editorFont,
+        setEditorFont,
+        terminalFont,
+        setTerminalFont,
+        editorFontSize,
+        setEditorFontSize,
+        terminalFontSize,
+        setTerminalFontSize,
+        editorLigatures,
+        setEditorLigatures,
+        terminalLigatures,
+        setTerminalLigatures,
+        fontList,
+        fontListLoaded,
+        fontListError,
+      }}
+    >
       {children}
     </AppearanceContext.Provider>
   )

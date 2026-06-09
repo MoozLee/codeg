@@ -345,6 +345,7 @@ impl ClaudeParser {
         let mut git_branch: Option<String> = None;
         let mut model: Option<String> = None;
         let mut title: Option<String> = None;
+        let mut ai_title: Option<String> = None;
         let mut first_timestamp: Option<DateTime<Utc>> = None;
         let mut last_timestamp: Option<DateTime<Utc>> = None;
         let mut message_count: u32 = 0;
@@ -373,6 +374,18 @@ impl ClaudeParser {
             // Skip system meta messages (e.g. local-command-caveat injections)
             if is_meta_message(&value) {
                 continue;
+            }
+
+            // Claude Code records its own AI-generated title as a dedicated
+            // `{"type":"ai-title","aiTitle":...}` entry. Prefer it over the first
+            // user message; the newest non-empty value wins.
+            if msg_type == "ai-title" {
+                if let Some(t) = value.get("aiTitle").and_then(|v| v.as_str()) {
+                    let t = t.trim();
+                    if !t.is_empty() {
+                        ai_title = Some(truncate_str(t, 100));
+                    }
+                }
             }
 
             if conversation_id.is_none() {
@@ -445,6 +458,9 @@ impl ClaudeParser {
         let folder_path = cwd.clone();
         let folder_name = folder_path.as_ref().map(|p| folder_name_from_path(p));
 
+        // Prefer Claude Code's own AI-generated title when present.
+        let title = ai_title.or(title);
+
         Ok(Some(ConversationSummary {
             id,
             agent_type: AgentType::ClaudeCode,
@@ -463,7 +479,7 @@ impl ClaudeParser {
     }
 }
 
-fn resolve_claude_config_dir() -> PathBuf {
+pub(crate) fn resolve_claude_config_dir() -> PathBuf {
     resolve_claude_config_dir_from(std::env::var_os("CLAUDE_CONFIG_DIR"), dirs::home_dir())
 }
 
@@ -576,6 +592,7 @@ impl ClaudeParser {
         let mut git_branch: Option<String> = None;
         let mut model: Option<String> = None;
         let mut title: Option<String> = None;
+        let mut ai_title: Option<String> = None;
         let mut first_timestamp: Option<DateTime<Utc>> = None;
         let mut last_timestamp: Option<DateTime<Utc>> = None;
         // A prompt-expanding slash command is buffered (with its promptId) until
@@ -616,6 +633,18 @@ impl ClaudeParser {
             // Skip system meta messages
             if is_meta_message(&value) {
                 continue;
+            }
+
+            // Claude Code records its own AI-generated title as a dedicated
+            // `{"type":"ai-title","aiTitle":...}` entry. Prefer it over the first
+            // user message; the newest non-empty value wins.
+            if msg_type == "ai-title" {
+                if let Some(t) = value.get("aiTitle").and_then(|v| v.as_str()) {
+                    let t = t.trim();
+                    if !t.is_empty() {
+                        ai_title = Some(truncate_str(t, 100));
+                    }
+                }
             }
 
             if cwd.is_none() {
@@ -997,6 +1026,9 @@ impl ClaudeParser {
             context_window_used_tokens,
             context_window_max_tokens,
         );
+
+        // Prefer Claude Code's own AI-generated title when present.
+        let title = ai_title.or(title);
 
         let summary = ConversationSummary {
             id: conversation_id.to_string(),
@@ -1650,6 +1682,112 @@ mod tests {
     }
 
     #[test]
+    fn parse_prefers_ai_title_over_first_user_message() {
+        let path = std::env::temp_dir().join(format!(
+            "codeg-claude-aititle-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        let mut file = fs::File::create(&path).expect("create temp jsonl");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "user",
+                "sessionId": "ai-title-test",
+                "timestamp": "2026-03-01T10:00:00Z",
+                "uuid": "u1",
+                "message": { "content": [{"type": "text", "text": "first user prompt"}] }
+            })
+        )
+        .expect("write user line");
+        // Claude Code records its own AI title after the messages and can repeat
+        // it; the newest non-empty value must win for both detail and summary.
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "ai-title",
+                "aiTitle": "Stale Title",
+                "sessionId": "ai-title-test"
+            })
+        )
+        .expect("write stale ai-title");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "ai-title",
+                "aiTitle": "Concise AI Summary",
+                "sessionId": "ai-title-test"
+            })
+        )
+        .expect("write ai-title");
+
+        let parser = ClaudeParser {
+            base_dir: PathBuf::new(),
+        };
+        let detail = parser
+            .parse_conversation_detail(&path, "ai-title-test")
+            .expect("parse conversation detail");
+        let summary = parser
+            .parse_jsonl_summary(&path)
+            .expect("parse summary")
+            .expect("summary present");
+        fs::remove_file(&path).expect("cleanup temp jsonl");
+
+        assert_eq!(detail.summary.title.as_deref(), Some("Concise AI Summary"));
+        assert_eq!(summary.title.as_deref(), Some("Concise AI Summary"));
+    }
+
+    #[test]
+    fn parse_falls_back_to_user_message_when_ai_title_empty() {
+        let path = std::env::temp_dir().join(format!(
+            "codeg-claude-aititle-empty-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        let mut file = fs::File::create(&path).expect("create temp jsonl");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "user",
+                "sessionId": "ai-title-empty",
+                "timestamp": "2026-03-01T10:00:00Z",
+                "uuid": "u1",
+                "message": { "content": [{"type": "text", "text": "fallback prompt"}] }
+            })
+        )
+        .expect("write user line");
+        // An empty aiTitle (Claude emits this for trivial sessions) must not
+        // clobber the first-user-message fallback.
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "ai-title",
+                "aiTitle": "   ",
+                "sessionId": "ai-title-empty"
+            })
+        )
+        .expect("write empty ai-title");
+
+        let parser = ClaudeParser {
+            base_dir: PathBuf::new(),
+        };
+        let detail = parser
+            .parse_conversation_detail(&path, "ai-title-empty")
+            .expect("parse conversation detail");
+        let summary = parser
+            .parse_jsonl_summary(&path)
+            .expect("parse summary")
+            .expect("summary present");
+        fs::remove_file(&path).expect("cleanup temp jsonl");
+
+        assert_eq!(detail.summary.title.as_deref(), Some("fallback prompt"));
+        assert_eq!(summary.title.as_deref(), Some("fallback prompt"));
+    }
+
+    #[test]
     fn parse_detail_completion_time_uses_event_log_timestamp_not_added_duration() {
         // Regression: turn_duration encodes the *entire* turn span, so
         // adding it to the assistant event timestamp lands far in the
@@ -1859,7 +1997,9 @@ mod tests {
         assert_eq!(slash_command_display("just a normal message"), None);
         // a non-slash <command-name> is not treated as a command
         assert_eq!(
-            slash_command_display("<command-name>init</command-name><command-args>x</command-args>"),
+            slash_command_display(
+                "<command-name>init</command-name><command-args>x</command-args>"
+            ),
             None
         );
     }
@@ -1915,10 +2055,8 @@ mod tests {
 
     #[test]
     fn slash_command_keeps_user_turn_between_assistant_turns() {
-        let path = std::env::temp_dir().join(format!(
-            "codeg-claude-slash-{}.jsonl",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("codeg-claude-slash-{}.jsonl", uuid::Uuid::new_v4()));
         let mut file = fs::File::create(&path).expect("create temp jsonl");
         // Client command /model: followed by stdout, no model turn -> stays hidden
         writeln!(

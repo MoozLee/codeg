@@ -25,9 +25,11 @@ import {
   acpSetConfigOption,
   acpCancel,
   acpRespondPermission,
+  acpAnswerQuestion,
   acpDisconnect,
   acpTouchConnection,
   acpGetSessionSnapshot,
+  acpFindConnectionForConversation,
 } from "@/lib/api"
 import { denormalizeSnapshot } from "@/lib/snapshot-denormalize"
 import { buildDelegationSeedEnvelopes } from "@/lib/delegation-seed"
@@ -37,16 +39,21 @@ import type {
   AcpEvent,
   ActiveDelegationState,
   AvailableCommandInfo,
+  ConfigStaleKind,
   ConnectionStatus,
+  ConversationConnectionInfo,
   EventEnvelope,
   PlanEntryInfo,
   PermissionOptionInfo,
+  PendingQuestionState,
+  QuestionAnswer,
   SessionConfigOptionInfo,
   SessionModeStateInfo,
   SessionUsageUpdateInfo,
   PromptCapabilitiesInfo,
   PromptInputBlock,
   ToolCallImageWire,
+  UserMessageBlock,
 } from "@/lib/types"
 import { AGENT_LABELS } from "@/lib/types"
 import {
@@ -102,6 +109,15 @@ export interface PendingPermission {
   request_id: string
   tool_call: unknown
   options: PermissionOptionInfo[]
+}
+
+/** In-flight user prompt carried on a connection (from a `user_message` event
+ *  or a snapshot's `pending_user_message`). Mirrored into the runtime as a
+ *  synthesized user turn for cross-client VIEWERS so they see the sender's
+ *  message (the sender renders its own optimistic turn and ignores it). */
+export interface PendingUserMessage {
+  messageId: string
+  blocks: UserMessageBlock[]
 }
 
 export interface PendingQuestion {
@@ -205,7 +221,16 @@ export interface ConnectionState {
   contextManagement: ContextManagementState
   liveMessage: LiveMessage | null
   pendingPermission: PendingPermission | null
+  /** In-flight user prompt for the current turn — set from a `user_message`
+   *  event or a snapshot's `pending_user_message`. A VIEWER mirrors this into
+   *  the runtime as a synthesized user turn; `null` outside an active turn. */
+  pendingUserMessage: PendingUserMessage | null
   pendingQuestion: PendingQuestion | null
+  /** Awaiting-answer multiple-choice `ask_user_question` (the codeg-mcp blocking
+   *  tool). Set from a `question_request` event or a snapshot's
+   *  `pending_question`; cleared on `question_resolved` or turn end. Distinct
+   *  from the free-text `pendingQuestion` above. */
+  pendingAskQuestion: PendingQuestionState | null
   claudeApiRetry: ClaudeApiRetryState | null
   lastTurnStopReason: string | null
   error: string | null
@@ -251,12 +276,51 @@ export interface ConnectionState {
    * connections.
    */
   parentConnectionId: string | null
+  /**
+   * True when this client did NOT spawn the backend connection but attached to
+   * one another client already owns (cross-client live streaming, discovered
+   * via `acp_find_connection_for_conversation`). A viewer is a NON-OWNING,
+   * co-controlling client: it streams the same turn and MAY drive the shared
+   * agent (sendPrompt/cancel target the owner's connection, serialized
+   * server-side by its prompt_lock; turn-level concurrency rejection is a
+   * tracked follow-up). The one hard invariant: on teardown a viewer MUST
+   * detach (drop its attach subscription / reverse-map entry) and MUST NOT
+   * `acpDisconnect` — that would kill the agent for the owner. Like
+   * `isDelegationChild`, viewers are skipped by the idle sweep's disconnect
+   * path. Distinct from `isDelegationChild` (broker-owned child bookkeeping);
+   * a plain viewer is the lighter cousin with no delegation state.
+   */
+  isViewer: boolean
+  /**
+   * True when the agent's effective settings changed after this session was
+   * spawned, so the running process is still on its launch-time config (env
+   * vars / model provider / native config). Set from a `session_config_stale`
+   * event or a hydrated snapshot; cleared when the user reverts the setting or
+   * restarts the session via `reapplyConfig`. Drives the per-conversation
+   * "restart to apply" banner.
+   */
+  configStale: boolean
+  /** Which settings surface drifted, for the banner's wording. `null` when not stale. */
+  configStaleKind: ConfigStaleKind | null
+  /**
+   * Client-local: the user dismissed (X) the stale banner for the CURRENT
+   * drift. Hides the banner without touching the underlying `configStale`
+   * state. Reset to `false` whenever a fresh `session_config_stale` arrives (a
+   * new change re-shows the banner) and on a new connection. Never sourced from
+   * the snapshot — dismissal is per-client UI state.
+   */
+  configStaleDismissed: boolean
 }
 
 type ConnectRequest = {
   agentType: AgentType
   workingDir?: string
   sessionId?: string
+  // Persisted conversation id (when known) — drives the cross-client viewer
+  // discovery gate in connect(). Not part of `sameConnectRequest` equality
+  // (sessionId already distinguishes), but carried so a re-fired pending
+  // request still runs discovery.
+  conversationId?: number
 }
 
 function sameConnectRequest(a: ConnectRequest, b: ConnectRequest) {
@@ -277,6 +341,9 @@ type Action =
       agentType: AgentType
       workingDir: string | null
       contextManagement: ContextManagementState
+      // Set when attaching to a connection another client owns (viewer).
+      // Defaults to false (owner) when omitted.
+      isViewer?: boolean
     }
   | {
       type: "HYDRATE_FROM_SNAPSHOT"
@@ -380,6 +447,18 @@ type Action =
       contextKey: string
       stopReason: string
     }
+  | {
+      type: "SET_ASK_QUESTION"
+      contextKey: string
+      pendingAskQuestion: PendingQuestionState
+    }
+  | {
+      type: "CLEAR_ASK_QUESTION"
+      contextKey: string
+      /** When present, only clear if the current question_id matches (guards a
+       *  late `question_resolved` from wiping a freshly-raised question). */
+      questionId?: string
+    }
   | { type: "SESSION_STARTED"; contextKey: string; sessionId: string }
   | {
       type: "SESSION_MODES"
@@ -390,6 +469,16 @@ type Action =
       type: "SESSION_CONFIG_OPTIONS"
       contextKey: string
       configOptions: SessionConfigOptionInfo[]
+    }
+  | {
+      type: "CONFIG_STALE_CHANGED"
+      contextKey: string
+      stale: boolean
+      kind: ConfigStaleKind
+    }
+  | {
+      type: "DISMISS_CONFIG_STALE"
+      contextKey: string
     }
   | {
       type: "SELECTORS_READY"
@@ -1065,7 +1154,14 @@ function extractPermissionToolKind(toolCall: unknown): string | null {
   return null
 }
 
-function extractQuestionText(rawInput: string | null): string | null {
+/**
+ * Extract the free-text question for the LEGACY `QuestionDialog` from a tool
+ * call's raw input — gated on a singular `question` STRING field. Exported so a
+ * regression test can prove the new multiple-choice `ask_user_question` tool
+ * (whose input is `{ questions: [...] }`, plural array) never trips this legacy
+ * path even though tool-name normalization classifies it as "question".
+ */
+export function extractQuestionText(rawInput: string | null): string | null {
   if (!rawInput) return null
   try {
     const parsed = JSON.parse(rawInput)
@@ -1336,7 +1432,9 @@ function connectionsReducer(
         contextManagement: action.contextManagement,
         liveMessage: null,
         pendingPermission: null,
+        pendingUserMessage: null,
         pendingQuestion: null,
+        pendingAskQuestion: null,
         claudeApiRetry: null,
         lastTurnStopReason: null,
         error: null,
@@ -1345,6 +1443,10 @@ function connectionsReducer(
         isDelegationChild: false,
         parentToolUseId: null,
         parentConnectionId: null,
+        isViewer: action.isViewer ?? false,
+        configStale: false,
+        configStaleKind: null,
+        configStaleDismissed: false,
       })
       return next
     }
@@ -1385,7 +1487,9 @@ function connectionsReducer(
         contextManagement: DEFAULT_CONTEXT_MANAGEMENT,
         liveMessage: null,
         pendingPermission: null,
+        pendingUserMessage: null,
         pendingQuestion: null,
+        pendingAskQuestion: null,
         claudeApiRetry: null,
         lastTurnStopReason: null,
         error: null,
@@ -1394,6 +1498,10 @@ function connectionsReducer(
         isDelegationChild: true,
         parentToolUseId: action.parentToolUseId,
         parentConnectionId: action.parentConnectionId,
+        isViewer: false,
+        configStale: false,
+        configStaleKind: null,
+        configStaleDismissed: false,
       })
       return next
     }
@@ -1492,9 +1600,16 @@ function connectionsReducer(
         ),
         liveMessage: action.patch.liveMessage,
         pendingPermission: action.patch.pendingPermission,
+        pendingAskQuestion: action.patch.pendingAskQuestion,
+        pendingUserMessage: action.patch.pendingUserMessage,
         promptCapabilities: mergedPromptCapabilities,
         selectorsReady: mergedSelectorsReady,
         supportsFork: mergedSupportsFork,
+        // Staleness is a current-state field (like status): apply the snapshot's
+        // value on the fresh path. `configStaleDismissed` is client-local and
+        // preserved via `...current`.
+        configStale: action.patch.configStale,
+        configStaleKind: action.patch.configStaleKind,
         lastAppliedSeq: action.patch.eventSeq,
       })
       return next
@@ -1552,6 +1667,10 @@ function connectionsReducer(
       } else if (conn.status === "prompting") {
         // Prompt cycle ended: clear in-flight Claude API retry banner.
         updated.claudeApiRetry = null
+        // A blocked ask_user_question can't outlive its turn. The normal path
+        // clears it via `question_resolved`; this is the safety net for a turn
+        // that ended without one (agent error / abandoned block).
+        updated.pendingAskQuestion = null
       }
       next.set(action.contextKey, updated)
       return next
@@ -1926,6 +2045,34 @@ function connectionsReducer(
       return next
     }
 
+    case "SET_ASK_QUESTION": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        pendingAskQuestion: action.pendingAskQuestion,
+      })
+      return next
+    }
+
+    case "CLEAR_ASK_QUESTION": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      if (
+        action.questionId !== undefined &&
+        conn.pendingAskQuestion?.question_id !== action.questionId
+      ) {
+        return state
+      }
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        pendingAskQuestion: null,
+      })
+      return next
+    }
+
     case "SESSION_STARTED": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
@@ -1964,6 +2111,41 @@ function connectionsReducer(
           conn.availableCommands,
           conn.contextManagement
         ),
+      })
+      return next
+    }
+
+    case "CONFIG_STALE_CHANGED": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const kind = action.stale ? action.kind : null
+      // A fresh stale=true is a NEW drift → un-dismiss so the banner reappears
+      // even if the user had dismissed a previous one. stale=false clears it.
+      const dismissed = action.stale ? false : conn.configStaleDismissed
+      if (
+        conn.configStale === action.stale &&
+        conn.configStaleKind === kind &&
+        conn.configStaleDismissed === dismissed
+      ) {
+        return state
+      }
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        configStale: action.stale,
+        configStaleKind: kind,
+        configStaleDismissed: dismissed,
+      })
+      return next
+    }
+
+    case "DISMISS_CONFIG_STALE": {
+      const conn = state.get(action.contextKey)
+      if (!conn || conn.configStaleDismissed) return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        configStaleDismissed: true,
       })
       return next
     }
@@ -2292,7 +2474,8 @@ export interface AcpActionsValue {
     contextKey: string,
     agentType: AgentType,
     workingDir?: string,
-    sessionId?: string
+    sessionId?: string,
+    conversationId?: number
   ): Promise<void>
   disconnect(contextKey: string): Promise<void>
   reconnect(contextKey: string): Promise<void>
@@ -2300,7 +2483,11 @@ export interface AcpActionsValue {
   sendPrompt(
     contextKey: string,
     blocks: PromptInputBlock[],
-    opts?: { folderId?: number | null; conversationId?: number | null }
+    opts?: {
+      folderId?: number | null
+      conversationId?: number | null
+      clientMessageId?: string | null
+    }
   ): Promise<void>
   setMode(contextKey: string, modeId: string): Promise<void>
   setConfigOption(
@@ -2313,6 +2500,11 @@ export interface AcpActionsValue {
     contextKey: string,
     requestId: string,
     optionId: string
+  ): Promise<void>
+  answerQuestion(
+    contextKey: string,
+    questionId: string,
+    answer: QuestionAnswer
   ): Promise<void>
   setActiveKey(key: string | null): void
   touchActivity(contextKey: string): void
@@ -2348,6 +2540,23 @@ export interface AcpActionsValue {
    * lifecycle. No-op when the child isn't attached.
    */
   detachDelegationChild(connectionId: string): void
+  /**
+   * Restart the session at `contextKey` so it picks up the latest agent/model
+   * settings: disconnect the running process, then reconnect with the same
+   * `sessionId` (the agent resumes the conversation — history is preserved).
+   * The freshly spawned process reads current config, so its recomputed
+   * fingerprint matches and `configStale` clears. Wired to the "restart to
+   * apply" banner button. Returns `true` if it actually restarted, `false` if
+   * it was a no-op (no connection, or a viewer / delegation child that doesn't
+   * own the backend process) — callers gate their "applied" confirmation on it.
+   */
+  reapplyConfig(contextKey: string): Promise<boolean>
+  /**
+   * Dismiss the "restart to apply" banner for the current drift WITHOUT
+   * restarting (client-local; the underlying `configStale` is untouched). A
+   * subsequent settings change re-shows it. Wired to the banner's X button.
+   */
+  dismissConfigStale(contextKey: string): void
 }
 
 const AcpActionsContext = createContext<AcpActionsValue | null>(null)
@@ -2945,6 +3154,30 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             requestId: e.request_id,
           })
           break
+        case "question_request":
+          // Agent called the blocking `ask_user_question` MCP tool. Flush any
+          // queued streaming so the card renders against current content, then
+          // raise the interactive multiple-choice card above the input box.
+          flushStreamingQueue()
+          dispatch({
+            type: "SET_ASK_QUESTION",
+            contextKey,
+            pendingAskQuestion: {
+              question_id: e.question_id,
+              questions: e.questions,
+              created_at: new Date().toISOString(),
+            },
+          })
+          break
+        case "question_resolved":
+          // The question was answered (this or another window) or canceled.
+          // Matched by question_id so a stale event can't wipe a fresh one.
+          dispatch({
+            type: "CLEAR_ASK_QUESTION",
+            contextKey,
+            questionId: e.question_id,
+          })
+          break
         case "permission_request":
           flushStreamingQueue()
           dispatch({
@@ -3031,6 +3264,16 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             entry.configOptions = e.config_options
             selectorsCache.set(cfgConn.agentType, entry)
           }
+          break
+        }
+        case "session_config_stale": {
+          flushStreamingQueue()
+          dispatch({
+            type: "CONFIG_STALE_CHANGED",
+            contextKey,
+            stale: e.stale,
+            kind: e.kind,
+          })
           break
         }
         case "selectors_ready": {
@@ -3594,6 +3837,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // would otherwise call acpDisconnect on a backend connection
         // still mid-prompt for the parent's tool_use.
         if (conn.isDelegationChild) continue
+        // Viewers don't own their backend connection — acpDisconnect here
+        // would kill another client's agent. The viewer is torn down when its
+        // tab unmounts (disconnect's isViewer branch detaches it).
+        if (conn.isViewer) continue
         const lastActive = lastActivityRef.current.get(contextKey) ?? 0
         if (now - lastActive > CONNECTION_IDLE_TIMEOUT_MS) {
           toDisconnect.push({
@@ -3636,6 +3883,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // connection" error from the backend.
         const conn = store.connections.get(contextKey)
         if (conn?.isDelegationChild) continue
+        // Viewers attach to a connection another client owns — never
+        // acpDisconnect it on our unmount. The attach-sub detach loop below
+        // releases our read-only subscription cleanly.
+        if (conn?.isViewer) continue
         acpDisconnect(connectionId).catch(() => {})
       }
       for (const [, sub] of attachSubs) {
@@ -3648,14 +3899,125 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // True when this client already owns (or is already viewing) the given
+  // backend connection: some store entry references it, or the desktop
+  // firehose already routes it via the reverse-map. Guards the discovery gate
+  // from demoting an owner to a viewer on a re-render — a viewer never
+  // `acpDisconnect`s, so a mis-tagged owner would leak its agent process.
+  const isConnectionOwnedLocally = useCallback((connectionId: string) => {
+    if (reverseMapRef.current.has(connectionId)) return true
+    for (const conn of storeRef.current.connections.values()) {
+      if (conn.connectionId === connectionId) return true
+    }
+    return false
+  }, [])
+
+  // Attach this client to a backend connection ANOTHER client owns
+  // (cross-client live streaming). The viewer is a NON-OWNING, co-controlling
+  // client: it streams the same turn and may also drive the shared agent
+  // (sendPrompt/cancel go to the owner's connection, serialized server-side by
+  // its prompt_lock; turn-level concurrency rejection is tracked as a
+  // follow-up). The one hard invariant: a viewer's teardown DETACHES, never
+  // `acpDisconnect`s — that would kill the owner's agent. Generalizes
+  // `attachDelegationChild`: Subscribe-with-Snapshot attach on web, snapshot-
+  // hydrate + firehose reverse-map on desktop.
+  //
+  // ALWAYS a COLD attach (no `sinceSeq`): the viewer has applied no prior
+  // events, so it must receive a full snapshot of the in-flight turn — passing
+  // the discovered `event_seq` as a cursor could yield only a post-cursor
+  // replay and miss all earlier live state. Reconnects re-attach with the
+  // running `lastAppliedSeq` (see `setupAttachSubscription.onDetached`).
+  const connectAsViewer = useCallback(
+    async (
+      contextKey: string,
+      connectionId: string,
+      agentType: AgentType,
+      workingDir: string | null
+    ) => {
+      dispatch({
+        type: "CONNECTION_CREATED",
+        contextKey,
+        connectionId,
+        agentType,
+        workingDir,
+        contextManagement: DEFAULT_CONTEXT_MANAGEMENT,
+        isViewer: true,
+      })
+      lastActivityRef.current.set(contextKey, Date.now())
+
+      const stream = getEventStream()
+      if (stream) {
+        // Web / remote: the per-connection WS attach delivers snapshot +
+        // replay + live events atomically over the same socket.
+        setupAttachSubscription(contextKey, connectionId, undefined)
+        return
+      }
+
+      // Desktop firehose: the global `acp://event` stream only carries FUTURE
+      // events, so fetch a snapshot to backfill the in-flight turn, then route
+      // this connection's events via the reverse-map and drain anything that
+      // arrived while the snapshot was in flight. Mirrors the legacy owner
+      // path in `connect()`.
+      let patch: import("@/lib/snapshot-denormalize").SnapshotPatch | null =
+        null
+      try {
+        const snapshot = await acpGetSessionSnapshot(connectionId)
+        if (snapshot) patch = denormalizeSnapshot(snapshot)
+      } catch (e) {
+        console.warn(
+          "[acp-context] viewer snapshot fetch failed for",
+          connectionId,
+          e
+        )
+      }
+      // Detach race: the tab may have disconnected (disconnect() removed the
+      // entry) while the snapshot fetch was in flight. Re-check the store still
+      // holds THIS viewer connection BEFORE applying the snapshot, seeding
+      // delegations, or installing firehose routing — otherwise we'd hydrate /
+      // seed child streams / route for a viewer no one is watching anymore.
+      if (
+        storeRef.current.connections.get(contextKey)?.connectionId !==
+        connectionId
+      ) {
+        return
+      }
+      if (patch) {
+        dispatch({ type: "HYDRATE_FROM_SNAPSHOT", contextKey, patch })
+        seedDelegationsFromSnapshot(
+          contextKey,
+          patch.connectionId,
+          patch.activeDelegations,
+          patch.eventSeq
+        )
+      }
+      reverseMapRef.current.set(connectionId, contextKey)
+      for (const env of consumeBufferedEvents(connectionId)) {
+        applyMappedEnvelope(contextKey, env)
+      }
+    },
+    [
+      applyMappedEnvelope,
+      consumeBufferedEvents,
+      dispatch,
+      seedDelegationsFromSnapshot,
+      setupAttachSubscription,
+    ]
+  )
+
   const connect = useCallback(
     async (
       contextKey: string,
       agentType: AgentType,
       workingDir?: string,
-      sessionId?: string
+      sessionId?: string,
+      conversationId?: number
     ) => {
-      const request: ConnectRequest = { agentType, workingDir, sessionId }
+      const request: ConnectRequest = {
+        agentType,
+        workingDir,
+        sessionId,
+        conversationId,
+      }
       if (connectingKeysRef.current.has(contextKey)) {
         pendingConnectRequestsRef.current.set(contextKey, request)
         return
@@ -3722,7 +4084,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             existing.status !== "disconnected" &&
             existing.status !== "error"
           ) {
-            await acpDisconnect(existing.connectionId).catch(() => {})
+            // A viewer doesn't own the backend connection — detach only, never
+            // acpDisconnect (that would kill the owner's agent). Owners are
+            // disconnected normally before re-spawning under new params.
+            if (!existing.isViewer) {
+              await acpDisconnect(existing.connectionId).catch(() => {})
+            }
             reverseMapRef.current.delete(existing.connectionId)
             teardownAttachSubscription(contextKey)
             lastActivityRef.current.delete(contextKey)
@@ -3782,6 +4149,63 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               contextKey,
               orphanConn.connectionId,
               orphanCursor
+            )
+            return
+          }
+        }
+
+        // Cross-client viewer attach. Before spawning a NEW backend agent, ask
+        // whether another client already holds a LIVE connection for this
+        // persisted conversation; if so, attach to it as a (co-controlling)
+        // both clients stream the same in-flight turn (fixes desktop→browser
+        // streaming). Only for real persisted conversations (id > 0) — a
+        // brand-new conversation has no live owner yet, so we spawn + own.
+        // Best-effort: a discovery failure falls through to the owner spawn.
+        if (conversationId != null && conversationId > 0) {
+          let discovered: ConversationConnectionInfo | null = null
+          try {
+            // Pass sessionId so discovery can fall back to external_id when the
+            // live owner hasn't bound its conversation_id yet (pre-first-prompt
+            // window) — without it a second client would reuse the owner's
+            // connection as a mis-tagged owner and kill it on tab close. The
+            // external_id fallback is matched WITH agentType (external_id is
+            // unique only per agent).
+            discovered = await acpFindConnectionForConversation(
+              conversationId,
+              sessionId,
+              agentType
+            )
+          } catch (e) {
+            console.warn(
+              "[acp-context] connection discovery failed for conversation",
+              conversationId,
+              e
+            )
+          }
+          // Discovery awaited: re-check the abandon/supersede guards in case a
+          // disconnect() or a newer connect() for this key landed meanwhile
+          // (mirrors the post-acpConnect guards below). The finally block
+          // clears connectingKeys/abandoned, so a bare return is safe.
+          if (abandonedKeysRef.current.has(contextKey)) {
+            return
+          }
+          const pendingAfterDiscovery =
+            pendingConnectRequestsRef.current.get(contextKey)
+          if (
+            pendingAfterDiscovery &&
+            !sameConnectRequest(pendingAfterDiscovery, request)
+          ) {
+            return
+          }
+          if (
+            discovered &&
+            !isConnectionOwnedLocally(discovered.connection_id)
+          ) {
+            await connectAsViewer(
+              contextKey,
+              discovered.connection_id,
+              agentType,
+              nextWorkingDir
             )
             return
           }
@@ -3957,7 +4381,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                   contextKey,
                   pendingRequest.agentType,
                   pendingRequest.workingDir,
-                  pendingRequest.sessionId
+                  pendingRequest.sessionId,
+                  pendingRequest.conversationId
                 )
                 .catch(() => {})
             })
@@ -3968,8 +4393,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [
       applyMappedEnvelope,
       buildOpenAgentsSettingsAction,
+      connectAsViewer,
       consumeBufferedEvents,
       dispatch,
+      isConnectionOwnedLocally,
       resolveConnectBlockState,
       seedDelegationsFromSnapshot,
       setActiveKey,
@@ -3993,6 +4420,19 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         }
         return
       }
+      if (conn.isViewer) {
+        // Viewer teardown: drop our read-only attachment WITHOUT
+        // `acpDisconnect` — the backend connection belongs to another client,
+        // and disconnecting it would kill the owner's agent mid-turn. Mirrors
+        // detachDelegationChild. The owner's own disconnect / the idle sweep
+        // governs the connection's real lifetime.
+        teardownAttachSubscription(contextKey)
+        reverseMapRef.current.delete(conn.connectionId)
+        pendingUnmappedEventsRef.current.delete(conn.connectionId)
+        lastActivityRef.current.delete(contextKey)
+        dispatch({ type: "CONNECTION_REMOVED", contextKey })
+        return
+      }
       await acpDisconnect(conn.connectionId)
       reverseMapRef.current.delete(conn.connectionId)
       teardownAttachSubscription(contextKey)
@@ -4003,15 +4443,17 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [dispatch, teardownAttachSubscription]
   )
 
-  const reconnect = useCallback(
-    async (contextKey: string) => {
+  const reapplyConfig = useCallback(
+    async (contextKey: string): Promise<boolean> => {
       const conn = storeRef.current.connections.get(contextKey)
       if (
         !conn ||
         conn.status === "prompting" ||
-        conn.status === "connecting"
+        conn.status === "connecting" ||
+        conn.isViewer ||
+        conn.isDelegationChild
       ) {
-        return
+        return false
       }
       const { agentType, workingDir, sessionId } = conn
       await disconnect(contextKey)
@@ -4021,15 +4463,35 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         workingDir ?? undefined,
         sessionId ?? undefined
       )
+      return true
     },
     [connect, disconnect]
+  )
+
+  const reconnect = useCallback(
+    async (contextKey: string) => {
+      await reapplyConfig(contextKey)
+    },
+    [reapplyConfig]
+  )
+
+  const dismissConfigStale = useCallback(
+    (contextKey: string) => {
+      dispatch({ type: "DISMISS_CONFIG_STALE", contextKey })
+    },
+    [dispatch]
   )
 
   const disconnectAll = useCallback(async () => {
     const promises: Promise<void>[] = []
     pendingConnectRequestsRef.current.clear()
     for (const [contextKey, conn] of storeRef.current.connections) {
-      promises.push(acpDisconnect(conn.connectionId).catch(() => {}))
+      // Viewers attach to a connection another client owns — detach our
+      // read-only subscription but never acpDisconnect (that would kill the
+      // owner's agent). Owners are torn down normally.
+      if (!conn.isViewer) {
+        promises.push(acpDisconnect(conn.connectionId).catch(() => {}))
+      }
       reverseMapRef.current.delete(conn.connectionId)
       teardownAttachSubscription(contextKey)
       pendingUnmappedEventsRef.current.delete(conn.connectionId)
@@ -4043,7 +4505,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     async (
       contextKey: string,
       blocks: PromptInputBlock[],
-      opts?: { folderId?: number | null; conversationId?: number | null }
+      opts?: {
+        folderId?: number | null
+        conversationId?: number | null
+        clientMessageId?: string | null
+      }
     ) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
@@ -4053,7 +4519,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         blocks,
         opts?.folderId ?? null,
         opts?.conversationId ?? null,
-        CLIENT_ORIGIN_ID
+        CLIENT_ORIGIN_ID,
+        opts?.clientMessageId ?? null
       )
     },
     []
@@ -4132,6 +4599,32 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "PERMISSION_CLEARED", contextKey, requestId })
       } catch (e) {
         console.error("[AcpConnections] respondPermission failed:", e)
+        throw e
+      }
+    },
+    [dispatch]
+  )
+
+  const answerQuestion = useCallback(
+    async (contextKey: string, questionId: string, answer: QuestionAnswer) => {
+      const conn = storeRef.current.connections.get(contextKey)
+      if (!conn) {
+        // Throw, don't silently return: AskQuestionCard awaits this and holds a
+        // disabled in-flight state (spinner) until it resolves, only re-enabling
+        // on rejection. A silent resolve here would leave the card stuck. The
+        // throw routes to the card's retryable inline error instead.
+        throw new Error(
+          `[AcpConnections] answerQuestion: no connection for ${contextKey}`
+        )
+      }
+      try {
+        lastActivityRef.current.set(contextKey, Date.now())
+        await acpAnswerQuestion(conn.connectionId, questionId, answer)
+        // Optimistically clear; the backend also broadcasts question_resolved
+        // (idempotent on the matched id).
+        dispatch({ type: "CLEAR_ASK_QUESTION", contextKey, questionId })
+      } catch (e) {
+        console.error("[AcpConnections] answerQuestion failed:", e)
         throw e
       }
     },
@@ -4219,12 +4712,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       setConfigOption,
       cancel,
       respondPermission,
+      answerQuestion,
       setActiveKey,
       touchActivity,
       registerOpenTabKeys,
       clearAcpLoadError,
       attachDelegationChild,
       detachDelegationChild,
+      reapplyConfig,
+      dismissConfigStale,
     }),
     [
       connect,
@@ -4236,12 +4732,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       setConfigOption,
       cancel,
       respondPermission,
+      answerQuestion,
       setActiveKey,
       touchActivity,
       registerOpenTabKeys,
       clearAcpLoadError,
       attachDelegationChild,
       detachDelegationChild,
+      reapplyConfig,
+      dismissConfigStale,
     ]
   )
 

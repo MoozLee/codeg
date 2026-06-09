@@ -7,6 +7,7 @@ import {
 } from "@/lib/adapters/tool-kind-classifier"
 import type { MessageRole } from "@/lib/types"
 import { normalizeToolName } from "@/lib/tool-call-normalization"
+import { isDelegateToAgentToolName } from "@/lib/delegation-card"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import {
@@ -2091,18 +2092,16 @@ function parseCliExecutionEnvelope(text: string): {
 
 const TextPart = memo(function TextPart({
   text,
-  preserveNewlines = false,
+  softBreaks = false,
 }: {
   text: string
-  preserveNewlines?: boolean
+  // User-authored text opts in so single newlines survive as line breaks
+  // (chat input commonly relies on them) while Markdown still renders.
+  softBreaks?: boolean
 }) {
-  if (preserveNewlines) {
-    return <div className="whitespace-pre-wrap break-words text-sm">{text}</div>
-  }
-
   return (
     <div className='break-words text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside [&_[data-streamdown="code-block-body"]]:max-h-96 [&_[data-streamdown="code-block-body"]]:overflow-auto'>
-      <MessageResponse>{text}</MessageResponse>
+      <MessageResponse softBreaks={softBreaks}>{text}</MessageResponse>
     </div>
   )
 })
@@ -2309,11 +2308,7 @@ const ToolCallPart = memo(function ToolCallPart({
   // un-normalized. Falls through to the normal renderer when no
   // toolCallId is available (snapshot replays without a live binding)
   // so the user still sees the tool input/output.
-  if (
-    (toolNameLower === "delegate_to_agent" ||
-      /[^a-z0-9]delegate_to_agent$/.test(toolNameLower)) &&
-    part.toolCallId
-  ) {
+  if (isDelegateToAgentToolName(normalizedToolName) && part.toolCallId) {
     return (
       <DelegatedSubThread
         parentToolUseId={part.toolCallId}
@@ -2586,7 +2581,7 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
         <TextPart
           key={`text-${keyId}`}
           text={part.text}
-          preserveNewlines={role === "user"}
+          softBreaks={role === "user"}
         />
       )
     }

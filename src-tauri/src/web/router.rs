@@ -65,6 +65,26 @@ pub fn build_router(
             post(handlers::delegation::set_delegation_settings),
         )
         .route(
+            "/get_feedback_settings",
+            post(handlers::feedback::get_feedback_settings),
+        )
+        .route(
+            "/set_feedback_settings",
+            post(handlers::feedback::set_feedback_settings),
+        )
+        .route(
+            "/submit_session_feedback",
+            post(handlers::feedback::submit_session_feedback),
+        )
+        .route(
+            "/get_question_settings",
+            post(handlers::question::get_question_settings),
+        )
+        .route(
+            "/set_question_settings",
+            post(handlers::question::set_question_settings),
+        )
+        .route(
             "/get_folder_conversation",
             post(handlers::conversations::get_folder_conversation),
         )
@@ -121,6 +141,14 @@ pub fn build_router(
         )
         .route("/get_folder", post(handlers::folders::get_folder))
         .route("/open_folder", post(handlers::folders::open_folder))
+        .route(
+            "/open_worktree_folder",
+            post(handlers::folders::open_worktree_folder),
+        )
+        .route(
+            "/resolve_worktree_folder",
+            post(handlers::folders::resolve_worktree_folder),
+        )
         .route(
             "/open_folder_in_workspace",
             post(handlers::folders::open_folder_in_workspace),
@@ -300,6 +328,10 @@ pub fn build_router(
         )
         .route("/read_file_base64", post(handlers::files::read_file_base64))
         .route(
+            "/read_workspace_file_base64",
+            post(handlers::files::read_workspace_file_base64),
+        )
+        .route(
             "/read_file_for_edit",
             post(handlers::files::read_file_for_edit),
         )
@@ -352,6 +384,30 @@ pub fn build_router(
             "/workspace_download_ticket",
             post(handlers::workspace_files::create_download_ticket),
         )
+        // ─── Backup & restore ───
+        //
+        // Export builds an archive and returns a download ticket; restore
+        // uploads the archive once (body limit disabled — it can be large),
+        // then inspects + stages it by reference. The data swap happens on the
+        // next process start; the client follows up with `restart_app`.
+        .route(
+            "/backup_create_ticket",
+            post(handlers::backup::backup_create_ticket),
+        )
+        .route(
+            "/backup_upload",
+            post(handlers::backup::backup_upload).layer(DefaultBodyLimit::disable()),
+        )
+        .route("/backup_inspect", post(handlers::backup::backup_inspect))
+        .route(
+            "/backup_scan_external_conflicts",
+            post(handlers::backup::backup_scan_external_conflicts),
+        )
+        .route(
+            "/backup_restore_stage",
+            post(handlers::backup::backup_restore_stage),
+        )
+        .route("/backup_cancel", post(handlers::backup::backup_cancel))
         .route(
             "/download_workspace_file",
             post(handlers::workspace_files::download_workspace_file),
@@ -533,6 +589,10 @@ pub fn build_router(
             post(handlers::acp::acp_respond_permission),
         )
         .route(
+            "/acp_answer_question",
+            post(handlers::acp::acp_answer_question),
+        )
+        .route(
             "/acp_list_connections",
             post(handlers::acp::acp_list_connections),
         )
@@ -543,6 +603,10 @@ pub fn build_router(
         .route(
             "/acp_get_session_snapshot_by_conversation",
             post(handlers::acp::acp_get_session_snapshot_by_conversation),
+        )
+        .route(
+            "/acp_find_connection_for_conversation",
+            post(handlers::acp::acp_find_connection_for_conversation),
         )
         .route(
             "/acp_clear_binary_cache",
@@ -692,6 +756,20 @@ pub fn build_router(
             "/check_app_update",
             post(handlers::web_server::check_app_update),
         )
+        .route(
+            "/app_update_status",
+            post(handlers::web_server::app_update_status),
+        )
+        .route(
+            "/app_update_state",
+            post(handlers::app_update::app_update_state),
+        )
+        .route(
+            "/perform_app_update",
+            post(handlers::app_update::perform_app_update),
+        )
+        .route("/restart_app", post(handlers::app_update::restart_app))
+        .route("/rollback_app", post(handlers::app_update::rollback_app))
         // ─── Chat Channels ───
         .route(
             "/list_chat_channels",
@@ -756,6 +834,14 @@ pub fn build_router(
         .route(
             "/set_chat_event_filter",
             post(handlers::chat_channel::set_chat_event_filter),
+        )
+        .route(
+            "/get_chat_event_webhooks",
+            post(handlers::chat_channel::get_chat_event_webhooks),
+        )
+        .route(
+            "/set_chat_event_webhooks",
+            post(handlers::chat_channel::set_chat_event_webhooks),
         )
         .route(
             "/get_chat_message_language",
@@ -894,6 +980,10 @@ pub fn build_router(
             "/pet_get_current_state",
             post(handlers::pet::pet_get_current_state),
         )
+        .route(
+            "/pet_list_active_sessions",
+            post(handlers::pet::pet_list_active_sessions),
+        )
         // ─── Terminal ───
         .route("/terminal_spawn", post(handlers::terminal::terminal_spawn))
         .route("/terminal_write", post(handlers::terminal::terminal_write))
@@ -920,6 +1010,10 @@ pub fn build_router(
         .route(
             "/workspace_download/{ticket}",
             get(handlers::workspace_files::consume_download_ticket),
+        )
+        .route(
+            "/backup_download/{ticket}",
+            get(handlers::backup::backup_download),
         );
 
     let api = public_api.merge(api);
@@ -980,7 +1074,14 @@ pub fn build_router(
 }
 
 async fn health_check() -> impl IntoResponse {
-    Json(serde_json::json!({ "status": "ok" }))
+    // Include the running version so the upgrade UI can confirm — using only a
+    // local signal — that a restart actually landed on the new version (and
+    // wasn't auto-rolled-back by the supervisor) without depending on the
+    // remote update manifest.
+    Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
 }
 
 async fn api_not_found(uri: axum::http::Uri) -> impl IntoResponse {
