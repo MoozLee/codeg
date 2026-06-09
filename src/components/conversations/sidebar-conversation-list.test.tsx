@@ -53,7 +53,7 @@ const stableWorkspaceFns = vi.hoisted(() => ({
 }))
 
 const stableTabFns = vi.hoisted(() => ({
-  openTab: () => {},
+  openTab: vi.fn(),
   closeConversationTab: () => {},
   closeTabsByFolder: () => {},
   openNewConversationTab: () => {},
@@ -692,12 +692,26 @@ describe("SidebarConversationList — scrollToActive across a worktree merge", (
 
 describe("SidebarConversationList — conversation context menu", () => {
   beforeEach(() => {
+    stableTabFns.openTab.mockClear()
     apiMocks.openConversationWindow.mockClear()
     store.folders = [folder(1, "Folder 1")]
     store.allFolders = store.folders
     store.conversations = [conv(11, 1)]
     store.activeTabId = null
     store.tabSpec = []
+  })
+
+  it("pins sidebar clicks as real conversation tabs", () => {
+    render(tree())
+
+    fireEvent.click(screen.getByText("conv-11"))
+
+    expect(stableTabFns.openTab).toHaveBeenCalledWith(
+      1,
+      11,
+      "claude_code",
+      true
+    )
   })
 
   it("opens sidebar conversations in a forced new window", async () => {

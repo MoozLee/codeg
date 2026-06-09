@@ -1043,7 +1043,7 @@ export function SidebarConversationList({
   // for the card `memo` actually bailing out (see Phase 1 of the perf plan).
   const handleSelect = useCallback(
     (id: number, agentType: string, folderId: number) => {
-      openTab(folderId, id, agentType as Parameters<typeof openTab>[2], false)
+      openTab(folderId, id, agentType as Parameters<typeof openTab>[2], true)
     },
     [openTab]
   )
