@@ -6,7 +6,7 @@ import {
   useImperativeHandle,
   useState,
 } from "react"
-import { act, fireEvent, render } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -60,6 +60,9 @@ const stableTabFns = vi.hoisted(() => ({
 }))
 
 const stableAgents = vi.hoisted(() => ({ sortedTypes: ["claude_code"] }))
+const apiMocks = vi.hoisted(() => ({
+  openConversationWindow: vi.fn(async () => ({ focusedExisting: false })),
+}))
 
 // Context functions are stable refs in production (useCallback values); the
 // mocks must be too, else the list's folder callbacks (which close over them)
@@ -164,6 +167,17 @@ vi.mock("@/components/ui/scroll-area", () => ({
 
 vi.mock("next-themes", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),
+}))
+
+vi.mock("@/lib/api", () => ({
+  deleteConversation: vi.fn(async () => {}),
+  importLocalConversations: vi.fn(async () => ({ imported: 0, skipped: 0 })),
+  openConversationWindow: apiMocks.openConversationWindow,
+  openProjectBootWindow: vi.fn(async () => {}),
+  updateConversationStatus: vi.fn(async () => {}),
+  updateConversationTitle: vi.fn(async () => {}),
+  updateFolderColor: vi.fn(async () => {}),
+  updateFolderDefaultAgent: vi.fn(async () => {}),
 }))
 
 vi.mock("@/hooks/use-appearance", () => ({
@@ -673,5 +687,29 @@ describe("SidebarConversationList — scrollToActive across a worktree merge", (
     // because it checked/expanded the child folder id (2) — never a rendered
     // group — so the row never entered the flat model.
     expect(virtuaCtl.scrollToIndex).toHaveBeenCalled()
+  })
+})
+
+describe("SidebarConversationList — conversation context menu", () => {
+  beforeEach(() => {
+    apiMocks.openConversationWindow.mockClear()
+    store.folders = [folder(1, "Folder 1")]
+    store.allFolders = store.folders
+    store.conversations = [conv(11, 1)]
+    store.activeTabId = null
+    store.tabSpec = []
+  })
+
+  it("opens sidebar conversations in a forced new window", async () => {
+    render(tree())
+
+    fireEvent.contextMenu(screen.getByText("conv-11"))
+    fireEvent.click(await screen.findByText("Open in new window"))
+
+    expect(apiMocks.openConversationWindow).toHaveBeenCalledWith(11, {
+      folderId: 1,
+      agentType: "claude_code",
+      forceNewWindow: true,
+    })
   })
 })

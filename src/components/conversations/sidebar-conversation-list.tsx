@@ -1060,6 +1060,7 @@ export function SidebarConversationList({
       void openConversationWindow(id, {
         folderId,
         agentType: agentType as Parameters<typeof openTab>[2],
+        forceNewWindow: true,
       }).catch((error) => {
         toast.error(toErrorMessage(error))
       })
