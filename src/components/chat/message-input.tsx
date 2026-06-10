@@ -2763,9 +2763,14 @@ export function MessageInput({
           )}
         </div>
         {hasFolderBranchPicker && (
+          // `pl-2` mirrors the action bar's `px-2` so this row lines up with the
+          // composer above. Kept on the rem scale (no px literals) so it tracks
+          // UI zoom; the folder icon then aligns with the centered "+" icon
+          // because both buttons add the same 1px transparent border (paired
+          // with the picker buttons' `px-1.5`).
           <div
             className={cn(
-              "flex items-center gap-1.5 pl-2 text-xs text-muted-foreground",
+              "flex items-center gap-1 pl-2 text-xs text-muted-foreground",
               folderBranchPickerAttached ? "rounded-b-xl pt-1 pr-2" : "mt-1.5"
             )}
           >
