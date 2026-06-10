@@ -10,6 +10,7 @@ use crate::parsers::claude::ClaudeParser;
 use crate::parsers::cline::ClineParser;
 use crate::parsers::codex::CodexParser;
 use crate::parsers::gemini::GeminiParser;
+use crate::parsers::hermes::HermesParser;
 use crate::parsers::openclaw::OpenClawParser;
 use crate::parsers::opencode::OpenCodeParser;
 use crate::parsers::{path_eq_for_matching, AgentParser, ParseError};
@@ -163,6 +164,7 @@ fn list_conversations_sync(
         (AgentType::Gemini, Box::new(GeminiParser::new())),
         (AgentType::OpenClaw, Box::new(OpenClawParser::new())),
         (AgentType::Cline, Box::new(ClineParser::new())),
+        (AgentType::Hermes, Box::new(HermesParser::new())),
     ];
 
     for (at, parser) in &parsers {
@@ -266,6 +268,7 @@ pub async fn get_conversation(
             AgentType::Gemini => Box::new(GeminiParser::new()),
             AgentType::OpenClaw => Box::new(OpenClawParser::new()),
             AgentType::Cline => Box::new(ClineParser::new()),
+            AgentType::Hermes => Box::new(HermesParser::new()),
         };
 
         parser
@@ -504,6 +507,7 @@ pub async fn get_folder_conversation_core(
                 AgentType::Gemini => Box::new(GeminiParser::new()),
                 AgentType::OpenClaw => Box::new(OpenClawParser::new()),
                 AgentType::Cline => Box::new(ClineParser::new()),
+                AgentType::Hermes => Box::new(HermesParser::new()),
             };
             match parser.get_conversation(&eid) {
                 Ok(d) => Ok((d.turns, d.session_stats, None, d.summary.title)),
@@ -1164,6 +1168,7 @@ mod tests {
     fn user_text_turn(id: &str, text: &str, ts: chrono::DateTime<chrono::Utc>) -> MessageTurn {
         MessageTurn {
             id: id.into(),
+            anchor_id: Some(format!("anchor-{id}")),
             role: TurnRole::User,
             blocks: vec![ContentBlock::Text { text: text.into() }],
             timestamp: ts,
@@ -1182,6 +1187,7 @@ mod tests {
     ) -> MessageTurn {
         MessageTurn {
             id: id.into(),
+            anchor_id: None,
             role: TurnRole::Assistant,
             blocks: vec![ContentBlock::Text { text: text.into() }],
             timestamp: ts,
@@ -1306,6 +1312,7 @@ mod tests {
     fn stamps_image_user_turn_only_on_exact_match() {
         let image_turn = |id: &str, data: &str| MessageTurn {
             id: id.into(),
+            anchor_id: Some(format!("anchor-{id}")),
             role: TurnRole::User,
             blocks: vec![ContentBlock::Image {
                 data: data.into(),

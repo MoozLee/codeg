@@ -419,6 +419,44 @@ export async function acpUpdateAgentConfig(
   })
 }
 
+/**
+ * Persist a Hermes config update. Writes the active provider's API key to
+ * ~/.hermes/.env and the model/provider/base_url to ~/.hermes/config.yaml.
+ * When `rawConfigYaml` is given, config.yaml is written verbatim (advanced
+ * mode), bypassing the structured merge.
+ */
+export async function acpUpdateHermesConfig(params: {
+  provider: string
+  apiKey?: string | null
+  model?: string | null
+  baseUrl?: string | null
+  rawConfigYaml?: string | null
+}): Promise<void> {
+  return getTransport().call("acp_update_hermes_config", {
+    provider: params.provider,
+    apiKey: params.apiKey ?? null,
+    model: params.model ?? null,
+    baseUrl: params.baseUrl ?? null,
+    rawConfigYaml: params.rawConfigYaml ?? null,
+  })
+}
+
+/**
+ * Launch Hermes's interactive setup in the OS terminal (desktop only). `kind`
+ * picks the flow; the backend constructs the exact command from the registry
+ * recipe (no arbitrary shell text crosses the boundary).
+ */
+export async function acpOpenHermesSetupTerminal(
+  kind: "setup" | "model"
+): Promise<void> {
+  return getTransport().call("acp_open_hermes_setup_terminal", { kind })
+}
+
+/** Ensure ~/.hermes exists and reveal it in the system file manager (desktop). */
+export async function acpRevealHermesHome(): Promise<void> {
+  return getTransport().call("acp_reveal_hermes_home", {})
+}
+
 export async function acpReorderAgents(agentTypes: AgentType[]): Promise<void> {
   return getTransport().call("acp_reorder_agents", { agentTypes })
 }

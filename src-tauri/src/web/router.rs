@@ -625,6 +625,10 @@ pub fn build_router(
             post(handlers::acp::acp_update_agent_config),
         )
         .route(
+            "/acp_update_hermes_config",
+            post(handlers::acp::acp_update_hermes_config),
+        )
+        .route(
             "/acp_download_agent_binary",
             post(handlers::acp::acp_download_agent_binary),
         )

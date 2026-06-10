@@ -3143,6 +3143,7 @@ mod tests {
             Some(folder_id),
             None,
             None,
+            None,
             Some("optimistic-abc".to_string()),
         )
         .await
@@ -3240,6 +3241,7 @@ mod tests {
             }],
             Some(folder_id),
             None,
+            None,
             Some(DelegationLink {
                 parent_conversation_id: parent.id,
                 parent_tool_use_id: "tu-1".into(),
@@ -3336,6 +3338,7 @@ mod tests {
             Some(folder_id),
             None,
             None,
+            None,
         )
         .await
         .expect("send should succeed with a live receiver");
@@ -3378,6 +3381,7 @@ mod tests {
                 uri: None,
             }],
             Some(folder_id),
+            None,
             None,
             None,
         )
