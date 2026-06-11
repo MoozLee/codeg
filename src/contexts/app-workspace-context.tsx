@@ -63,7 +63,9 @@ interface AppWorkspaceContextValue {
   refreshConversations: () => Promise<void>
   updateConversationLocal: (
     id: number,
-    patch: Partial<Pick<DbConversationSummary, "status" | "title">>
+    patch: Partial<
+      Pick<DbConversationSummary, "status" | "title" | "pinned_at">
+    >
   ) => void
   syncConversationSummaryLocal: (sync: ConversationSummaryLocalSync) => void
 
@@ -293,6 +295,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
           message_count: messageCount ?? 0,
           created_at: createdAt ?? nextUpdatedAt,
           updated_at: nextUpdatedAt,
+          pinned_at: null,
         }
 
         return [...prev, newConversation]
@@ -304,11 +307,24 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
   const updateConversationLocal = useCallback(
     (
       id: number,
-      patch: Partial<Pick<DbConversationSummary, "status" | "title">>
+      patch: Partial<
+        Pick<DbConversationSummary, "status" | "title" | "pinned_at">
+      >
     ) => {
-      syncConversationSummaryLocal({ id, ...patch })
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => c.id === id)
+        if (idx < 0) return prev
+        const next = prev.slice()
+        const bumpUpdatedAt = !("pinned_at" in patch)
+        next[idx] = {
+          ...next[idx],
+          ...patch,
+          ...(bumpUpdatedAt ? { updated_at: new Date().toISOString() } : {}),
+        }
+        return next
+      })
     },
-    [syncConversationSummaryLocal]
+    []
   )
 
   // ── Cross-client list/status sync ──────────────────────────────────────

@@ -825,6 +825,7 @@
       "notInstalled": "No instalado",
       "remoteLocal": "Remota: {remoteVersion} · Local: {localVersion}",
       "platformUnsupported": "{versionText}. La plataforma actual no soporta este agente.",
+      "uvxNotReady": "{versionText}. El runtime de uv no está instalado: instálalo desde la comprobación de uv de abajo para usar este agente.",
       "clickInstall": "{versionText}. Haz clic en Instalar a la derecha.",
       "localUnrecognized": "{versionText}. La versión local no es comparable; intenta actualizar para sobrescribir la instalación.",
       "upgradeAvailable": "{versionText}. Hay actualización disponible.",
@@ -972,6 +973,8 @@
       "collapseAllGroups": "Colapsar todos los grupos",
       "newConversation": "Nueva conversación",
       "newConversationShort": "Nueva",
+      "newChat": "Nueva conversación",
+      "search": "Buscar",
       "noConversationsFound": "No se encontraron conversaciones.",
       "importLocalSessions": "Importar sesiones locales",
       "importing": "Importando...",
@@ -1050,7 +1053,9 @@
         "toastDeleted": "Se eliminaron {count} conversación(es)",
         "toastStatusUpdated": "Estado actualizado para {count} conversación(es)",
         "toastOpFailed": "Error en la operación: {message}"
-      }
+      },
+      "sectionPinned": "Fijadas",
+      "sectionFolders": "Carpetas"
     },
     "conversation": {
       "reloadFailed": "No se pudo recargar la conversación: {message}",
@@ -1107,7 +1112,11 @@
       "deleteConversationTitle": "¿Eliminar conversación?",
       "deleteConversationDescription": "Esto eliminará \"{title}\". Esta acción no se puede deshacer.",
       "cancel": "Cancelar",
-      "save": "Guardar"
+      "save": "Guardar",
+      "pin": "Fijar",
+      "unpin": "Dejar de fijar",
+      "markCompleted": "Marcar como completada",
+      "reopen": "Reabrir"
     },
     "search": {
       "dialogTitle": "Buscar",
@@ -2595,6 +2604,8 @@
       "saveFailed": "Error al guardar el filtro de eventos.",
       "permissionRequest": "Solicitud de permiso",
       "permissionRequestDesc": "Cuando un agente solicita permiso para actuar",
+      "questionRequest": "Pregunta del agente",
+      "questionRequestDesc": "Cuando un agente te hace una pregunta",
       "userPromptSent": "Mensaje del usuario",
       "userPromptSentDesc": "Cuando envías un mensaje (el texto del mensaje se incluye en la notificación)",
       "loadFailed": "No se pudo cargar la configuración.",

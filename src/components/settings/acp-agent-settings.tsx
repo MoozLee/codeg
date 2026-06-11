@@ -73,6 +73,8 @@ import {
   acpClearBinaryCache,
   acpDetectAgentLocalVersion,
   acpDownloadAgentBinary,
+  acpInstallUvTool,
+  acpGetAgentStatus,
   acpListAgents,
   acpPreflight,
   acpPrepareNpxAgent,
@@ -169,6 +171,7 @@ type RunningActionKind =
   | "uninstall_npx"
   | "redownload_binary"
   | "custom_install"
+  | "install_uv"
 
 type UiFixAction =
   | FixAction
@@ -184,6 +187,9 @@ type UiFixAction =
         | "install_opencode_plugins"
         | "custom_install"
       payload: string
+      // When true, the fix renders as a greyed-out button (e.g. the uvx
+      // agent-install action while the uv runtime isn't ready yet).
+      disabled?: boolean
     }
 
 interface UiCheckItem {
@@ -2533,7 +2539,15 @@ function isValidCustomVersion(value: string): boolean {
   return /^[0-9][0-9A-Za-z.\-+]*$/.test(normalized) && normalized.includes(".")
 }
 
-function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
+// `uvReady` reports whether the uv runtime (uvx) is installed — only meaningful
+// for uvx agents (Hermes). Derived from the uv preflight check by the caller.
+// uvx agents need uv installed before their package can be prepared, so when
+// uv isn't ready every managed install/upgrade action is surfaced disabled and
+// the user is pointed at the separate "Install uv" preflight action.
+export function buildVersionCheck(
+  agent: AcpAgentInfo,
+  uvReady: boolean = true
+): UiCheckItem | null {
   if (
     agent.distribution_type !== "binary" &&
     agent.distribution_type !== "npx" &&
@@ -2556,7 +2570,47 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
   const uninstallAction: RunningActionKind =
     agent.distribution_type === "binary" ? "uninstall_binary" : "uninstall_npx"
 
-  if (!agent.available) {
+  // uvx agents (Hermes) need the uv runtime before any managed install/upgrade
+  // can run. Surface a single blocked state pointing at the separate "Install
+  // uv" preflight action below, with the agent-install action shown disabled.
+  // This covers both the fresh case (available=false) and the rare system-CLI
+  // case (available=true via a global `hermes`, but uvx still missing).
+  // Uninstall stays available even without uv — it only clears the prepared
+  // marker — so a prepared package can still be removed when uv is gone.
+  if (agent.distribution_type === "uvx" && !uvReady) {
+    const blockedFixes: UiFixAction[] = [
+      {
+        label: acpText("actions.install", "Install"),
+        kind: installAction,
+        payload: agent.agent_type,
+        disabled: true,
+      },
+    ]
+    if (agent.installed_version) {
+      blockedFixes.push({
+        label: acpText("actions.uninstall", "Uninstall"),
+        kind: uninstallAction,
+        payload: agent.agent_type,
+      })
+    }
+    return {
+      check_id: "version_status",
+      label: acpText("version.statusLabel", "Version Status"),
+      status: "warn",
+      message: acpText(
+        "version.uvxNotReady",
+        "{versionText}. The uv runtime isn't installed — install it from the uv check below to use this agent.",
+        { versionText }
+      ),
+      fixes: blockedFixes,
+    }
+  }
+
+  // Only binary agents can be genuinely platform-unsupported (no binary for
+  // this platform). uvx runs everywhere — a uvx agent that reaches here (uv
+  // treated as ready, i.e. preflight unknown) falls through to an actionable
+  // install rather than a dead-end "unsupported" message.
+  if (!agent.available && agent.distribution_type !== "uvx") {
     return {
       check_id: "version_status",
       label: acpText("version.statusLabel", "Version Status"),
@@ -2701,11 +2755,22 @@ function buildVersionCheck(agent: AcpAgentInfo): UiCheckItem | null {
   }
 }
 
-function getAgentChecks(
+export function getAgentChecks(
   agent: AcpAgentInfo,
   current?: AgentCheckState
 ): UiCheckItem[] {
-  const versionCheck = buildVersionCheck(agent)
+  // For uvx agents, only treat uv as not-ready when the preflight result is
+  // present AND its uv check isn't passing. With no result yet (or an errored
+  // preflight) stay optimistic — otherwise we'd block the version-status
+  // install while the "Install uv" button (which lives in that same preflight
+  // result) is absent, a dead end. When the result IS present, the button is
+  // present alongside it, so blocking is always paired with an actionable fix.
+  const uvCheck = current?.result?.checks?.find(
+    (check) => check.check_id === "uv_available"
+  )
+  const uvReady =
+    agent.distribution_type !== "uvx" || !uvCheck || uvCheck.status === "pass"
+  const versionCheck = buildVersionCheck(agent, uvReady)
   const remoteChecks: UiCheckItem[] = (current?.result?.checks ?? []).map(
     (check) => ({
       ...check,
@@ -2934,10 +2999,12 @@ export function AcpAgentSettings() {
     async (agentType: AgentType, forceRefresh?: boolean) => {
       setChecking((prev) => ({ ...prev, [agentType]: true }))
       try {
-        const [resultState, versionState] = await Promise.allSettled([
-          acpPreflight(agentType, forceRefresh),
-          acpDetectAgentLocalVersion(agentType),
-        ])
+        const [resultState, versionState, statusState] =
+          await Promise.allSettled([
+            acpPreflight(agentType, forceRefresh),
+            acpDetectAgentLocalVersion(agentType),
+            acpGetAgentStatus(agentType),
+          ])
 
         if (versionState.status === "fulfilled") {
           setAgents((prev) => {
@@ -2948,6 +3015,24 @@ export function AcpAgentSettings() {
               if (agent.installed_version === versionState.value) return agent
               changed = true
               return { ...agent, installed_version: versionState.value }
+            })
+            return changed ? next : prev
+          })
+        }
+
+        // Re-sync `available` from the authoritative backend status. It is
+        // recomputed live (e.g. `uvx_agent_launchable` for Hermes), so an
+        // install that provisions the runtime flips it true here — otherwise
+        // the version-status panel would stay stuck on the unavailable /
+        // "runtime not ready" branch with the freshly installed version shown.
+        if (statusState.status === "fulfilled") {
+          setAgents((prev) => {
+            let changed = false
+            const next = prev.map((agent) => {
+              if (agent.agent_type !== agentType) return agent
+              if (agent.available === statusState.value.available) return agent
+              changed = true
+              return { ...agent, available: statusState.value.available }
             })
             return changed ? next : prev
           })
@@ -3487,6 +3572,49 @@ export function AcpAgentSettings() {
     [runPreflight, t, installStream.start]
   )
 
+  // Install ONLY the uv runtime (uvx) — separate from preparing a uvx agent's
+  // package. Triggered by the uv preflight check's "Install uv" fix. On success
+  // `runPreflight` re-syncs the uv check + `available`, unblocking the agent's
+  // version-status install action.
+  const runUvInstall = useCallback(
+    async (agent: AcpAgentInfo) => {
+      if (busyActionRef.current.has(agent.agent_type)) return
+      busyActionRef.current.add(agent.agent_type)
+      setBusyBinaryAction((prev) => ({ ...prev, [agent.agent_type]: true }))
+      setRunningActionKind((prev) => ({
+        ...prev,
+        [agent.agent_type]: "install_uv",
+      }))
+      const actionLabel = t("actions.install")
+      const taskId = randomUUID()
+      setStreamAgentType(agent.agent_type)
+      await installStream.start(taskId)
+      try {
+        await acpInstallUvTool(taskId)
+        await runPreflight(agent.agent_type)
+        toast.success(
+          t("toasts.agentActionCompleted", { name: "uv", action: actionLabel })
+        )
+      } catch (err) {
+        const message = toErrorMessage(err)
+        toast.error(
+          t("toasts.agentActionFailed", { name: "uv", action: actionLabel }),
+          { description: message }
+        )
+        throw err
+      } finally {
+        busyActionRef.current.delete(agent.agent_type)
+        setBusyBinaryAction((prev) => ({ ...prev, [agent.agent_type]: false }))
+        setRunningActionKind((prev) => ({
+          ...prev,
+          [agent.agent_type]: undefined,
+        }))
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runPreflight, t, installStream.start]
+  )
+
   const handleFixAction = async (agent: AcpAgentInfo, action: UiFixAction) => {
     if (
       busyBinaryAction[agent.agent_type] ||
@@ -3525,6 +3653,10 @@ export function AcpAgentSettings() {
     if (action.kind === "install_opencode_plugins") {
       setPluginModalAgent(agent.agent_type)
       setPluginModalOpen(true)
+      return
+    }
+    if (action.kind === "install_uv") {
+      await runUvInstall(agent)
       return
     }
     if (action.kind === "custom_install") {
@@ -3641,18 +3773,20 @@ export function AcpAgentSettings() {
                     variant="outline"
                     className="h-6 bg-muted/30 hover:bg-muted/50 disabled:bg-muted/30 disabled:opacity-100"
                     disabled={
-                      Boolean(busyBinaryAction[agent.agent_type]) &&
-                      [
-                        "download_binary",
-                        "upgrade_binary",
-                        "install_npx",
-                        "upgrade_npx",
-                        "uninstall_binary",
-                        "uninstall_npx",
-                        "redownload_binary",
-                        "install_opencode_plugins",
-                        "custom_install",
-                      ].includes(fix.kind)
+                      ("disabled" in fix && fix.disabled === true) ||
+                      (Boolean(busyBinaryAction[agent.agent_type]) &&
+                        [
+                          "download_binary",
+                          "upgrade_binary",
+                          "install_npx",
+                          "upgrade_npx",
+                          "uninstall_binary",
+                          "uninstall_npx",
+                          "redownload_binary",
+                          "install_opencode_plugins",
+                          "custom_install",
+                          "install_uv",
+                        ].includes(fix.kind))
                     }
                     onClick={() => {
                       handleFixAction(agent, fix).catch((err) => {
@@ -3663,7 +3797,8 @@ export function AcpAgentSettings() {
                     {runningActionKind[agent.agent_type] === fix.kind ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
                     ) : fix.kind === "download_binary" ||
-                      fix.kind === "install_npx" ? (
+                      fix.kind === "install_npx" ||
+                      fix.kind === "install_uv" ? (
                       <Download className="h-3 w-3" />
                     ) : fix.kind === "upgrade_binary" ||
                       fix.kind === "upgrade_npx" ||

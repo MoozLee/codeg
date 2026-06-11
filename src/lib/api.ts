@@ -330,6 +330,17 @@ export async function acpDownloadAgentBinary(
   })
 }
 
+export async function acpInstallUvTool(taskId: string): Promise<void> {
+  // uv install downloads + extracts the toolchain from GitHub; allow well
+  // beyond the default 60s web-call timeout so slow networks don't surface a
+  // spurious timeout while the backend is still streaming progress.
+  return getTransport().call(
+    "acp_install_uv_tool",
+    { taskId },
+    { timeoutMs: 600_000 }
+  )
+}
+
 export async function acpDetectAgentLocalVersion(
   agentType: AgentType
 ): Promise<string | null> {
@@ -1754,6 +1765,16 @@ export async function updateConversationTitle(
   return getTransport().call("update_conversation_title", {
     conversationId,
     title,
+  })
+}
+
+export async function updateConversationPinned(
+  conversationId: number,
+  pinned: boolean
+): Promise<void> {
+  return getTransport().call("update_conversation_pinned", {
+    conversationId,
+    pinned,
   })
 }
 

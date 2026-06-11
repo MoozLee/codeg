@@ -15,6 +15,7 @@ static NPM_ENV_CACHE: Mutex<Option<Vec<CheckItem>>> = Mutex::new(None);
 pub enum FixActionKind {
     OpenUrl,
     InstallOpencodePlugins,
+    InstallUv,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -317,7 +318,9 @@ async fn check_uv_environment(
     }
 
     // Fallback: the agent's own CLI is already installed on PATH (e.g. a user
-    // who ran the official installer has `hermes` available).
+    // who ran the official installer has `hermes` available). The agent is
+    // launchable as-is, but installing uv unlocks codeg's managed install /
+    // upgrade flow, so offer it as a non-blocking action.
     if let Some((cmd, _)) = system_cmd {
         if crate::commands::acp::resolve_command_on_path(cmd).is_some() {
             return vec![CheckItem {
@@ -325,23 +328,30 @@ async fn check_uv_environment(
                 label: "uv".into(),
                 status: CheckStatus::Warn,
                 message: format!(
-                    "uv not found; will launch via the system `{cmd}` command on PATH"
+                    "uv not found; will launch via the system `{cmd}` command on PATH. Install uv to enable managed install/upgrade."
                 ),
-                fixes: vec![],
+                fixes: vec![FixAction {
+                    label: "Install uv".into(),
+                    kind: FixActionKind::InstallUv,
+                    payload: String::new(),
+                }],
             }];
         }
     }
 
-    // Not a hard failure: codeg auto-provisions the uv toolchain on demand when
-    // the agent is installed (see `prewarm_uvx_agent` → `ensure_uv_tool`).
+    // uv is required and not installed: a hard failure with an actionable
+    // installer. Installing uv is a separate step from installing the agent.
     vec![CheckItem {
         check_id: "uv_available".into(),
         label: "uv".into(),
-        status: CheckStatus::Warn,
-        message:
-            "uv (the Python tool runner) isn't installed yet; codeg will install it automatically when you install this agent"
-                .into(),
-        fixes: vec![],
+        status: CheckStatus::Fail,
+        message: "uv (the Python tool runner) is not installed. Click Install uv to set it up."
+            .into(),
+        fixes: vec![FixAction {
+            label: "Install uv".into(),
+            kind: FixActionKind::InstallUv,
+            payload: String::new(),
+        }],
     }]
 }
 

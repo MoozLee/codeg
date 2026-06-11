@@ -115,6 +115,7 @@ const conversationsMock: DbConversationSummary[] = [
     message_count: 1,
     created_at: "2026-05-24T00:00:00Z",
     updated_at: "2026-05-24T00:00:00Z",
+    pinned_at: null,
   },
   {
     id: 2,
@@ -129,6 +130,7 @@ const conversationsMock: DbConversationSummary[] = [
     message_count: 1,
     created_at: "2026-05-24T00:00:00Z",
     updated_at: "2026-05-24T00:00:00Z",
+    pinned_at: null,
   },
   {
     id: 3,
@@ -143,6 +145,7 @@ const conversationsMock: DbConversationSummary[] = [
     message_count: 1,
     created_at: "2026-05-24T00:00:00Z",
     updated_at: "2026-05-24T00:00:00Z",
+    pinned_at: null,
   },
 ]
 

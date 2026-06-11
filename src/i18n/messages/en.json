@@ -825,6 +825,7 @@
       "notInstalled": "Not installed",
       "remoteLocal": "Remote: {remoteVersion} · Local: {localVersion}",
       "platformUnsupported": "{versionText}. Current platform does not support this agent.",
+      "uvxNotReady": "{versionText}. The uv runtime isn't installed — install it from the uv check below to use this agent.",
       "clickInstall": "{versionText}. Click Install on the right.",
       "localUnrecognized": "{versionText}. Local version is not comparable; try upgrade to overwrite install.",
       "upgradeAvailable": "{versionText}. Upgrade available.",
@@ -972,6 +973,8 @@
       "collapseAllGroups": "Collapse All Groups",
       "newConversation": "New Conversation",
       "newConversationShort": "New",
+      "newChat": "New chat",
+      "search": "Search",
       "noConversationsFound": "No conversations found.",
       "importLocalSessions": "Import local sessions",
       "importing": "Importing...",
@@ -1050,7 +1053,9 @@
         "toastDeleted": "Deleted {count} conversation(s)",
         "toastStatusUpdated": "Updated status for {count} conversation(s)",
         "toastOpFailed": "Operation failed: {message}"
-      }
+      },
+      "sectionPinned": "Pinned",
+      "sectionFolders": "Folders"
     },
     "conversation": {
       "reloadFailed": "Failed to reload conversation: {message}",
@@ -1107,7 +1112,11 @@
       "deleteConversationTitle": "Delete conversation?",
       "deleteConversationDescription": "This will delete \"{title}\". This action cannot be undone.",
       "cancel": "Cancel",
-      "save": "Save"
+      "save": "Save",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "markCompleted": "Mark as completed",
+      "reopen": "Reopen"
     },
     "search": {
       "dialogTitle": "Search",
@@ -2607,6 +2616,8 @@
       "saveFailed": "Failed to save event filter.",
       "permissionRequest": "Permission Request",
       "permissionRequestDesc": "When an agent requests permission to act",
+      "questionRequest": "Agent Question",
+      "questionRequestDesc": "When an agent asks you a question",
       "userPromptSent": "User Message",
       "userPromptSentDesc": "When you send a message — the message text is included in the notification",
       "loadFailed": "Failed to load settings.",

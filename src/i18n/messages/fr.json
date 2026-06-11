@@ -825,6 +825,7 @@
       "notInstalled": "Non installé",
       "remoteLocal": "Distant : {remoteVersion} · Local : {localVersion}",
       "platformUnsupported": "{versionText}. La plateforme actuelle ne prend pas en charge cet agent.",
+      "uvxNotReady": "{versionText}. Le runtime uv n'est pas installé — installez-le depuis la vérification uv ci-dessous pour utiliser cet agent.",
       "clickInstall": "{versionText}. Cliquez sur Installer à droite.",
       "localUnrecognized": "{versionText}. La version locale n’est pas comparable ; essayez une mise à niveau pour écraser l’installation.",
       "upgradeAvailable": "{versionText}. Mise à niveau disponible.",
@@ -972,6 +973,8 @@
       "collapseAllGroups": "Réduire tous les groupes",
       "newConversation": "Nouvelle conversation",
       "newConversationShort": "Nouvelle",
+      "newChat": "Nouvelle conversation",
+      "search": "Rechercher",
       "noConversationsFound": "Aucune conversation trouvée.",
       "importLocalSessions": "Importer les sessions locales",
       "importing": "Import en cours...",
@@ -1050,7 +1053,9 @@
         "toastDeleted": "{count} conversation(s) supprimée(s)",
         "toastStatusUpdated": "Statut mis à jour pour {count} conversation(s)",
         "toastOpFailed": "Échec de l'opération : {message}"
-      }
+      },
+      "sectionPinned": "Épinglées",
+      "sectionFolders": "Dossiers"
     },
     "conversation": {
       "reloadFailed": "Échec du rechargement de la conversation : {message}",
@@ -1107,7 +1112,11 @@
       "deleteConversationTitle": "Supprimer la conversation ?",
       "deleteConversationDescription": "Cela supprimera \"{title}\". Cette action est irréversible.",
       "cancel": "Annuler",
-      "save": "Enregistrer"
+      "save": "Enregistrer",
+      "pin": "Épingler",
+      "unpin": "Désépingler",
+      "markCompleted": "Marquer comme terminé",
+      "reopen": "Rouvrir"
     },
     "search": {
       "dialogTitle": "Rechercher",
@@ -2595,6 +2604,8 @@
       "saveFailed": "Échec de l'enregistrement du filtre d'événements.",
       "permissionRequest": "Demande d'autorisation",
       "permissionRequestDesc": "Lorsqu'un agent demande une autorisation",
+      "questionRequest": "Question de l'agent",
+      "questionRequestDesc": "Quand un agent vous pose une question",
       "userPromptSent": "Message de l'utilisateur",
       "userPromptSentDesc": "Lorsque vous envoyez un message (le texte du message est inclus dans la notification)",
       "loadFailed": "Échec du chargement des paramètres.",

@@ -825,6 +825,7 @@
       "notInstalled": "غير مثبت",
       "remoteLocal": "البعيد: {remoteVersion} · المحلي: {localVersion}",
       "platformUnsupported": "{versionText}. المنصة الحالية لا تدعم هذا الوكيل.",
+      "uvxNotReady": "{versionText}. وقت تشغيل uv غير مثبّت — ثبّته من فحص uv بالأسفل لاستخدام هذا الوكيل.",
       "clickInstall": "{versionText}. انقر تثبيت في الجهة اليمنى.",
       "localUnrecognized": "{versionText}. الإصدار المحلي غير قابل للمقارنة؛ جرّب الترقية للكتابة فوق التثبيت.",
       "upgradeAvailable": "{versionText}. تتوفر ترقية.",
@@ -972,6 +973,8 @@
       "collapseAllGroups": "طي كل المجموعات",
       "newConversation": "محادثة جديدة",
       "newConversationShort": "جديدة",
+      "newChat": "محادثة جديدة",
+      "search": "بحث",
       "noConversationsFound": "لم يتم العثور على محادثات.",
       "importLocalSessions": "استيراد الجلسات المحلية",
       "importing": "جارٍ الاستيراد...",
@@ -1050,7 +1053,9 @@
         "toastDeleted": "تم حذف {count} محادثة",
         "toastStatusUpdated": "تم تحديث حالة {count} محادثة",
         "toastOpFailed": "فشلت العملية: {message}"
-      }
+      },
+      "sectionPinned": "مثبّتة",
+      "sectionFolders": "المجلدات"
     },
     "conversation": {
       "reloadFailed": "فشل إعادة تحميل المحادثة: {message}",
@@ -1107,7 +1112,11 @@
       "deleteConversationTitle": "حذف المحادثة؟",
       "deleteConversationDescription": "سيؤدي ذلك إلى حذف \"{title}\". لا يمكن التراجع عن هذا الإجراء.",
       "cancel": "إلغاء",
-      "save": "حفظ"
+      "save": "حفظ",
+      "pin": "تثبيت",
+      "unpin": "إلغاء التثبيت",
+      "markCompleted": "وضع علامة كمكتمل",
+      "reopen": "إعادة فتح"
     },
     "search": {
       "dialogTitle": "بحث",
@@ -2595,6 +2604,8 @@
       "saveFailed": "فشل حفظ فلتر الأحداث.",
       "permissionRequest": "طلب إذن",
       "permissionRequestDesc": "عندما يطلب الوكيل إذنًا لتنفيذ إجراء",
+      "questionRequest": "سؤال من الوكيل",
+      "questionRequestDesc": "عندما يطرح أحد الوكلاء سؤالاً عليك",
       "userPromptSent": "رسالة المستخدم",
       "userPromptSentDesc": "عند إرسالك رسالة — يُضمَّن نص الرسالة في الإشعار",
       "loadFailed": "فشل تحميل الإعدادات.",

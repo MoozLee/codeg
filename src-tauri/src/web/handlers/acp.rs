@@ -675,6 +675,23 @@ pub async fn acp_download_agent_binary(
     Ok(Json(()))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpInstallUvToolParams {
+    pub task_id: String,
+}
+
+pub async fn acp_install_uv_tool(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpInstallUvToolParams>,
+) -> Result<Json<()>, AppCommandError> {
+    let emitter = state.emitter.clone();
+    acp_commands::acp_install_uv_tool_core(params.task_id, &emitter)
+        .await
+        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(()))
+}
+
 pub async fn acp_detect_agent_local_version(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AgentTypeParams>,

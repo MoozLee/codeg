@@ -390,6 +390,7 @@ async fn build_agent(
             cmd,
             args,
             env,
+            python,
             system_cmd,
             ..
         } => {
@@ -399,9 +400,12 @@ async fn build_agent(
                 parts.push(format!("{k}={v}"));
             }
             if let Some(uvx_path) = crate::commands::acp::resolve_uvx_command() {
-                // Primary: `uvx --from <pinned package> <entry script>`.
-                // uvx fetches + caches the pinned package on first use.
+                // Primary: `uvx [--python <ver>] --from <pinned package> <entry
+                // script>`. uvx fetches + caches the pinned package on first use;
+                // the `--python` pin keeps it on an interpreter the agent
+                // supports (see the registry `python` field).
                 parts.push(uvx_path.to_string_lossy().to_string());
+                parts.extend(crate::commands::acp::uvx_python_args(python));
                 parts.push("--from".into());
                 parts.push(package.to_string());
                 parts.push(cmd.to_string());

@@ -32,6 +32,11 @@ pub enum AgentDistribution {
         env: &'static [(&'static str, &'static str)],
         /// Minimum `uv` version required, e.g. "0.5.0". None means no specific requirement.
         uv_required: Option<&'static str>,
+        /// Interpreter to pin via `uvx --python <ver>`, e.g. `Some("3.13")`.
+        /// `None` lets uvx pick its default interpreter. Set this when the
+        /// package (or a transitive dep) does not support the machine's default
+        /// Python — uv auto-downloads a managed build of the pinned version.
+        python: Option<&'static str>,
         /// Fallback command resolvable on PATH when `uvx` is unavailable, e.g.
         /// `Some(("hermes", &["acp"]))` — lets users who installed the agent via
         /// its official installer launch it without `uv`.
@@ -270,6 +275,13 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
                 args: &[],
                 env: &[],
                 uv_required: Some("0.5.0"),
+                // hermes-agent 0.16.0 is `requires-python = ">=3.11,<3.14"`, and
+                // its win32 dep `pywinpty` (>=2.0.0,<3) has no Python 3.14 wheel
+                // (the 2.0.15 source build fails against PyO3's 3.13 ceiling).
+                // Without this pin uvx grabs the machine's default interpreter
+                // (e.g. 3.14) and the install breaks; 3.13 is the newest version
+                // Hermes supports.
+                python: Some("3.13"),
                 system_cmd: Some(("hermes", &["acp"])),
             },
         },
@@ -310,6 +322,7 @@ mod tests {
         expected_version: &str,
         expected_package: &str,
         expected_uv_required: Option<&str>,
+        expected_python: Option<&str>,
     ) {
         let meta = get_agent_meta(agent_type);
         match meta.distribution {
@@ -317,11 +330,13 @@ mod tests {
                 version,
                 package,
                 uv_required,
+                python,
                 ..
             } => {
                 assert_eq!(version, expected_version);
                 assert_eq!(package, expected_package);
                 assert_eq!(uv_required, expected_uv_required);
+                assert_eq!(python, expected_python);
                 assert_eq!(meta.registry_version(), Some(expected_version));
             }
             other => {
@@ -379,6 +394,9 @@ mod tests {
             "0.16.0",
             "hermes-agent[acp,mcp]==0.16.0",
             Some("0.5.0"),
+            // hermes-agent 0.16.0 is requires-python `<3.14`; uvx must pin an
+            // interpreter it (and its win32 `pywinpty` dep) supports.
+            Some("3.13"),
         );
     }
 }
