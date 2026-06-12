@@ -162,8 +162,13 @@ export function TabProvider({
 }: TabProviderProps) {
   const t = useTranslations("Folder.tabContext")
   const { activateConversationPane } = useWorkspaceContext()
-  const { conversations, folders, foldersHydrated, setActiveFolderId } =
-    useAppWorkspace()
+  const {
+    conversations,
+    folders,
+    allFolders,
+    foldersHydrated,
+    setActiveFolderId,
+  } = useAppWorkspace()
   const { disconnect: acpDisconnect } = useAcpActions()
 
   const [tabState, setTabState] = useState<TabState>({
@@ -264,6 +269,19 @@ export function TabProvider({
   useEffect(() => {
     foldersRef.current = folders
   }, [folders])
+
+  // `allFolders` includes hidden `is_chat` folders (the user-facing `folders`
+  // list filters them out, and drops them on refetch), so chat-folder detection
+  // must read this ref — never `foldersRef`.
+  const allFoldersRef = useRef(allFolders)
+  useEffect(() => {
+    allFoldersRef.current = allFolders
+  }, [allFolders])
+
+  // Forward reference to `openChatModeTab` (defined after `openNewConversationTab`
+  // but called by it for the chat-folder redirect). Assigned at render time once
+  // the callback is created, mirroring the existing callback-ref idiom.
+  const openChatModeTabRef = useRef<() => void>(() => {})
 
   // ACP agent list driven by the shared hook. `sortedTypes` reflects the
   // user-defined drag-sort order (filtered to enabled+available) and is
@@ -396,6 +414,10 @@ export function TabProvider({
                     workingDir: request.workingDir,
                     agentType: request.agentType,
                     agentTypeProvisional: request.provisional,
+                    // Retargets only ever move a draft to a REAL folder (the
+                    // chat-folder case is redirected to openChatModeTab), so this
+                    // clears chat mode if the draft was previously a chat draft.
+                    isChat: false,
                   }
                 : tab
             ),
@@ -771,11 +793,26 @@ export function TabProvider({
 
   const makeReplacementDraftTab = useCallback(
     (preferred?: TabItemInternal): TabItemInternal => {
-      const folderId = preferred?.folderId ?? foldersRef.current[0]?.id ?? 0
-      const workingDir =
-        preferred?.workingDir ??
-        foldersRef.current.find((f) => f.id === folderId)?.path ??
-        ""
+      // A closing chat-mode tab (its hidden `is_chat` folder, or the in-memory
+      // draft flag) must not seed the replacement draft — that folder is hidden
+      // from folder lists and has no real project cwd. Fall back to a real
+      // folder. Detection reads `allFoldersRef` (the in-memory draft flag is
+      // dropped on reload, and `foldersRef` excludes chat folders after refetch),
+      // while the fallback pool reads the user-facing `foldersRef`.
+      const preferredIsChat =
+        preferred?.isChat === true ||
+        allFoldersRef.current.find((f) => f.id === preferred?.folderId)
+          ?.is_chat === true
+      const nonChatFallbackId =
+        foldersRef.current.find((f) => !f.is_chat)?.id ?? 0
+      const folderId = preferredIsChat
+        ? nonChatFallbackId
+        : (preferred?.folderId ?? nonChatFallbackId)
+      const workingDir = preferredIsChat
+        ? (foldersRef.current.find((f) => f.id === folderId)?.path ?? "")
+        : (preferred?.workingDir ??
+          foldersRef.current.find((f) => f.id === folderId)?.path ??
+          "")
       // If we have a preferred (closing) tab, inherit BOTH its agent and
       // its provisional flag — we should not silently launder a system
       // best-guess into a confirmed value just because the source tab was
@@ -875,12 +912,15 @@ export function TabProvider({
           }
         })
 
-        // Keep the device-local draft if its folder still exists.
+        // Keep the device-local draft if it's a folderless chat draft (its
+        // `folderId` 0 is in no folder list, so check the flag) or its real
+        // folder still exists. Never yank the user off an in-progress draft.
         const localDraft = prev.rawTabs.find((tb) => tb.conversationId == null)
         const nextTabs = [...remoteTabs]
         if (
           localDraft &&
-          foldersRef.current.some((f) => f.id === localDraft.folderId)
+          (localDraft.isChat === true ||
+            foldersRef.current.some((f) => f.id === localDraft.folderId))
         ) {
           nextTabs.push(localDraft)
         }
@@ -1216,6 +1256,15 @@ export function TabProvider({
         folderDefaultAgent?: AgentType | null
       }
     ) => {
+      // "New conversation" while a chat conversation is active resolves the
+      // active (hidden) chat folder. Never pile a second conversation into a
+      // per-conversation chat folder — its delete cleanup retires the folder and
+      // it has no real project cwd — so start a fresh folderless chat draft
+      // instead. Single choke point for every "new conversation" entry point.
+      if (allFoldersRef.current.find((f) => f.id === folderId)?.is_chat) {
+        openChatModeTabRef.current()
+        return
+      }
       // Pick the agent for the new conversation via the shared resolver.
       // Only inherit from the active tab when the caller opted in. The
       // active tab counts as a valid inherit source if it's either:
@@ -1326,6 +1375,122 @@ export function TabProvider({
     [activateConversationPane, resolveAgentForFolder, t]
   )
 
+  const openChatModeTab = useCallback(() => {
+    // Inherit the agent like openNewConversationTab's inherit path: keep the
+    // active tab's agent when it's a real conversation or a confirmed draft,
+    // else fall back to the global default (chat mode has no folder default).
+    const activeTab = rawTabsRef.current.find(
+      (x) => x.id === activeTabIdRef.current
+    )
+    const inherit =
+      activeTab &&
+      (activeTab.conversationId != null || !activeTab.agentTypeProvisional)
+        ? activeTab.agentType
+        : null
+    const { agentType: targetAgent, provisional } = resolveAgentForFolder(
+      0,
+      inherit,
+      null
+    )
+
+    // Capture the existing singleton draft (if any) up front so its stale ACP
+    // session can be torn down after we flip it to chat mode.
+    const existingDraft = rawTabsRef.current.find(
+      (t) => t.conversationId == null
+    )
+    const needsDisconnect =
+      existingDraft != null &&
+      !(existingDraft.isChat && existingDraft.folderId === 0)
+
+    const tabId = makeNewConversationTabId()
+    setTabState((prevState) => {
+      const existingTab = prevState.rawTabs.find(
+        (t) => t.conversationId == null
+      )
+
+      if (!existingTab) {
+        const newTab: TabItemInternal = {
+          id: tabId,
+          kind: "conversation",
+          folderId: 0,
+          conversationId: null,
+          agentType: targetAgent,
+          title: t("newConversation"),
+          isPinned: true,
+          workingDir: undefined,
+          agentTypeProvisional: provisional,
+          isChat: true,
+        }
+        return {
+          ...prevState,
+          rawTabs: [...prevState.rawTabs, newTab],
+          activeTabId: tabId,
+        }
+      }
+
+      // Already a chat-mode draft — just focus it.
+      if (existingTab.isChat && existingTab.folderId === 0) {
+        if (prevState.activeTabId === existingTab.id) return prevState
+        return { ...prevState, activeTabId: existingTab.id }
+      }
+
+      // Existing draft on a real folder: flip it to chat mode SYNCHRONOUSLY in
+      // this same state update (folderId + isChat together), so a send issued
+      // before any async teardown can never still create/send in the old folder.
+      // Its now-stale ACP session is disconnected fire-and-forget below. The
+      // agent is re-resolved for chat mode (no folder default), so a draft still
+      // carrying its old folder's provisional default doesn't leak into chat.
+      return {
+        ...prevState,
+        activeTabId: existingTab.id,
+        rawTabs: prevState.rawTabs.map((tab) =>
+          tab.id === existingTab.id
+            ? {
+                ...tab,
+                folderId: 0,
+                workingDir: undefined,
+                isChat: true,
+                agentType: targetAgent,
+                agentTypeProvisional: provisional,
+              }
+            : tab
+        ),
+      }
+    })
+    if (needsDisconnect && existingDraft) {
+      void acpDisconnect(existingDraft.id).catch((err) => {
+        console.error("[TabProvider] disconnect chat-mode draft:", err)
+      })
+    }
+    activateConversationPane()
+  }, [acpDisconnect, activateConversationPane, resolveAgentForFolder, t])
+  // Forward reference for `openNewConversationTab`'s chat-folder redirect (the
+  // callbacks are siblings; this mirrors the codebase's callback-ref idiom).
+  openChatModeTabRef.current = openChatModeTab
+
+  const setChatDraftWorkingDir = useCallback(
+    (tabId: string, workingDir: string) => {
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== tabId) return tab
+          // Guard against a stale eager-prepare result landing after the draft
+          // already bound, retargeted to a real folder, or left chat mode — any
+          // of which would make this workingDir wrong. Only patch a still-unbound
+          // chat draft, and skip a redundant write to keep the reference stable.
+          if (
+            tab.conversationId != null ||
+            tab.isChat !== true ||
+            tab.workingDir === workingDir
+          ) {
+            return tab
+          }
+          return { ...tab, workingDir }
+        })
+      )
+    },
+    [setTabs]
+  )
+
   const confirmDraftAgent = useCallback(
     (tabId: string, agentType: AgentType) => {
       setTabs((prev) =>
@@ -1363,7 +1528,9 @@ export function TabProvider({
       conversationId: number,
       agentType: AgentType,
       title: string,
-      runtimeConversationId?: number
+      runtimeConversationId?: number,
+      folderId?: number,
+      workingDir?: string
     ) => {
       setTabState((prevState) => {
         const nextTabs = prevState.rawTabs.flatMap((tab) => {
@@ -1377,6 +1544,12 @@ export function TabProvider({
               // Bound to a real conversation now — drop the provisional
               // hint so the correction effect never revisits it.
               agentTypeProvisional: false,
+              // Chat-mode bind: point at the backend-created hidden `is_chat`
+              // folder and its scratch cwd. `isChat` stays set so chrome stays
+              // hidden through the brief window before the folder lands in
+              // `allFolders` (after which `activeFolder.is_chat` takes over).
+              ...(folderId != null ? { folderId } : {}),
+              ...(workingDir != null ? { workingDir } : {}),
             }
             return [nextTab]
           }
@@ -1582,6 +1755,8 @@ export function TabProvider({
       pinTab,
       toggleTileMode,
       openNewConversationTab,
+      openChatModeTab,
+      setChatDraftWorkingDir,
       confirmDraftAgent,
       setDraftAgentFromFallback,
       bindConversationTab,
@@ -1607,6 +1782,8 @@ export function TabProvider({
       pinTab,
       toggleTileMode,
       openNewConversationTab,
+      openChatModeTab,
+      setChatDraftWorkingDir,
       confirmDraftAgent,
       setDraftAgentFromFallback,
       bindConversationTab,

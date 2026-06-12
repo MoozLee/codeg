@@ -17,6 +17,7 @@ function mkFolder(p: Partial<FolderDetail> & { id: number }): FolderDetail {
     color: "blue",
     is_pinned: false,
     parent_id: null,
+    is_chat: false,
     ...p,
   }
 }

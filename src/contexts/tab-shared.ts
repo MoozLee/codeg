@@ -22,6 +22,7 @@ export interface TabItemInternal {
   isPinned: boolean
   workingDir?: string
   status?: ConversationStatus
+  isChat?: boolean
 }
 
 export type TabItem = TabItemInternal
@@ -60,6 +61,8 @@ export interface TabContextValue {
       folderDefaultAgent?: AgentType | null
     }
   ) => void
+  openChatModeTab: () => void
+  setChatDraftWorkingDir: (tabId: string, workingDir: string) => void
   confirmDraftAgent: (tabId: string, agentType: AgentType) => void
   setDraftAgentFromFallback: (tabId: string, agentType: AgentType) => void
   bindConversationTab: (
@@ -67,7 +70,9 @@ export interface TabContextValue {
     conversationId: number,
     agentType: AgentType,
     title: string,
-    runtimeConversationId?: number
+    runtimeConversationId?: number,
+    folderId?: number,
+    workingDir?: string
   ) => void
   setTabRuntimeConversationId: (
     tabId: string,

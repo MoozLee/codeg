@@ -41,6 +41,7 @@ fn to_detail(m: folder::Model) -> FolderDetail {
         color: m.color,
         is_pinned: m.is_pinned,
         parent_id: m.parent_id,
+        is_chat: m.is_chat,
     }
 }
 
@@ -143,11 +144,52 @@ async fn add_folder_inner(
                 ParentWrite::Preserve => None,
                 ParentWrite::Set(parent_id) => parent_id,
             }),
+            is_chat: Set(false),
         };
         active.insert(conn).await?
     };
 
     Ok(to_entry(model))
+}
+
+/// Create a dedicated hidden folder backing a single chat-mode conversation.
+///
+/// Unlike [`add_folder`], the display name is a fixed sentinel ("Chat") rather
+/// than derived from the path, and `is_chat` is set so the frontend routes this
+/// folder's conversations to the sidebar "Chat" group and hides folder-bound
+/// chrome. `path` is a freshly generated per-conversation scratch dir, so it
+/// never collides on the `UNIQUE(path)` constraint. Returns the full
+/// [`FolderDetail`] so the caller can hand it straight to the frontend.
+pub async fn add_chat_folder(
+    conn: &DatabaseConnection,
+    path: &str,
+) -> Result<FolderDetail, DbError> {
+    let now = Utc::now();
+    let max_order = folder::Entity::find()
+        .order_by_desc(folder::Column::SortOrder)
+        .one(conn)
+        .await?
+        .map(|m| m.sort_order)
+        .unwrap_or(0);
+    let active = folder::ActiveModel {
+        id: NotSet,
+        name: Set("Chat".to_string()),
+        path: Set(path.to_string()),
+        git_branch: Set(None),
+        default_agent_type: Set(None),
+        last_opened_at: Set(now),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deleted_at: Set(None),
+        is_open: Set(true),
+        sort_order: Set(max_order + 1),
+        color: Set(DEFAULT_FOLDER_COLOR.to_string()),
+        is_pinned: Set(false),
+        parent_id: Set(None),
+        is_chat: Set(true),
+    };
+    let model = active.insert(conn).await?;
+    Ok(to_detail(model))
 }
 
 pub async fn update_folder_color(
@@ -246,6 +288,9 @@ pub async fn update_folder_default_agent(
 pub async fn list_folders(conn: &DatabaseConnection) -> Result<Vec<FolderHistoryEntry>, DbError> {
     let rows = folder::Entity::find()
         .filter(folder::Column::DeletedAt.is_null())
+        // Hidden chat folders are an implementation detail, never user-facing in
+        // folder history / open-folder pickers.
+        .filter(folder::Column::IsChat.eq(false))
         .order_by_desc(folder::Column::LastOpenedAt)
         .all(conn)
         .await?;
@@ -292,6 +337,7 @@ pub async fn list_open_folders(
     let rows = folder::Entity::find()
         .filter(folder::Column::DeletedAt.is_null())
         .filter(folder::Column::IsOpen.eq(true))
+        .filter(folder::Column::IsChat.eq(false))
         .order_by_desc(folder::Column::LastOpenedAt)
         .all(conn)
         .await?;
@@ -302,9 +348,13 @@ pub async fn list_open_folders(
 pub async fn list_open_folder_details(
     conn: &DatabaseConnection,
 ) -> Result<Vec<FolderDetail>, DbError> {
+    // Excludes hidden chat folders from the workspace "open folders" surface.
+    // `list_all_folder_details` (below) intentionally keeps them so the frontend
+    // can still resolve an active chat conversation's cwd / active folder by id.
     let rows = folder::Entity::find()
         .filter(folder::Column::DeletedAt.is_null())
         .filter(folder::Column::IsOpen.eq(true))
+        .filter(folder::Column::IsChat.eq(false))
         .order_by_desc(folder::Column::IsPinned)
         .order_by_asc(folder::Column::SortOrder)
         .order_by_desc(folder::Column::LastOpenedAt)

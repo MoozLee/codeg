@@ -10,6 +10,7 @@ export type SidebarSortMode = "created" | "updated"
 export interface SidebarSectionCollapsed {
   pinned?: boolean
   folders?: boolean
+  chats?: boolean
 }
 
 export function loadFolderExpanded(): Record<number, boolean> {
@@ -92,6 +93,7 @@ export function loadSectionCollapsed(): SidebarSectionCollapsed {
     const result: SidebarSectionCollapsed = {}
     if (typeof obj.pinned === "boolean") result.pinned = obj.pinned
     if (typeof obj.folders === "boolean") result.folders = obj.folders
+    if (typeof obj.chats === "boolean") result.chats = obj.chats
     return result
   } catch {
     return {}
