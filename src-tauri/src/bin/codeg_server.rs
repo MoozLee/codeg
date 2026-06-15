@@ -194,6 +194,28 @@ async fn async_main() {
     // config at build time, so this must run before the first one is constructed.
     codeg_lib::init_proxy_from_db(&db.conn).await;
 
+    // Reclaim orphaned chat scratch dirs (pre-send drafts that never bound to a
+    // conversation, plus dirs left behind by deleted chat conversations).
+    // Background, non-blocking; failures are logged but non-fatal.
+    {
+        let gc_conn = db.conn.clone();
+        let gc_data_dir = data_dir.clone();
+        tokio::spawn(async move {
+            match codeg_lib::commands::conversations::gc_orphan_chat_dirs_core(
+                &gc_conn,
+                &gc_data_dir,
+            )
+            .await
+            {
+                Ok(n) if n > 0 => {
+                    eprintln!("[SERVER] chat-dir GC: reclaimed {n} orphan scratch dir(s)")
+                }
+                Ok(_) => {}
+                Err(err) => eprintln!("[SERVER] chat-dir GC failed: {err}"),
+            }
+        });
+    }
+
     // Create shared broadcaster + internal ACP event bus.
     let broadcaster = Arc::new(WebEventBroadcaster::new());
     let event_bus_metrics = Arc::new(codeg_lib::acp::EventBusMetrics::default());
@@ -212,6 +234,7 @@ async fn async_main() {
         delegation_socket_path,
         feedback_config,
         question_config,
+        session_info_config,
     ) = codeg_lib::app_state::build_delegation_stack(
         &connection_manager,
         db.conn.clone(),
@@ -237,6 +260,7 @@ async fn async_main() {
         delegation_socket_path: delegation_socket_path.clone(),
         feedback_config: feedback_config.clone(),
         question_config: question_config.clone(),
+        session_info_config: session_info_config.clone(),
         system_op_lock: codeg_lib::app_state::default_system_op_lock(),
         update_state: codeg_lib::app_state::default_update_state(),
     });
@@ -261,6 +285,12 @@ async fn async_main() {
         &question_config,
     )
     .await;
+    // Same for the get-session-info enable flag.
+    codeg_lib::commands::session_info::apply_persisted_session_info_config(
+        &state.db.conn,
+        &session_info_config,
+    )
+    .await;
 
     // Spawn the delegation listener so companion processes can round-trip
     // through the broker. Path is PID-scoped, so the listener owns it for
@@ -278,6 +308,11 @@ async fn async_main() {
             Arc::new(codeg_lib::acp::manager::ConnectionManagerQuestionLookup {
                 manager: Arc::new(state.connection_manager.clone_ref()),
             }),
+            Arc::new(codeg_lib::commands::session_info::DbSessionInfoLookup::new(
+                Arc::new(codeg_lib::db::AppDatabase {
+                    conn: state.db.conn.clone(),
+                }),
+            )),
         );
         let socket = delegation_socket_path.clone();
         tokio::spawn(async move {

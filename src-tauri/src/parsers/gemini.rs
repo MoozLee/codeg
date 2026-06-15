@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 use crate::models::*;
 use crate::parsers::{
     folder_name_from_path, stable_user_anchor_id_from_message, stable_user_anchor_id_from_parts,
-    truncate_str, AgentParser, ParseError,
+    title_from_user_text, truncate_str, AgentParser, ParseError,
 };
 
 pub struct GeminiParser {
@@ -422,7 +422,7 @@ impl GeminiParser {
             .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("user"))
             .filter_map(Self::extract_message_text)
             .find(|t| !t.trim_start().starts_with("<session_context"))
-            .map(|t| truncate_str(&t, 100));
+            .map(|t| title_from_user_text(&t));
 
         let title = topic_title.or(fallback_title);
 

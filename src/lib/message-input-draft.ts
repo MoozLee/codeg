@@ -1,58 +1,39 @@
 "use client"
 
+import type { JSONContent } from "@tiptap/core"
 import {
   readScopedStorageItem,
   removeScopedStorageItem,
-  writeScopedStorageItem,
   type TabPersistenceMode,
 } from "@/contexts/tab-shared"
 
-export interface MessageInputPastedTextEntry {
-  id: number
-  content: string
-}
-
-export interface MessageInputDraftState {
+interface PersistedDraftState {
   text: string
-  pastedTexts: MessageInputPastedTextEntry[]
 }
 
-const V2_STORAGE_PREFIX = "codeg:message-input-draft:v2"
-const V1_STORAGE_PREFIX = "codeg:message-input-draft:v1"
+/** v2 draft payload: the composer's Tiptap document (preserves reference badges,
+ *  which a Markdown round-trip would downgrade to plain links). */
+interface PersistedDraftStateV2 {
+  doc: JSONContent
+}
+
+const STORAGE_PREFIX = "codeg:message-input-draft:v1"
+const STORAGE_PREFIX_V2 = "codeg:message-input-draft:v2"
 const SHARED_PERSISTENCE_MODE: TabPersistenceMode = "shared"
 const WINDOW_LOCAL_DRAFT_PREFIX = "window-local:"
-const draftStateCache = new Map<string, MessageInputDraftState>()
-const pendingPersistDrafts = new Map<string, MessageInputDraftState>()
+const draftTextCache = new Map<string, string>()
+const draftDocCache = new Map<string, JSONContent>()
+const pendingPersistDrafts = new Map<string, string>()
+const pendingPersistDocs = new Map<string, JSONContent>()
 let idlePersistHandle: number | null = null
 let persistenceListenersBound = false
 
-function storageKeyForDraftKey(
-  draftKey: string,
-  storagePrefix: string = V2_STORAGE_PREFIX
-): string {
-  return `${storagePrefix}:${draftKey}`
+function storageKeyForDraftKey(draftKey: string): string {
+  return `${STORAGE_PREFIX}:${draftKey}`
 }
 
-function cloneDraftState(
-  state: MessageInputDraftState
-): MessageInputDraftState {
-  return {
-    text: state.text,
-    pastedTexts: state.pastedTexts.map((entry) => ({ ...entry })),
-  }
-}
-
-function areDraftStatesEqual(
-  a: MessageInputDraftState | undefined,
-  b: MessageInputDraftState
-): boolean {
-  if (!a) return false
-  if (a.text !== b.text) return false
-  if (a.pastedTexts.length !== b.pastedTexts.length) return false
-  return a.pastedTexts.every((entry, index) => {
-    const other = b.pastedTexts[index]
-    return entry.id === other.id && entry.content === other.content
-  })
+function storageKeyForDraftKeyV2(draftKey: string): string {
+  return `${STORAGE_PREFIX_V2}:${draftKey}`
 }
 
 function resolveDraftScope(draftKey: string): {
@@ -72,53 +53,75 @@ function resolveDraftScope(draftKey: string): {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
+function readDraftStorageItem(draftKey: string, v2 = false): string | null {
+  const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
+  return readScopedStorageItem(
+    persistenceMode,
+    v2 ? storageKeyForDraftKeyV2(scopedDraftKey) : storageKeyForDraftKey(scopedDraftKey)
+  )
 }
 
-function parsePastedTexts(value: unknown): MessageInputPastedTextEntry[] {
-  if (!Array.isArray(value)) return []
-  const entries: MessageInputPastedTextEntry[] = []
-  const seenIds = new Set<number>()
-  for (const item of value) {
-    if (!isRecord(item)) continue
-    const { id, content } = item
-    if (typeof id !== "number" || !Number.isInteger(id) || id <= 0) continue
-    if (typeof content !== "string") continue
-    if (seenIds.has(id)) continue
-    seenIds.add(id)
-    entries.push({ id, content })
+function writeDraftStorageItem(draftKey: string, value: string, v2 = false): boolean {
+  if (typeof window === "undefined") return false
+  const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
+  const key = v2
+    ? storageKeyForDraftKeyV2(scopedDraftKey)
+    : storageKeyForDraftKey(scopedDraftKey)
+  try {
+    const storage =
+      persistenceMode === "window-local" ? window.sessionStorage : window.localStorage
+    storage.setItem(key, value)
+    return true
+  } catch {
+    return false
   }
-  return entries
 }
 
-function parseDraftState(value: unknown): MessageInputDraftState | null {
-  if (!isRecord(value)) return null
-  if (typeof value.text !== "string") return null
-  return {
-    text: value.text,
-    pastedTexts: parsePastedTexts(value.pastedTexts),
-  }
+function removeDraftStorageItem(draftKey: string, v2 = false): void {
+  const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
+  removeScopedStorageItem(
+    persistenceMode,
+    v2 ? storageKeyForDraftKeyV2(scopedDraftKey) : storageKeyForDraftKey(scopedDraftKey)
+  )
+}
+
+/** A persisted v2 payload's `doc` is only trusted when it is a ProseMirror doc
+ *  root (a non-array object whose `type` is "doc"); anything else (corrupt or
+ *  partial payload, array, …) is rejected so we fall back to v1 / null rather
+ *  than hand garbage to the editor. */
+function isTiptapDoc(value: unknown): value is JSONContent {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as { type?: unknown }).type === "doc"
+  )
 }
 
 function flushPendingDraftPersistence(): void {
   if (typeof window === "undefined") return
-  if (pendingPersistDrafts.size === 0) {
+  if (pendingPersistDrafts.size === 0 && pendingPersistDocs.size === 0) {
     idlePersistHandle = null
     return
   }
 
-  const entries = Array.from(pendingPersistDrafts.entries())
+  const textEntries = Array.from(pendingPersistDrafts.entries())
   pendingPersistDrafts.clear()
+  const docEntries = Array.from(pendingPersistDocs.entries())
+  pendingPersistDocs.clear()
   idlePersistHandle = null
 
-  for (const [draftKey, state] of entries) {
-    const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
-    writeScopedStorageItem(
-      persistenceMode,
-      storageKeyForDraftKey(scopedDraftKey),
-      JSON.stringify(state)
+  for (const [draftKey, text] of textEntries) {
+    writeDraftStorageItem(draftKey, JSON.stringify({ text }))
+  }
+  for (const [draftKey, doc] of docEntries) {
+    const persisted = writeDraftStorageItem(
+      draftKey,
+      JSON.stringify({ doc } satisfies PersistedDraftStateV2),
+      true
     )
+    // Only retire the legacy v1 draft once the v2 document is durably written.
+    if (persisted) clearMessageInputDraft(draftKey)
   }
 }
 
@@ -179,86 +182,111 @@ export function buildNewConversationDraftStorageKey(
     : "new"
 }
 
-export function loadMessageInputDraft(
-  draftKey: string
-): MessageInputDraftState | null {
-  const cached = draftStateCache.get(draftKey)
-  if (cached) return cloneDraftState(cached)
+export function loadMessageInputDraft(draftKey: string): string | null {
+  const cached = draftTextCache.get(draftKey)
+  if (typeof cached === "string") return cached
   if (typeof window === "undefined") return null
 
-  const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
-
   try {
-    const raw = readScopedStorageItem(
-      persistenceMode,
-      storageKeyForDraftKey(scopedDraftKey)
-    )
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw)
-      const state = parseDraftState(parsed)
-      if (state) {
-        draftStateCache.set(draftKey, cloneDraftState(state))
-        return state
-      }
-    }
-
-    const legacyRaw = readScopedStorageItem(
-      persistenceMode,
-      storageKeyForDraftKey(scopedDraftKey, V1_STORAGE_PREFIX)
-    )
-    if (!legacyRaw) return null
-    const legacyParsed: unknown = JSON.parse(legacyRaw)
-    const legacyState = parseDraftState(legacyParsed)
-    if (!legacyState) return null
-    const state: MessageInputDraftState = {
-      text: legacyState.text,
-      pastedTexts: [],
-    }
-    draftStateCache.set(draftKey, cloneDraftState(state))
-    return state
+    const raw = readDraftStorageItem(draftKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PersistedDraftState>
+    if (typeof parsed.text !== "string") return null
+    draftTextCache.set(draftKey, parsed.text)
+    return parsed.text
   } catch {
     return null
   }
 }
 
-export function saveMessageInputDraft(
-  draftKey: string,
-  state: MessageInputDraftState
-): void {
-  const normalized: MessageInputDraftState = {
-    text: state.text,
-    pastedTexts: parsePastedTexts(state.pastedTexts),
-  }
-
-  if (normalized.pastedTexts.length !== state.pastedTexts.length) {
-    normalized.pastedTexts = []
-  }
-
-  if (normalized.text.length === 0) {
+export function saveMessageInputDraft(draftKey: string, text: string): void {
+  if (text.length === 0) {
     clearMessageInputDraft(draftKey)
     return
   }
 
-  if (areDraftStatesEqual(draftStateCache.get(draftKey), normalized)) return
-  draftStateCache.set(draftKey, cloneDraftState(normalized))
+  if (draftTextCache.get(draftKey) === text) return
+  draftTextCache.set(draftKey, text)
   if (typeof window === "undefined") return
 
-  pendingPersistDrafts.set(draftKey, cloneDraftState(normalized))
+  pendingPersistDrafts.set(draftKey, text)
   scheduleDraftPersistence()
 }
 
 export function clearMessageInputDraft(draftKey: string): void {
-  draftStateCache.delete(draftKey)
+  draftTextCache.delete(draftKey)
   pendingPersistDrafts.delete(draftKey)
   if (typeof window === "undefined") return
 
-  const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
-  removeScopedStorageItem(
-    persistenceMode,
-    storageKeyForDraftKey(scopedDraftKey)
-  )
-  removeScopedStorageItem(
-    persistenceMode,
-    storageKeyForDraftKey(scopedDraftKey, V1_STORAGE_PREFIX)
-  )
+  removeDraftStorageItem(draftKey)
+}
+
+/**
+ * Result of loading a v2 draft: a parsed composer document, a legacy v1 Markdown
+ * string to hydrate via `setMarkdown` (migration), or null when no draft exists.
+ */
+export type LoadedDraftV2 =
+  | { kind: "doc"; doc: JSONContent }
+  | { kind: "legacyMarkdown"; markdown: string }
+  | null
+
+/**
+ * Load the persisted composer draft for a key. Prefers the v2 document; falls
+ * back to a v1 text draft (returned as `legacyMarkdown` for the host to hydrate
+ * as Markdown), or null. The v1 draft is left in place on read — it is only
+ * cleared once a v2 document is actually saved ({@link saveMessageInputDraftV2}),
+ * so an unedited migration is never lost.
+ */
+export function loadMessageInputDraftV2(draftKey: string): LoadedDraftV2 {
+  const cached = draftDocCache.get(draftKey)
+  if (cached) return { kind: "doc", doc: cached }
+
+  if (typeof window !== "undefined") {
+    try {
+      const raw = readDraftStorageItem(draftKey, true)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<PersistedDraftStateV2>
+        if (isTiptapDoc(parsed?.doc)) {
+          draftDocCache.set(draftKey, parsed.doc)
+          return { kind: "doc", doc: parsed.doc }
+        }
+      }
+    } catch {
+      // Fall through to the legacy v1 draft.
+    }
+  }
+
+  const legacy = loadMessageInputDraft(draftKey)
+  if (legacy != null && legacy.length > 0) {
+    return { kind: "legacyMarkdown", markdown: legacy }
+  }
+  return null
+}
+
+/**
+ * Persist the composer document for a key (v2). The host calls this only for a
+ * non-empty document and {@link clearMessageInputDraftV2} otherwise. The in-memory
+ * `draftDocCache` makes the v2 document win immediately; any legacy v1 text draft
+ * is only removed once the v2 write is durably flushed (see the flush path), so a
+ * deferred write that later fails cannot lose the draft.
+ */
+export function saveMessageInputDraftV2(
+  draftKey: string,
+  doc: JSONContent
+): void {
+  draftDocCache.set(draftKey, doc)
+  if (typeof window === "undefined") return
+
+  pendingPersistDocs.set(draftKey, doc)
+  scheduleDraftPersistence()
+}
+
+export function clearMessageInputDraftV2(draftKey: string): void {
+  draftDocCache.delete(draftKey)
+  pendingPersistDocs.delete(draftKey)
+  // Also drop any legacy v1 draft so a cleared composer stays cleared.
+  clearMessageInputDraft(draftKey)
+  if (typeof window === "undefined") return
+
+  removeDraftStorageItem(draftKey, true)
 }

@@ -70,7 +70,6 @@ import { useConversationRuntime } from "@/contexts/conversation-runtime-context"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import {
   extractUserImagesFromDraft,
-  extractUserResourcesFromDraft,
   getPromptDraftDisplayText,
 } from "@/lib/prompt-draft"
 import {
@@ -139,18 +138,12 @@ function buildOptimisticUserTurnFromDraft(
   draft: PromptDraft,
   attachedResourcesFallback: string
 ): MessageTurn {
-  const displayText = getPromptDraftDisplayText(
-    draft,
-    attachedResourcesFallback
-  )
-  const resources = extractUserResourcesFromDraft(draft)
-  const resourceLines = resources.map((resource) => {
-    const label = resource.uri.toLowerCase().startsWith("file://")
-      ? resource.name
-      : `@${resource.name}`
-    return `[${label}](${resource.uri})`
-  })
-  const text = [displayText, ...resourceLines].join("\n").trim()
+  // `draft.displayText` is the composer's full Markdown, which already renders
+  // every inline file/resource badge as a `[label](uri)` link (see
+  // `referenceToMarkdown`). Re-appending the resource blocks here would duplicate
+  // each attached file in the optimistic bubble, so the display text is used
+  // as-is — images are the only out-of-band content left to add as blocks.
+  const text = getPromptDraftDisplayText(draft, attachedResourcesFallback)
 
   const blocks: ContentBlock[] = []
   for (const image of extractUserImagesFromDraft(draft)) {
@@ -268,6 +261,7 @@ const ConversationTabView = memo(function ConversationTabView({
     closeTab,
     confirmDraftAgent,
     setDraftAgentFromFallback,
+    tabPersistenceMode,
   } = useTabContext()
   const { setSessionStats } = useSessionStats()
   const {
@@ -479,8 +473,8 @@ const ConversationTabView = memo(function ConversationTabView({
     if (dbConversationId != null) {
       return buildConversationDraftStorageKey(dbConversationId)
     }
-    return buildNewConversationDraftStorageKey()
-  }, [dbConversationId])
+    return buildNewConversationDraftStorageKey(tabPersistenceMode)
+  }, [dbConversationId, tabPersistenceMode])
   // Use the per-tab workingDir (derived from the tab's own folderId by the
   // parent) rather than the active folder's path — otherwise switching tabs
   // briefly exposes the previous folder's path to the ACP auto-connect
@@ -1143,7 +1137,7 @@ const ConversationTabView = memo(function ConversationTabView({
               effectiveConversationId
             )
           }
-          clearMessageInputDraft(buildNewConversationDraftStorageKey())
+          clearMessageInputDraft(draftStorageKey)
           refreshConversations()
 
           // Now that the row exists, kick off the actual prompt with the
@@ -1171,10 +1165,7 @@ const ConversationTabView = memo(function ConversationTabView({
           setHasSentMessage(false)
           const draftText = draft.displayText.trim()
           if (draftText) {
-            saveMessageInputDraft(buildNewConversationDraftStorageKey(), {
-              text: draftText,
-              pastedTexts: [],
-            })
+            saveMessageInputDraft(draftStorageKey, draftText)
           }
           if (mountedRef.current) {
             setAgentConnectError(tWelcome("createConversationFailed"))
@@ -1193,6 +1184,7 @@ const ConversationTabView = memo(function ConversationTabView({
       bindConversationTab,
       canAutoConnect,
       connectionReady,
+      draftStorageKey,
       effectiveConversationId,
       folderId,
       hasPersistedConversation,
@@ -1422,6 +1414,14 @@ const ConversationTabView = memo(function ConversationTabView({
     setRetryEditingTurn(null)
   }, [])
 
+  // The editing item's full blocks, so the composer can restore inline badges +
+  // attachments (not just the display text) when re-opening a queued message.
+  const editingQueueDraftBlocks = useMemo(() => {
+    if (!mqEditingItemId) return null
+    const item = msgQueue.find((m) => m.id === mqEditingItemId)
+    return item?.draft.blocks ?? null
+  }, [mqEditingItemId, msgQueue])
+
   const handleQueueEdit = useCallback(
     (id: string) => {
       handleCancelRetryEdit()
@@ -1596,6 +1596,7 @@ const ConversationTabView = memo(function ConversationTabView({
       onQueueDelete={mqRemove}
       editingItemId={mqEditingItemId}
       editingDraftText={effectiveEditingDraftText}
+      editingDraftBlocks={retryEditingTurn ? null : editingQueueDraftBlocks}
       isEditingQueueItem={mqEditingItemId != null}
       isRetryEditingMessage={retryEditingTurn != null}
       onSaveQueueEdit={handleSaveQueueEdit}

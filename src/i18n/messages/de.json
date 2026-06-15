@@ -1342,6 +1342,9 @@
       "recentOpen": "Zuletzt geöffnet"
     },
     "fileWorkspacePanel": {
+      "addSelectionToChat": "Auswahl zum Chat hinzufügen",
+      "addToChat": "Zum Chat hinzufügen",
+      "addSelectionToChatDone": "{label} zur Unterhaltung hinzugefügt",
       "viewDiff": "Diff anzeigen",
       "openFile": "Datei öffnen",
       "fileCount": "{count, plural, one {# Datei} other {# Dateien}}",
@@ -1988,7 +1991,17 @@
         "attachUploadNotAFile": "{names} ist keine reguläre Datei (Verzeichnis oder Spezialdatei) und wurde übersprungen.",
         "attachUploadQuotaExceeded": "Auf dem Server ist kein Upload-Speicher mehr verfügbar; {names} konnte nicht hochgeladen werden.",
         "liveFeedback": "Live-Feedback",
-        "liveFeedbackDisabledHint": "Verfügbar, während der Agent arbeitet"
+        "liveFeedbackDisabledHint": "Verfügbar, während der Agent arbeitet",
+        "mentionEmpty": "Keine Treffer",
+        "mentionLoading": "Suche läuft…",
+        "mentionListLabel": "Erwähnungen",
+        "mentionMore": "Weitere Ergebnisse – tippe weiter, um zu filtern",
+        "mentionCount": "{count, plural, one {# Ergebnis} other {# Ergebnisse}}",
+        "mentionGroupFile": "Dateien",
+        "mentionGroupAgent": "Agenten",
+        "mentionGroupSession": "Sitzungen",
+        "mentionGroupCommit": "Commits",
+        "mentionGroupSkill": "Fähigkeiten"
       },
       "messageQueue": {
         "addToQueue": "Zur Warteschlange",
@@ -3149,6 +3162,17 @@
     "turnEndedResent": "Die Runde endete – stattdessen als neue Nachricht gesendet.",
     "turnEnded": "Die Runde ist bereits beendet.",
     "submitFailed": "Deine Notiz konnte nicht gesendet werden"
+  },
+  "SessionInfoSettings": {
+    "title": "Sitzungsinformationen abrufen",
+    "description": "Erlaubt Agenten, eine in deiner Nachricht referenzierte Sitzung (ein Sitzungs-Badge) nachzuschlagen, um Titel, Agent, Status, Arbeitsbereich, Token-Verbrauch und letzte Nachrichten zu lesen.",
+    "enable": "Sitzungsinformationen abrufen aktivieren",
+    "enableHint": "Fügt das get_session_info-Tool zu Agenten hinzu, die nach dem Aktivieren gestartet werden.",
+    "save": "Speichern",
+    "saving": "Wird gespeichert…",
+    "saved": "Einstellungen für Sitzungsinformationen gespeichert",
+    "saveFailed": "Einstellungen für Sitzungsinformationen konnten nicht gespeichert werden",
+    "loadFailed": "Laden fehlgeschlagen: {detail}"
   },
   "AskQuestionSettings": {
     "title": "Benutzer fragen",

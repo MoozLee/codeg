@@ -7,6 +7,7 @@ import type {
   ConnectionStatus,
   PromptCapabilitiesInfo,
   PromptDraft,
+  PromptInputBlock,
   SessionConfigOptionInfo,
   SessionModeInfo,
   AvailableCommandInfo,
@@ -44,6 +45,7 @@ interface ChatInputProps {
   onQueueDelete?: (id: string) => void
   editingItemId?: string | null
   editingDraftText?: string | null
+  editingDraftBlocks?: PromptInputBlock[] | null
   isEditingQueueItem?: boolean
   isRetryEditingMessage?: boolean
   onSaveQueueEdit?: (draft: PromptDraft) => void
@@ -91,6 +93,7 @@ export const ChatInput = memo(function ChatInput({
   onQueueDelete,
   editingItemId,
   editingDraftText,
+  editingDraftBlocks,
   isEditingQueueItem,
   isRetryEditingMessage,
   onSaveQueueEdit,
@@ -150,7 +153,9 @@ export const ChatInput = memo(function ChatInput({
         draftStorageKey={draftStorageKey}
         isActive={isActive}
         onEnqueue={onEnqueue}
+        editingItemId={editingItemId}
         editingDraftText={editingDraftText}
+        editingDraftBlocks={editingDraftBlocks}
         isEditingQueueItem={isEditingQueueItem}
         isRetryEditingMessage={isRetryEditingMessage}
         onSaveQueueEdit={onSaveQueueEdit}

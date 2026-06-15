@@ -47,7 +47,7 @@ function parseHashLine(hash: string): number | null {
   const normalized = hash.startsWith("#") ? hash.slice(1) : hash
   if (!normalized) return null
   return (
-    parseLineValue(normalized.match(/^L(\d+)$/i)?.[1]) ??
+    parseLineValue(normalized.match(/^L(\d+)(?:-L?\d+)?$/i)?.[1]) ??
     parseLineValue(normalized.match(/^line=(\d+)$/i)?.[1]) ??
     parseLineValue(normalized.match(/^(\d+)$/)?.[1])
   )

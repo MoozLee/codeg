@@ -11,7 +11,7 @@ use walkdir::WalkDir;
 use crate::models::*;
 use crate::parsers::{
     folder_name_from_path, stable_user_anchor_id_from_message, stable_user_anchor_id_from_parts,
-    truncate_str, AgentParser, ParseError,
+    title_from_user_text, truncate_str, AgentParser, ParseError,
 };
 
 pub struct CodexParser {
@@ -1606,7 +1606,7 @@ fn extract_codex_title_candidate(input: &str, fallback_attached: bool) -> Option
             None
         }
     } else {
-        Some(truncate_str(&cleaned, 100))
+        Some(title_from_user_text(&cleaned))
     }
 }
 

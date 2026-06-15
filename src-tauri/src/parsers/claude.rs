@@ -8,8 +8,8 @@ use regex::Regex;
 
 use crate::models::*;
 use crate::parsers::{
-    folder_name_from_path, stable_user_anchor_id_from_message, truncate_str, AgentParser,
-    ParseError,
+    folder_name_from_path, stable_user_anchor_id_from_message, title_from_user_text, truncate_str,
+    AgentParser, ParseError,
 };
 
 /// Regex that matches Claude Code system-injected XML tags and their content.
@@ -437,7 +437,7 @@ impl ClaudeParser {
 
                 // Extract title from first user message
                 if msg_type == "user" && title.is_none() {
-                    title = extract_user_text(&value).map(|t| truncate_str(&t, 100));
+                    title = extract_user_text(&value).map(|t| title_from_user_text(&t));
                 }
             }
         }
@@ -727,7 +727,7 @@ impl ClaudeParser {
                                 ContentBlock::Text { text } => Some(text.clone()),
                                 _ => None,
                             }) {
-                                title = Some(truncate_str(&first_text, 100));
+                                title = Some(title_from_user_text(&first_text));
                             }
                         }
                         MessageRole::User

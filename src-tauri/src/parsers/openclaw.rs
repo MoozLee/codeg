@@ -12,7 +12,7 @@ use crate::models::*;
 use crate::parsers::{
     compute_session_stats, folder_name_from_path, infer_context_window_max_tokens,
     latest_turn_total_usage_tokens, merge_context_window_stats, stable_user_anchor_id_from_message,
-    truncate_str, AgentParser, ParseError,
+    title_from_user_text, truncate_str, AgentParser, ParseError,
 };
 
 /// Regex to strip the "Sender (untrusted metadata):" block and optional
@@ -450,7 +450,7 @@ impl OpenClawParser {
                             if title.is_none() {
                                 let cleaned = strip_openclaw_user_prefix(&text);
                                 if !cleaned.is_empty() {
-                                    title = Some(truncate_str(&cleaned, 100));
+                                    title = Some(title_from_user_text(&cleaned));
                                 }
                             }
                         }
@@ -603,7 +603,7 @@ impl OpenClawParser {
                     }
                     if title.is_none() {
                         if let Some(ContentBlock::Text { ref text }) = content.first() {
-                            title = Some(truncate_str(text, 100));
+                            title = Some(title_from_user_text(text));
                         }
                     }
                     messages.push(UnifiedMessage {

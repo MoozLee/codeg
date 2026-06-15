@@ -29,7 +29,6 @@ const ALLOWED_EXTERNAL_PROTOCOLS = new Set([
 // page load. They must NOT be opened via `window.open(_, "_blank")` — most
 // browsers leave behind an empty `about:blank` tab once the OS handler fires.
 const OS_HANDLER_PROTOCOLS = new Set(["mailto:", "tel:"])
-
 function parseExternalUrl(rawUrl: string): URL | null {
   const trimmed = rawUrl.trim()
   if (!trimmed) return null
@@ -143,7 +142,13 @@ function DirectLinkOpen({
   return null
 }
 
-function useOpenLinkOrFile() {
+/**
+ * Hook returning an async opener for a link or local-file uri: `file://` (and
+ * bare local paths) open in the workspace file panel; http(s)/mailto/tel route
+ * to the browser / OS handler. Used by the Streamdown link-safety modal and by
+ * standalone clickable file affordances (e.g. user-message resource badges).
+ */
+export function useOpenLinkOrFile() {
   const t = useTranslations("Folder.chat.linkSafety")
   const { activeFolder: folder } = useActiveFolder()
   const folderPath = folder?.path
