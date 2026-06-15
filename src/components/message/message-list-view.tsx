@@ -86,6 +86,7 @@ import {
   type MessageNavEntry,
 } from "@/components/message/conversation-message-nav"
 import type { MessageScrollContextValue } from "@/components/message/message-scroll-context"
+import { resolveRetryEditableUserAnchorId } from "@/components/message/retry-edit"
 import { extractSessionFilesGrouped } from "@/lib/session-files"
 import {
   type StickToBottomContext,
@@ -380,58 +381,6 @@ function isEmptyTurnItem(item: ThreadRenderItem): boolean {
   if (g.resources.length > 0) return false
   if (g.images.length > 0) return false
   return true
-}
-
-function isAssistantTextTurn(turn: MessageTurn): boolean {
-  if (turn.role !== "assistant") return false
-  return turn.blocks.some(
-    (block) => block.type === "text" && block.text.trim().length > 0
-  )
-}
-
-function isTextOnlyUserTurn(turn: MessageTurn): boolean {
-  return (
-    turn.role === "user" && turn.blocks.every((block) => block.type === "text")
-  )
-}
-
-function isInterruptedStopReason(
-  stopReason: string | null | undefined
-): boolean {
-  return stopReason === "cancelled"
-}
-
-function findRetryEditableUserAnchorId(
-  turns: MessageTurn[],
-  lastTurnStopReason: string | null | undefined
-): string | null {
-  const hasInterruptedTail = isInterruptedStopReason(lastTurnStopReason)
-  let latestUserTurnIndex = -1
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    if (turns[index].role === "user") {
-      latestUserTurnIndex = index
-      break
-    }
-  }
-  if (latestUserTurnIndex < 0) return null
-
-  const latestUserTurn = turns[latestUserTurnIndex]
-  const anchorId = latestUserTurn.anchor_id ?? null
-  if (!anchorId || !isTextOnlyUserTurn(latestUserTurn)) {
-    return null
-  }
-
-  for (let index = latestUserTurnIndex + 1; index < turns.length; index += 1) {
-    const turn = turns[index]
-    if (turn.role !== "assistant" || !isAssistantTextTurn(turn)) {
-      continue
-    }
-    if (!hasInterruptedTail) {
-      return null
-    }
-  }
-
-  return anchorId
 }
 
 /**
@@ -1180,17 +1129,14 @@ export function MessageListView({
       storageConversationId,
       rawTurns
     )
-    const retryEditableCandidate = onRetryEditTurn
-      ? findRetryEditableUserAnchorId(rawTurns, lastTurnStopReason)
+    const retryEditableAnchorId = onRetryEditTurn
+      ? resolveRetryEditableUserAnchorId({
+          turns: rawTurns,
+          connStatus,
+          showPromptingState,
+          lastTurnStopReason,
+        })
       : null
-    const retryEditableAnchorId =
-      connStatus === "connected" && !showPromptingState
-        ? retryEditableCandidate
-        : connStatus === "prompting" &&
-            retryEditableCandidate !== null &&
-            isOptimisticAnchorId(retryEditableCandidate)
-          ? retryEditableCandidate
-          : null
     const visibleTimelineTurns = timelineTurns.filter((item) => {
       const anchorId = item.turn.anchor_id ?? null
       return !anchorId || !hiddenAnchorIds.has(anchorId)

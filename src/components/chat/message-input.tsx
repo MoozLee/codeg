@@ -758,6 +758,32 @@ export function MessageInput({
     hydrateFromBlocks,
   ])
 
+  const prevRetryEditingDraftRef = useRef<string | null>(null)
+  useEffect(() => {
+    const retryDraftText = isRetryEditingMessage
+      ? (editingDraftText ?? null)
+      : null
+    if (retryDraftText === prevRetryEditingDraftRef.current) return
+    prevRetryEditingDraftRef.current = retryDraftText
+    if (retryDraftText == null) return
+
+    const editor = editorRef.current?.getEditor()
+    if (editingDraftBlocks && editingDraftBlocks.length > 0 && editor) {
+      hydrateFromBlocks(editor, editingDraftBlocks)
+    } else {
+      editorRef.current?.setMarkdown(retryDraftText)
+    }
+    setComposerEmpty(editor ? isComposerEmpty(editor) : true)
+    requestAnimationFrame(() => {
+      editorRef.current?.focus()
+    })
+  }, [
+    editingDraftBlocks,
+    editingDraftText,
+    hydrateFromBlocks,
+    isRetryEditingMessage,
+  ])
+
   // Re-hydrate when the user (re)edits a *different* queue item after the
   // initial mount hydration above. Keyed on the item id (not display text) so
   // switching between two items with identical text still reloads.

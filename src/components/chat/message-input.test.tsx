@@ -96,4 +96,33 @@ describe("MessageInput (RichComposer integration)", () => {
     expect(card.className).toContain("codeg-composer-chrome")
     expect(fireEvent.mouseDown(card)).toBe(false)
   })
+
+  it("hydrates the composer when retry-edit mode is entered after mount", async () => {
+    const onSend = vi.fn()
+    const { container, rerender } = render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <MessageInput onSend={onSend} promptCapabilities={CAPS} />
+      </NextIntlClientProvider>
+    )
+
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <MessageInput
+          onSend={onSend}
+          promptCapabilities={CAPS}
+          isRetryEditingMessage
+          editingDraftText="rewrite the last question"
+        />
+      </NextIntlClientProvider>
+    )
+
+    await waitFor(() => {
+      const textbox = container.querySelector('[role="textbox"]')
+      expect(textbox?.textContent).toContain("rewrite the last question")
+    })
+  })
 })
