@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { useConnectionStore } from "@/contexts/acp-connections-context"
 import { formatTokenCount } from "@/lib/token-format"
+import { formatContextWindowPercent } from "@/lib/context-window"
 import {
   Popover,
   PopoverContent,
@@ -17,9 +18,9 @@ const ICON_CENTER = 8
 const ICON_VIEWBOX = 16
 const ICON_CIRCUMFERENCE = 2 * Math.PI * ICON_RADIUS
 
-function formatPercent(percent: number | null): string {
-  if (percent == null) return "--"
-  return `${percent.toFixed(1)}%`
+function formatPercent(ratio: number): string {
+  const percent = ratio * 100
+  return `${percent.toFixed(percent >= 10 ? 0 : 1)}%`
 }
 
 export function StatusBarTokens() {
@@ -193,7 +194,7 @@ export function StatusBarTokens() {
                   opacity="0.75"
                 />
               </svg>
-              <span>{formatPercent(contextPercent)}</span>
+              <span>{formatContextWindowPercent(contextPercent)}</span>
             </>
           ) : (
             <>
@@ -213,7 +214,7 @@ export function StatusBarTokens() {
             <div className="flex items-center justify-between gap-2 text-xs font-medium whitespace-nowrap">
               <span>{t("contextWindow")}</span>
               <span className="tabular-nums shrink-0">
-                {formatPercent(contextPercent)}
+                {formatContextWindowPercent(contextPercent)}
               </span>
             </div>
             <div className="relative h-1.5 overflow-hidden rounded-full bg-muted">
