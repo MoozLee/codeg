@@ -101,7 +101,10 @@ export function SessionConfigSelector({
         <span className="min-w-0 flex-1 truncate font-medium">
           {option.name}
         </span>
-        <span className="max-w-[10rem] shrink-0 truncate text-xs text-muted-foreground">
+        <span
+          className="max-w-[10rem] shrink-0 truncate text-xs text-muted-foreground"
+          title={currentLabel}
+        >
           {currentLabel}
         </span>
       </DropdownMenuSubTrigger>
@@ -125,6 +128,7 @@ export function SessionConfigSelector({
                     <DropdownMenuRadioItem
                       key={`${group.group}-${item.value}`}
                       value={item.value}
+                      title={item.name}
                     >
                       <DropdownRadioItemContent
                         label={item.name}
@@ -135,7 +139,11 @@ export function SessionConfigSelector({
                 </Fragment>
               ))
             : filteredOptions.map((item) => (
-                <DropdownMenuRadioItem key={item.value} value={item.value}>
+                <DropdownMenuRadioItem
+                  key={item.value}
+                  value={item.value}
+                  title={item.name}
+                >
                   <DropdownRadioItemContent
                     label={item.name}
                     description={item.description}
@@ -204,7 +212,7 @@ export function InlineSessionConfigSelector({
         <Button
           variant="ghost"
           size="xs"
-          title={option.description ?? option.name}
+          title={currentLabel}
           className="min-w-0 gap-0.5 px-1 text-muted-foreground"
         >
           <span className="max-w-[10rem] truncate">{currentLabel}</span>
@@ -234,6 +242,7 @@ export function InlineSessionConfigSelector({
                     <DropdownMenuRadioItem
                       key={`${group.group}-${item.value}`}
                       value={item.value}
+                      title={item.name}
                     >
                       <DropdownRadioItemContent
                         label={item.name}
@@ -244,7 +253,11 @@ export function InlineSessionConfigSelector({
                 </Fragment>
               ))
             : filteredOptions.map((item) => (
-                <DropdownMenuRadioItem key={item.value} value={item.value}>
+                <DropdownMenuRadioItem
+                  key={item.value}
+                  value={item.value}
+                  title={item.name}
+                >
                   <DropdownRadioItemContent
                     label={item.name}
                     description={item.description}
