@@ -95,7 +95,7 @@ const defaultFoldersMock: FolderDetail[] = [
     color: "blue",
     is_pinned: false,
     parent_id: null,
-    is_chat: false,
+    kind: "regular",
   },
   {
     id: 2,
@@ -108,7 +108,7 @@ const defaultFoldersMock: FolderDetail[] = [
     color: "green",
     is_pinned: false,
     parent_id: null,
-    is_chat: false,
+    kind: "regular",
   },
 ]
 
@@ -125,6 +125,7 @@ const conversationsMock: DbConversationSummary[] = [
     title_locked: false,
     agent_type: "codex",
     status: "in_progress",
+    kind: "regular",
     model: null,
     git_branch: null,
     external_id: null,
@@ -140,6 +141,7 @@ const conversationsMock: DbConversationSummary[] = [
     title_locked: false,
     agent_type: "codex",
     status: "in_progress",
+    kind: "regular",
     model: null,
     git_branch: null,
     external_id: null,
@@ -155,6 +157,7 @@ const conversationsMock: DbConversationSummary[] = [
     title_locked: false,
     agent_type: "codex",
     status: "in_progress",
+    kind: "regular",
     model: null,
     git_branch: null,
     external_id: null,
@@ -380,7 +383,7 @@ describe("TabProvider tab state transitions", () => {
       sort_order: 99,
       color: "inherit",
       parent_id: null,
-      is_chat: true,
+      kind: "chat",
       is_pinned: false,
     }
     foldersMock = defaultFoldersMock
@@ -410,7 +413,7 @@ describe("TabProvider tab state transitions", () => {
       sort_order: 99,
       color: "inherit",
       parent_id: null,
-      is_chat: true,
+      kind: "chat",
       is_pinned: false,
     }
     foldersMock = defaultFoldersMock // open list excludes the chat folder

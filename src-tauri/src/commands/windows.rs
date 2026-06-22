@@ -1001,9 +1001,12 @@ pub async fn open_settings_window(
         .min_inner_size(1080.0, 600.0)
         .center()
         .visible(false);
-    let builder = builder.parent(&window).map_err(|e| {
-        AppCommandError::window("Failed to attach settings window to parent", e.to_string())
-    })?;
+    // Intentionally NOT a child of the caller window: on macOS `.parent()`
+    // attaches the window via `addChildWindow`, which makes settings move and
+    // minimize together with the main window. Keep it an independent top-level
+    // window; focus returns to the owner on close via
+    // `restore_windows_after_settings` (the SettingsWindowState owner tracking
+    // is independent of any parent/child relationship).
     let settings_window = apply_platform_window_style(builder)
         .build()
         .map_err(|e| AppCommandError::window("Failed to open settings window", e.to_string()))?;
@@ -2248,7 +2251,7 @@ pub fn install_tray_icon(
                 builder = builder.icon(icon).icon_as_template(true);
             }
             Err(err) => {
-                eprintln!("[Tray] failed to load template icon, falling back: {err}");
+                tracing::warn!("[Tray] failed to load template icon, falling back: {err}");
                 if let Some(icon) = app.default_window_icon() {
                     builder = builder.icon(icon.clone());
                 }

@@ -10,6 +10,7 @@ import {
 import {
   Bot,
   BookOpenText,
+  FileSpreadsheet,
   GitBranch,
   Globe,
   Keyboard,
@@ -51,6 +52,7 @@ interface SettingsNavItem {
     | "chat_channels"
     | "system"
     | "web_service"
+    | "logs"
   icon: ComponentType<{ className?: string }>
 }
 
@@ -114,6 +116,11 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     href: "/settings/web-service",
     labelKey: "web_service",
     icon: Globe,
+  },
+  {
+    href: "/settings/logs",
+    labelKey: "logs",
+    icon: FileSpreadsheet,
   },
   {
     href: "/settings/system",

@@ -34,6 +34,7 @@ export interface TabContextValue {
   tabsHydrated: boolean
   isTileMode: boolean
   tabPersistenceMode: TabPersistenceMode
+  consumeRemoteActivation: () => boolean
   openTab: (
     folderId: number,
     conversationId: number,

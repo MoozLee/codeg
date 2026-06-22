@@ -201,6 +201,12 @@ export function TabProvider({
   //   save (no version churn).
   const versionRef = useRef(0)
   const applyingRemoteRef = useRef(false)
+  // One-shot flag: an incoming remote snapshot mirrored the focused tab, so the
+  // active tab changed for a non-local reason. The route-sync chokepoint
+  // consumes this to avoid hijacking this window into the conversations route
+  // (which would unmount e.g. the Automations editor + its unsaved edits) just
+  // because another client switched tabs.
+  const remoteActivationPendingRef = useRef(false)
   const pendingRemoteRef = useRef<TabsChanged | null>(null)
   const tabsHydratedRef = useRef(false)
   const lastSavedPayloadRef = useRef<string | null>(null)
@@ -276,7 +282,7 @@ export function TabProvider({
     foldersRef.current = folders
   }, [folders])
 
-  // `allFolders` includes hidden `is_chat` folders (the user-facing `folders`
+  // `allFolders` includes hidden chat folders (the user-facing `folders`
   // list filters them out, and drops them on refetch), so chat-folder detection
   // must read this ref — never `foldersRef`.
   const allFoldersRef = useRef(allFolders)
@@ -805,7 +811,7 @@ export function TabProvider({
 
   const makeReplacementDraftTab = useCallback(
     (preferred?: TabItemInternal): TabItemInternal => {
-      // A closing chat-mode tab (its hidden `is_chat` folder, or the in-memory
+      // A closing chat-mode tab (its hidden chat folder, or the in-memory
       // draft flag) must not seed the replacement draft — that folder is hidden
       // from folder lists and has no real project cwd. Fall back to a real
       // folder. Detection reads `allFoldersRef` (the in-memory draft flag is
@@ -814,9 +820,9 @@ export function TabProvider({
       const preferredIsChat =
         preferred?.isChat === true ||
         allFoldersRef.current.find((f) => f.id === preferred?.folderId)
-          ?.is_chat === true
+          ?.kind === "chat"
       const nonChatFallbackId =
-        foldersRef.current.find((f) => !f.is_chat)?.id ?? 0
+        foldersRef.current.find((f) => f.kind !== "chat")?.id ?? 0
       const folderId = preferredIsChat
         ? nonChatFallbackId
         : (preferred?.folderId ?? nonChatFallbackId)
@@ -990,6 +996,11 @@ export function TabProvider({
           nextActiveId = nextTabs[0].id
         }
 
+        // A focus change driven by the remote snapshot (not local intent) must
+        // not trip the route-sync chokepoint into the conversations route.
+        if (nextActiveId !== prev.activeTabId) {
+          remoteActivationPendingRef.current = true
+        }
         // Seed the last-saved payload from the state we're about to commit
         // (focus included) so the guarded save-effect run is a confirmed no-op
         // AND a passive focus fallback never propagates to yank another client.
@@ -1273,7 +1284,9 @@ export function TabProvider({
       // per-conversation chat folder — its delete cleanup retires the folder and
       // it has no real project cwd — so start a fresh folderless chat draft
       // instead. Single choke point for every "new conversation" entry point.
-      if (allFoldersRef.current.find((f) => f.id === folderId)?.is_chat) {
+      if (
+        allFoldersRef.current.find((f) => f.id === folderId)?.kind === "chat"
+      ) {
         openChatModeTabRef.current()
         return
       }
@@ -1559,10 +1572,10 @@ export function TabProvider({
               // Bound to a real conversation now — drop the provisional
               // hint so the correction effect never revisits it.
               agentTypeProvisional: false,
-              // Chat-mode bind: point at the backend-created hidden `is_chat`
+              // Chat-mode bind: point at the backend-created hidden chat
               // folder and its scratch cwd. `isChat` stays set so chrome stays
               // hidden through the brief window before the folder lands in
-              // `allFolders` (after which `activeFolder.is_chat` takes over).
+              // `allFolders` (after which `activeFolder.kind === "chat"` takes over).
               ...(folderId != null ? { folderId } : {}),
               ...(workingDir != null ? { workingDir } : {}),
             }
@@ -1819,6 +1832,13 @@ export function TabProvider({
     }
   }, [rawTabs, activeTabId, tabsHydrated])
 
+  // Read-and-clear the remote-activation flag (see remoteActivationPendingRef).
+  const consumeRemoteActivation = useCallback(() => {
+    if (!remoteActivationPendingRef.current) return false
+    remoteActivationPendingRef.current = false
+    return true
+  }, [])
+
   const value = useMemo(
     () => ({
       tabs,
@@ -1827,6 +1847,7 @@ export function TabProvider({
       tabsHydrated,
       tabPersistenceMode: persistenceMode,
       isTileMode,
+      consumeRemoteActivation,
       openTab,
       closeTab,
       closeConversationTab,
@@ -1854,6 +1875,7 @@ export function TabProvider({
       tabsHydrated,
       persistenceMode,
       isTileMode,
+      consumeRemoteActivation,
       openTab,
       closeTab,
       closeConversationTab,

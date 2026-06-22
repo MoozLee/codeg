@@ -252,7 +252,7 @@ async fn build_agent(
                 .map(|a| {
                     a.with_debug(move |line, dir| {
                         if dir == sacp_tokio::LineDirection::Stderr {
-                            eprintln!("[ACP][{agent_name}][stderr] {line}");
+                            tracing::debug!("[ACP][{agent_name}][stderr] {line}");
                         }
                     })
                 })
@@ -295,9 +295,9 @@ async fn build_agent(
                         ))
                     })?;
             if cached_version == registry_version {
-                eprintln!("[ACP][{}] Using cached binary {cached_version}", meta.name);
+                tracing::info!("[ACP][{}] Using cached binary {cached_version}", meta.name);
             } else {
-                eprintln!(
+                tracing::info!(
                     "[ACP][{}] Using cached binary {cached_version} (registry recommends {registry_version})",
                     meta.name
                 );
@@ -326,7 +326,7 @@ async fn build_agent(
             // key list (values omitted — they may contain API keys). If
             // the connection hangs later, these lines pin down exactly
             // which binary was invoked and how.
-            eprintln!(
+            tracing::info!(
                 "[ACP][{}] binary_path={} size={} platform={} args={:?} env_keys={:?}",
                 meta.name,
                 binary_str,
@@ -373,13 +373,13 @@ async fn build_agent(
                                 .last()
                                 .map(|(i, c)| i + c.len_utf8())
                                 .unwrap_or(MAX);
-                            eprintln!(
+                            tracing::debug!(
                                 "[ACP][{agent_name}][{tag}] {}... <truncated {} bytes>",
                                 &line[..head],
                                 line.len() - head
                             );
                         } else {
-                            eprintln!("[ACP][{agent_name}][{tag}] {line}");
+                            tracing::debug!("[ACP][{agent_name}][{tag}] {line}");
                         }
                     },
                 ),
@@ -418,7 +418,7 @@ async fn build_agent(
                 // Fallback: the agent's own CLI is already on PATH (e.g.
                 // `hermes acp`), installed via its official installer rather
                 // than provisioned through uvx.
-                eprintln!(
+                tracing::warn!(
                     "[ACP][{}] uvx unavailable; falling back to system command {:?}",
                     meta.name, sys_path
                 );
@@ -445,7 +445,7 @@ async fn build_agent(
                 .map(|a| {
                     a.with_debug(move |line, dir| {
                         if dir == sacp_tokio::LineDirection::Stderr {
-                            eprintln!("[ACP][{agent_name}][stderr] {line}");
+                            tracing::debug!("[ACP][{agent_name}][stderr] {line}");
                         }
                     })
                 })
@@ -1077,7 +1077,7 @@ fn load_mcp_servers_for_agent(agent_type: AgentType) -> Vec<McpServer> {
     let entries = match crate::commands::mcp::read_servers_for_agent_type(agent_type) {
         Ok(map) => map,
         Err(err) => {
-            eprintln!(
+            tracing::error!(
                 "[ACP][{}] failed to read MCP servers from local config: {err}",
                 agent_type
             );
@@ -1090,7 +1090,7 @@ fn load_mcp_servers_for_agent(agent_type: AgentType) -> Vec<McpServer> {
         match canonical_spec_to_mcp_server(&name, &spec) {
             Ok(server) => out.push(server),
             Err(err) => {
-                eprintln!(
+                tracing::warn!(
                     "[ACP][{}] skip MCP server '{name}' (cannot map to ACP schema): {err}",
                     agent_type
                 );
@@ -1273,7 +1273,7 @@ async fn inject_codeg_mcp(
         sessions_enabled,
     )?;
     let Some(binary_path) = locate_codeg_mcp_binary() else {
-        eprintln!(
+        tracing::warn!(
             "[delegation][WARN] codeg-mcp companion binary not found (checked CODEG_MCP_BIN, \
              exe sibling, and PATH); skipping delegate_to_agent / check_user_feedback / \
              ask_user_question / get_session_info tool injection for connection \
@@ -1415,6 +1415,16 @@ fn canonical_spec_to_mcp_server(name: &str, spec: &serde_json::Value) -> Result<
 
 /// The main ACP connection loop.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(
+    name = "connection",
+    skip_all,
+    fields(
+        connection_id = %connection_id,
+        agent_type = ?agent_type,
+        working_dir = ?working_dir,
+        session_id = ?session_id,
+    )
+)]
 async fn run_connection(
     agent: AcpAgent,
     connection_id: String,
@@ -1576,7 +1586,7 @@ async fn run_connection(
             // convert it back to `AcpError::InitializeTimeout` in the
             // outer `.map_err(...)` below. The outer layer attaches a
             // stable `code` to the frontend event so it can be localized.
-            eprintln!(
+            tracing::info!(
                 "[ACP][{agent_name_for_log}] Sending Initialize (protocol={}, timeout=60s)",
                 ProtocolVersion::LATEST
             );
@@ -1588,21 +1598,21 @@ async fn run_connection(
             .await
             {
                 Ok(Ok(resp)) => {
-                    eprintln!(
+                    tracing::info!(
                         "[ACP][{agent_name_for_log}] Initialize responded in {:?}",
                         init_started.elapsed()
                     );
                     resp
                 }
                 Ok(Err(e)) => {
-                    eprintln!(
+                    tracing::error!(
                         "[ACP][{agent_name_for_log}] Initialize failed in {:?}: {e}",
                         init_started.elapsed()
                     );
                     return Err(e);
                 }
                 Err(_) => {
-                    eprintln!(
+                    tracing::error!(
                         "[ACP][{agent_name_for_log}] Initialize TIMED OUT after {:?} \
                          — the agent never answered the handshake. Check the \
                          [stderr] lines above for agent-side errors. For a full \
@@ -1624,7 +1634,7 @@ async fn run_connection(
                 .session_capabilities
                 .fork
                 .is_some();
-            eprintln!(
+            tracing::info!(
                 "[ACP] Agent capabilities: load_session={}, fork={}",
                 init_resp.agent_capabilities.load_session, supports_fork
             );
@@ -1641,7 +1651,7 @@ async fn run_connection(
                         if mcp_caps.http {
                             true
                         } else {
-                            eprintln!(
+                            tracing::warn!(
                                 "[ACP][{}] skip HTTP MCP server '{}': agent does not advertise mcpCapabilities.http",
                                 agent_type, server.name
                             );
@@ -1652,7 +1662,7 @@ async fn run_connection(
                         if mcp_caps.sse {
                             true
                         } else {
-                            eprintln!(
+                            tracing::warn!(
                                 "[ACP][{}] skip SSE MCP server '{}': agent does not advertise mcpCapabilities.sse",
                                 agent_type, server.name
                             );
@@ -1770,7 +1780,7 @@ async fn run_connection(
                             }
                         }
                         if drained > 0 {
-                            eprintln!("[ACP] Drained {drained} historical replay notifications");
+                            tracing::info!("[ACP] Drained {drained} historical replay notifications");
                         }
 
                         emit_with_state(
@@ -1841,7 +1851,7 @@ async fn run_connection(
                             e.code,
                             sacp::schema::ErrorCode::ResourceNotFound
                         );
-                        eprintln!(
+                        tracing::warn!(
                             "[ACP] session/load failed ({}){}",
                             err_str,
                             if is_resource_not_found {
@@ -2261,7 +2271,7 @@ async fn apply_preferred_session_options(
             .unwrap_or(false);
         if needs_apply {
             if let Err(e) = set_session_mode(session, state, emitter, pref_mode.to_string()).await {
-                eprintln!("[ACP] failed to apply preferred mode '{pref_mode}' on connect: {e}");
+                tracing::error!("[ACP] failed to apply preferred mode '{pref_mode}' on connect: {e}");
             }
         }
     }
@@ -2296,7 +2306,7 @@ async fn apply_preferred_session_options(
         .await
         {
             Ok(updated) => options = updated,
-            Err(e) => eprintln!(
+            Err(e) => tracing::error!(
                 "[ACP] failed to apply preferred config '{config_id}'='{value}' \
                  on connect: {e}"
             ),
@@ -2797,7 +2807,7 @@ async fn poll_tracked_terminal_tool_calls(
             match poll_terminal_tool_call_output(terminal_runtime, session_id, entry).await {
                 Ok(result) => result,
                 Err(err) => {
-                    eprintln!(
+                    tracing::error!(
                         "[ACP] Failed to poll terminal output for tool call {}: {:?}",
                         tool_call_id, err
                     );
@@ -2920,7 +2930,7 @@ async fn handle_fork_or_exit(
     let fork_resp = fork_info.fork_response;
     let new_sid = fork_resp.session_id.0.to_string();
 
-    eprintln!(
+    tracing::info!(
         "[ACP] Fork transition: attaching to forked session {} (original: {})",
         new_sid, fork_info.original_session_id
     );
@@ -3135,7 +3145,7 @@ async fn run_conversation_loop<'a>(
                         }
                         Ok(_) => {}
                         Err(e) => {
-                            eprintln!("[ACP] Ignoring unrecognized session update in idle loop: {e}");
+                            tracing::warn!("[ACP] Ignoring unrecognized session update in idle loop: {e}");
                         }
                     }
                 }
@@ -3231,7 +3241,7 @@ async fn run_conversation_loop<'a>(
                             let update = match update {
                                 Ok(u) => u,
                                 Err(e) => {
-                                    eprintln!("[ACP] Ignoring unrecognized session update: {e}");
+                                    tracing::warn!("[ACP] Ignoring unrecognized session update: {e}");
                                     continue;
                                 }
                             };
@@ -3274,7 +3284,7 @@ async fn run_conversation_loop<'a>(
                                         })
                                         .await
                                     {
-                                        eprintln!("[ACP] Ignoring dispatch parse error: {e}");
+                                        tracing::warn!("[ACP] Ignoring dispatch parse error: {e}");
                                     }
                                 }
                                 SessionMessage::StopReason(reason) => {
@@ -3558,7 +3568,7 @@ async fn run_conversation_loop<'a>(
                                     break;
                                 }
                                 Some(ConnectionCommand::Disconnect) | None => {
-                                    eprintln!(
+                                    tracing::info!(
                                         "[ACP] disconnect requested during prompting; connection_id={conn_id}"
                                     );
                                     let _ = cx.send_notification_to(
@@ -3585,7 +3595,7 @@ async fn run_conversation_loop<'a>(
                 }
 
                 if disconnect_requested {
-                    eprintln!(
+                    tracing::info!(
                         "[ACP] closing connection loop after disconnect; connection_id={conn_id}"
                     );
                     break;
@@ -3694,14 +3704,14 @@ async fn run_conversation_loop<'a>(
                 }
                 let cx = session.connection();
                 let sid = session.session_id().clone();
-                eprintln!(
+                tracing::info!(
                     "[ACP] Sending session/fork for session_id={} cwd={}",
                     sid.0, cwd
                 );
                 let result = crate::acp::fork::fork_session(&cx, &sid, cwd).await;
                 match result {
                     Ok(fork_response) => {
-                        eprintln!(
+                        tracing::info!(
                             "[ACP] Fork succeeded: new_session_id={}",
                             fork_response.session_id.0
                         );
@@ -3713,7 +3723,7 @@ async fn run_conversation_loop<'a>(
                         }));
                     }
                     Err(e) => {
-                        eprintln!("[ACP] Fork failed: {e}");
+                        tracing::error!("[ACP] Fork failed: {e}");
                         let _ = reply.send(Err(e));
                     }
                 }
@@ -4054,7 +4064,7 @@ async fn emit_conversation_update(
                 // task description (PII-adjacent) and would create noise in
                 // server-mode log sinks. The opaque tool_call_id is enough
                 // to correlate this event with downstream traces.
-                eprintln!(
+                tracing::info!(
                     "[ACP][{agent_type}] subagent detected, rewrote tool title to 'agent' (tool_call_id={tool_call_id})"
                 );
                 "agent".to_string()
@@ -4124,7 +4134,7 @@ async fn emit_conversation_update(
             // Logging mirrors the ToolCall arm: we deliberately omit the
             // incoming title (user-generated content) to keep server logs clean.
             let title = if is_opencode_subagent_invocation(agent_type, &raw_input) {
-                eprintln!(
+                tracing::info!(
                     "[ACP][{agent_type}] subagent detected, rewrote tool title to 'agent' (tool_call_id={tool_call_id}, on update)"
                 );
                 Some("agent".to_string())
@@ -4210,7 +4220,7 @@ async fn emit_conversation_update(
         }
         other => {
             // Log unhandled update types for debugging
-            eprintln!("[ACP] Unhandled SessionUpdate: {:?}", other);
+            tracing::info!("[ACP] Unhandled SessionUpdate: {:?}", other);
         }
     }
 }

@@ -46,6 +46,8 @@ import {
   expertsUnlinkFromAgent,
   openFolder,
 } from "@/lib/api"
+import { revealItemInDir } from "@/lib/platform"
+import { getActiveRemoteConnectionId, isDesktop } from "@/lib/transport"
 import { invalidateAgentExpertsCache } from "@/hooks/use-agent-experts"
 import type {
   AcpAgentInfo,
@@ -370,7 +372,18 @@ export function ExpertsSettings() {
   const handleOpenCentralDir = useCallback(async () => {
     try {
       const path = await expertsOpenCentralDir()
-      await openFolder(path)
+      if (isDesktop() && getActiveRemoteConnectionId() === null) {
+        // Desktop: reveal the central skills folder in Finder / File Explorer.
+        // `revealItemInDir` (not `openPath`) is used deliberately: the opener
+        // plugin's path scope (`$HOME/**`) defaults to require-literal-leading-
+        // dot on Unix, so `openPath` is rejected for the hidden `~/.codeg/...`
+        // path. `revealItemInDir` is not scope-checked, mirroring the file tree.
+        await revealItemInDir(path)
+      } else {
+        // Web / remote desktop: no local file manager, so fall back to
+        // opening it as an in-app workspace folder.
+        await openFolder(path)
+      }
     } catch (err) {
       const message = toErrorMessage(err)
       toast.error(t("toasts.openFolderFailed"), { description: message })
