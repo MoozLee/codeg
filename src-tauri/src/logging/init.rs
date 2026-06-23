@@ -17,9 +17,10 @@
 
 use std::path::Path;
 
+use tracing::Subscriber;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_appender::rolling::Rotation;
-use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter, Registry};
+use tracing_subscriber::{fmt, prelude::*, reload, util::SubscriberInitExt, EnvFilter, Registry};
 
 use crate::logging::hub::LogHub;
 use crate::logging::layer::BufferEmitLayer;
@@ -71,9 +72,9 @@ fn is_valid_target(target: &str) -> bool {
     {
         return false;
     }
-    target.split("::").all(|seg| {
-        !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-    })
+    target
+        .split("::")
+        .all(|seg| !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
 }
 
 /// Build a reload handle not attached to any installed subscriber, for tests
@@ -147,12 +148,34 @@ fn init_file_writer(dir: &Path, prefix: &str) -> Option<(NonBlocking, WorkerGuar
     Some(tracing_appender::non_blocking(appender))
 }
 
+#[derive(Clone, Copy)]
+enum SubscriberInstallMode {
+    /// Install both the tracing subscriber and the `log` → `tracing` bridge.
+    /// Used outside desktop where no Tauri plugin owns the global `log` logger.
+    WithLogTracer,
+    /// Install only the tracing subscriber. Desktop must leave the global `log`
+    /// logger empty so `tauri-plugin-log` can register its Stdout/Webview logger.
+    TracingOnly,
+}
+
+fn install_subscriber<S>(subscriber: S, mode: SubscriberInstallMode)
+where
+    S: Subscriber + Send + Sync + 'static,
+{
+    match mode {
+        SubscriberInstallMode::WithLogTracer => subscriber.init(),
+        SubscriberInstallMode::TracingOnly => tracing::subscriber::set_global_default(subscriber)
+            .expect("error setting global tracing subscriber"),
+    }
+}
+
 /// Build and install the subscriber. `file_dir` is `None` for `codeg-mcp`
 /// (stderr only). Returns the reload handle and the appender guard.
 fn build_subscriber(
     initial: LogLevel,
     file_dir: Option<&Path>,
     file_prefix: &str,
+    install_mode: SubscriberInstallMode,
 ) -> (ReloadHandle, Option<WorkerGuard>) {
     // Explicit env wins at startup; otherwise the passed-in default. Phase 2
     // (apply_persisted_level) later overrides the default from the DB. Uses the
@@ -180,20 +203,24 @@ fn build_subscriber(
     // arm) lets the compiler infer each layer's subscriber type without boxing.
     let guard = match file {
         Some((non_blocking, guard)) => {
-            Registry::default()
-                .with(filter_layer)
-                .with(fmt::layer().with_writer(std::io::stderr))
-                .with(BufferEmitLayer)
-                .with(fmt::layer().json().with_writer(non_blocking))
-                .init();
+            install_subscriber(
+                Registry::default()
+                    .with(filter_layer)
+                    .with(fmt::layer().with_writer(std::io::stderr))
+                    .with(BufferEmitLayer)
+                    .with(fmt::layer().json().with_writer(non_blocking)),
+                install_mode,
+            );
             Some(guard)
         }
         None => {
-            Registry::default()
-                .with(filter_layer)
-                .with(fmt::layer().with_writer(std::io::stderr))
-                .with(BufferEmitLayer)
-                .init();
+            install_subscriber(
+                Registry::default()
+                    .with(filter_layer)
+                    .with(fmt::layer().with_writer(std::io::stderr))
+                    .with(BufferEmitLayer),
+                install_mode,
+            );
             None
         }
     };
@@ -205,18 +232,18 @@ fn build_subscriber(
 /// buffer. Default level is env-or-`info`; [`apply_persisted_level`] refines it
 /// once the DB is open.
 pub fn init_desktop() -> LogGuard {
-    init_with_file("codeg")
+    init_with_file("codeg", SubscriberInstallMode::TracingOnly)
 }
 
 /// Phase 1 for `codeg-server`: stderr + file (`codeg-server.<date>.log`) +
 /// buffer.
 pub fn init_server() -> LogGuard {
-    init_with_file("codeg-server")
+    init_with_file("codeg-server", SubscriberInstallMode::WithLogTracer)
 }
 
-fn init_with_file(prefix: &str) -> LogGuard {
+fn init_with_file(prefix: &str, install_mode: SubscriberInstallMode) -> LogGuard {
     let dir = crate::paths::codeg_logs_root();
-    let (reload, guard) = build_subscriber(LogLevel::default(), Some(&dir), prefix);
+    let (reload, guard) = build_subscriber(LogLevel::default(), Some(&dir), prefix, install_mode);
     LogHub::install(reload);
     LogGuard { _guard: guard }
 }
@@ -232,7 +259,12 @@ fn init_with_file(prefix: &str) -> LogGuard {
 /// or multi-process and must not clobber a shared rolling file. No hub: nothing
 /// to buffer/emit, so `BufferEmitLayer` short-circuits.
 pub fn init_stderr_only() -> LogGuard {
-    let (_reload, guard) = build_subscriber(LogLevel::default(), None, "");
+    let (_reload, guard) = build_subscriber(
+        LogLevel::default(),
+        None,
+        "",
+        SubscriberInstallMode::WithLogTracer,
+    );
     LogGuard { _guard: guard }
 }
 
@@ -365,13 +397,10 @@ mod tests {
             },
         );
         // Both empty / whitespace-only → no override.
-        temp_env::with_vars(
-            [("CODEG_LOG", Some("  ")), ("RUST_LOG", Some(""))],
-            || {
-                assert_eq!(env_level_override(), None);
-                assert!(!env_level_is_set());
-            },
-        );
+        temp_env::with_vars([("CODEG_LOG", Some("  ")), ("RUST_LOG", Some(""))], || {
+            assert_eq!(env_level_override(), None);
+            assert!(!env_level_is_set());
+        });
         // CODEG_LOG wins when both are non-empty.
         temp_env::with_vars(
             [("CODEG_LOG", Some("trace")), ("RUST_LOG", Some("debug"))],
