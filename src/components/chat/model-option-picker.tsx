@@ -54,7 +54,7 @@ export function ModelOptionPicker({
         <Button
           variant="ghost"
           size="xs"
-          title={currentLabel}
+          title={currentLabel ? `${option.name}: ${currentLabel}` : option.name}
           aria-label={
             currentLabel ? `${option.name}: ${currentLabel}` : option.name
           }

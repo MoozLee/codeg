@@ -581,6 +581,7 @@ impl GeminiParser {
                     output_preview,
                     is_error,
                     agent_stats: None,
+                    images: Vec::new(),
                 });
             }
         }

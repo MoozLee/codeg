@@ -6,6 +6,8 @@ export type AgentType =
   | "open_claw"
   | "cline"
   | "hermes"
+  | "code_buddy"
+  | "kimi_code"
 
 export type AppErrorCode =
   | "invalid_input"
@@ -151,6 +153,16 @@ export type ContentBlock =
       output_preview: string | null
       is_error: boolean
       agent_stats?: AgentExecutionStats | null
+      /**
+       * Images returned in a tool result (e.g. Claude Code's `Read` of a
+       * PNG/JPEG, or a multi-page PDF read returning one image per page).
+       * Mirror of Rust `ContentBlock::ToolResult.images`. The adapter renders
+       * these in-position as `generated-image` cards so the historical (JSONL
+       * replay) path matches the live ACP stream — which surfaces the same
+       * bytes via `ToolCallInfo.images` and an `image_generation` block.
+       * Absent/empty for the common text-only tool result.
+       */
+      images?: ImageData[] | null
     }
   | { type: "thinking"; text: string }
   /**
@@ -439,6 +451,8 @@ export const AGENT_DISPLAY_ORDER: AgentType[] = [
   "open_claw",
   "cline",
   "hermes",
+  "code_buddy",
+  "kimi_code",
 ]
 
 const AGENT_DISPLAY_ORDER_INDEX = new Map(
@@ -459,6 +473,8 @@ export const ALL_AGENT_TYPES: AgentType[] = [
   "open_claw",
   "cline",
   "hermes",
+  "code_buddy",
+  "kimi_code",
 ]
 
 export const MODEL_PROVIDER_AGENT_TYPES: AgentType[] = [
@@ -746,6 +762,8 @@ export const AGENT_LABELS: Record<AgentType, string> = {
   open_claw: "OpenClaw",
   cline: "Cline",
   hermes: "Hermes Agent",
+  code_buddy: "CodeBuddy",
+  kimi_code: "Kimi Code",
 }
 
 export const AGENT_COLORS: Record<AgentType, string> = {
@@ -756,6 +774,8 @@ export const AGENT_COLORS: Record<AgentType, string> = {
   open_claw: "bg-emerald-600",
   cline: "bg-purple-500",
   hermes: "bg-amber-500",
+  code_buddy: "bg-[#0052D9]",
+  kimi_code: "bg-[#1783FF]",
 }
 
 // ACP connection status (matches Rust ConnectionStatus)
@@ -1749,6 +1769,8 @@ export type McpAppType =
   | "open_code"
   | "cline"
   | "hermes"
+  | "code_buddy"
+  | "kimi_code"
 
 export interface LocalMcpServer {
   id: string

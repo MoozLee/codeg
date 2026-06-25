@@ -663,6 +663,14 @@ pub fn build_router(
             post(handlers::acp::acp_update_hermes_config),
         )
         .route(
+            "/acp_update_kimi_code_config",
+            post(handlers::acp::acp_update_kimi_code_config),
+        )
+        .route(
+            "/acp_fetch_kimi_models",
+            post(handlers::acp::acp_fetch_kimi_models),
+        )
+        .route(
             "/acp_download_agent_binary",
             post(handlers::acp::acp_download_agent_binary),
         )

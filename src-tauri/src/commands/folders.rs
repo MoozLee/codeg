@@ -4373,6 +4373,7 @@ mod tests {
                 color: "inherit".to_string(),
                 parent_id: Some(1),
                 kind: FolderKind::Regular,
+                is_pinned: false,
             },
         );
 

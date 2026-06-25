@@ -895,7 +895,6 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                         <TabKeysSync />
                         <DeepLinkBootstrap />
                         <PetFocusBridge />
-                        <WorkspaceOpenFolderListener />
                         <SessionStatsProvider>
                           <SidebarProvider>
                             <AuxPanelProvider>
@@ -904,6 +903,10 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                                   <AutomationsViewProvider>
                                     <WorkbenchRouteProvider>
                                       <WorkbenchRouteConversationSync />
+                                      {/* Inside WorkbenchRouteProvider: the
+                                          listener calls openConversations() to
+                                          surface a launcher-opened folder. */}
+                                      <WorkspaceOpenFolderListener />
                                       <FolderLayoutShell>
                                         {children}
                                       </FolderLayoutShell>

@@ -1137,6 +1137,8 @@ mod tauri_app {
                 acp_commands::acp_update_agent_env,
                 acp_commands::acp_update_agent_config,
                 acp_commands::acp_update_hermes_config,
+                acp_commands::acp_update_kimi_code_config,
+                acp_commands::acp_fetch_kimi_models,
                 acp_commands::acp_open_hermes_setup_terminal,
                 acp_commands::acp_reveal_hermes_home,
                 acp_commands::acp_reorder_agents,

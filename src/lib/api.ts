@@ -463,6 +463,56 @@ export async function acpUpdateHermesConfig(params: {
 }
 
 /**
+ * Persist a Kimi Code config update, keeping exactly one source authoritative.
+ * `mode` "apikey" writes the codeg-managed ~/.kimi-code/config.toml provider/model
+ * block AND seeds a synthetic gate token so the API key authenticates `kimi acp`
+ * (its session gate only checks for a stored token); "login" clears the managed
+ * block + removes our synthetic token so a real OAuth login governs; "raw" writes
+ * a verbatim config.toml then seeds the gate token. Returns the number of running
+ * Kimi sessions left on stale config.
+ */
+export async function acpUpdateKimiCodeConfig(params: {
+  mode: "apikey" | "login" | "raw"
+  interfaceType?: string | null
+  authType?: string | null
+  baseUrl?: string | null
+  apiKey?: string | null
+  model?: string | null
+  maxContextSize?: number | null
+  vertexProject?: string | null
+  vertexLocation?: string | null
+  rawConfigToml?: string | null
+}): Promise<number> {
+  return getTransport().call("acp_update_kimi_code_config", {
+    mode: params.mode,
+    interfaceType: params.interfaceType ?? null,
+    authType: params.authType ?? null,
+    baseUrl: params.baseUrl ?? null,
+    apiKey: params.apiKey ?? null,
+    model: params.model ?? null,
+    maxContextSize: params.maxContextSize ?? null,
+    vertexProject: params.vertexProject ?? null,
+    vertexLocation: params.vertexLocation ?? null,
+    rawConfigToml: params.rawConfigToml ?? null,
+  })
+}
+
+/**
+ * List the models an API key + endpoint can access (GET `<baseUrl>/models`).
+ * Validates the key and powers the Kimi settings model picker; throws with the
+ * provider's error message on failure.
+ */
+export async function acpFetchKimiModels(params: {
+  baseUrl: string
+  apiKey: string
+}): Promise<string[]> {
+  return getTransport().call("acp_fetch_kimi_models", {
+    baseUrl: params.baseUrl,
+    apiKey: params.apiKey,
+  })
+}
+
+/**
  * Launch Hermes's interactive setup in the OS terminal (desktop only). `kind`
  * picks the flow; the backend constructs the exact command from the registry
  * recipe (no arbitrary shell text crosses the boundary).
