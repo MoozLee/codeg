@@ -629,12 +629,6 @@ export async function expertsList(): Promise<ExpertListItem[]> {
   return getTransport().call("experts_list")
 }
 
-export async function expertsListForAgent(
-  agentType: AgentType
-): Promise<ExpertListItem[]> {
-  return getTransport().call("experts_list_for_agent", { agentType })
-}
-
 export async function expertsGetInstallStatus(
   expertId: string
 ): Promise<ExpertInstallStatus[]> {
@@ -754,6 +748,32 @@ export async function officecliRenderHtml(
   path: string
 ): Promise<string> {
   return getTransport().call("officecli_render_html", { rootPath, path })
+}
+
+/**
+ * Start (or share, by ref-count) a long-lived `officecli watch` preview server
+ * for an office file and return its loopback `port` plus a per-watch `cap`
+ * capability. `path` is relative to `rootPath`. Live refresh is driven by
+ * officecli's own SSE channel, so the preview no longer re-reads (and locks)
+ * the file the way the one-shot {@link officecliRenderHtml} did.
+ *
+ * `cap` is only used by web/server mode, where the iframe loads the preview
+ * through the `/api/office-watch-proxy/{port}` reverse proxy and authenticates
+ * with `?cap=` (the master token never enters the iframe). Desktop ignores it.
+ */
+export async function startOfficeWatch(
+  rootPath: string,
+  path: string
+): Promise<{ port: number; cap: string }> {
+  return getTransport().call("start_office_watch", { rootPath, path })
+}
+
+/** Release one reference to an office file's watch preview server. */
+export async function stopOfficeWatch(
+  rootPath: string,
+  path: string
+): Promise<void> {
+  return getTransport().call("stop_office_watch", { rootPath, path })
 }
 
 export async function getSystemProxySettings(): Promise<SystemProxySettings> {

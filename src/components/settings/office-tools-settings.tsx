@@ -28,7 +28,12 @@ import {
   SkillAgentMatrix,
   type MatrixSkill,
 } from "@/components/settings/skill-agent-matrix"
+import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
+import {
+  loadOfficeAutoPreview,
+  saveOfficeAutoPreview,
+} from "@/lib/office-preview-prefs"
 import {
   acpListAgents,
   officecliDetect,
@@ -40,7 +45,7 @@ import {
   officecliSyncSkills,
   officecliUninstall,
 } from "@/lib/api"
-import { invalidateAgentExpertsCache } from "@/hooks/use-agent-experts"
+import { invalidateAgentSkillsCache } from "@/hooks/use-agent-skills"
 import { pickLocalized } from "@/lib/expert-presentation"
 import type {
   AcpAgentInfo,
@@ -194,6 +199,7 @@ function DetectionCard({
 export function OfficeToolsSettings() {
   const t = useTranslations("OfficeToolsSettings")
   const locale = useLocale()
+  const [autoPreview, setAutoPreview] = useState(() => loadOfficeAutoPreview())
 
   const [info, setInfo] = useState<OfficecliInfo | null>(null)
   const [detecting, setDetecting] = useState(true)
@@ -391,6 +397,26 @@ export function OfficeToolsSettings() {
         syncing={syncing}
       />
 
+      <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
+        <div className="min-w-0 space-y-1">
+          <label htmlFor="office-auto-preview" className="text-sm font-medium">
+            {t("autoPreviewLabel")}
+          </label>
+          <p className="text-xs text-muted-foreground">
+            {t("autoPreviewHint")}
+          </p>
+        </div>
+        <Switch
+          id="office-auto-preview"
+          checked={autoPreview}
+          onCheckedChange={(next) => {
+            setAutoPreview(next)
+            saveOfficeAutoPreview(next)
+          }}
+          className="shrink-0"
+        />
+      </div>
+
       <div className="flex-1 min-h-0 min-w-0 mt-4">
         {skills.length === 0 ? (
           <div className="h-full rounded-lg border bg-card flex items-center justify-center text-sm text-muted-foreground">
@@ -408,7 +434,7 @@ export function OfficeToolsSettings() {
             applyLinks={officecliSkillApplyLinks}
             loadContent={loadContent}
             onApplied={(touched) =>
-              touched.forEach((a) => invalidateAgentExpertsCache(a))
+              touched.forEach((a) => invalidateAgentSkillsCache(a))
             }
             searchPlaceholder={t("searchPlaceholder")}
             notReadyHint={installed ? t("syncFirst") : t("installFirst")}
