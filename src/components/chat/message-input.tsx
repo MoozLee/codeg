@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { isDesktop } from "@/lib/platform"
 import Image from "next/image"
-import { useLocale, useTranslations } from "next-intl"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import {
   BookOpenText,
@@ -22,7 +22,6 @@ import {
   Search,
   Send,
   Command,
-  Sparkles,
   Square,
   TextSelect,
   Upload,
@@ -32,8 +31,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -89,7 +86,6 @@ import type {
   AgentSkillItem,
   AgentType,
   AvailableCommandInfo,
-  ExpertListItem,
   PromptCapabilitiesInfo,
   PromptDraft,
   PromptInputBlock,
@@ -123,13 +119,7 @@ import {
   MODEL_LIST_VIRTUALIZE_THRESHOLD,
   type ModelOptionGroup,
 } from "@/lib/model-config-groups"
-import {
-  getExpertIcon,
-  pickExpertLocalized,
-} from "@/components/chat/experts-command-menu"
 import { DropdownRadioItemContent } from "@/components/chat/dropdown-radio-item-content"
-import { useBuiltInExperts } from "@/hooks/use-built-in-experts"
-import { useAgentExperts } from "@/hooks/use-agent-experts"
 import { useAgentSkills } from "@/hooks/use-agent-skills"
 import {
   clearMessageInputDraftV2,
@@ -153,7 +143,6 @@ import {
 } from "@/components/chat/composer/composer-commands"
 import {
   commandToReference,
-  expertToReference,
   skillToReference,
 } from "@/components/chat/composer/invocation-reference"
 import { cutSelectionToClipboard } from "@/components/chat/composer/clipboard-actions"
@@ -170,6 +159,17 @@ import type {
   InputAttachment,
   ResourceInputAttachment,
 } from "./message-input-attachments"
+
+/**
+ * Payload pushed into the composer from outside (e.g. a welcome-page quick
+ * action). `text` replaces the document; `skill`, when present, is prepended as
+ * the leading invocation badge (serializes to `${prefix}${id}` as the first
+ * token).
+ */
+export interface ComposerInjectContent {
+  text: string
+  skill?: { id: string; label: string }
+}
 
 interface MessageInputProps {
   onSend: (draft: PromptDraft, modeId?: string | null) => void
@@ -220,6 +220,8 @@ interface MessageInputProps {
   /** Grey out the live-feedback "+" entry when a note can't be sent right now
    *  (no active turn / agent lacks the tool). */
   feedbackAddDisabled?: boolean
+  injectContent?: ComposerInjectContent | null
+  onInjectConsumed?: () => void
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -488,10 +490,11 @@ export function MessageInput({
   onForkSend,
   onAddFeedback,
   feedbackAddDisabled,
+  injectContent,
+  onInjectConsumed,
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
   const tQueue = useTranslations("Folder.chat.messageQueue")
-  const tExperts = useTranslations("ExpertsSettings")
   // Kept as a separate binding from `t` so its call sites — exclusively
   // upload / attachment toasts — read as a single coherent group when
   // scanning the file. Same namespace, no extra runtime cost.
@@ -507,15 +510,6 @@ export function MessageInput({
     () => desktopMode && getActiveRemoteConnectionId() === null,
     [desktopMode]
   )
-  const locale = useLocale()
-  const builtInExperts = useBuiltInExperts()
-  const expertIdSet = useMemo(
-    () => new Set(builtInExperts.map((item) => item.metadata.id)),
-    [builtInExperts]
-  )
-  // Experts linked to the current agent via symlinks in the settings page.
-  // Kept so the dedicated expert (Sparkles) button can still surface them.
-  const availableExperts = useAgentExperts(agentType ?? null)
   // The `$` prefix autocomplete is Codex-only: Codex advertises very few
   // native slash commands, so we augment the dropdown with the agent's
   // skills read from disk. Other agents already surface their full command
@@ -526,69 +520,7 @@ export function MessageInput({
   // project skills (e.g. `{folder}/.codex/skills`). Without this, users
   // only ever saw global skills in the `$` autocomplete.
   const availableSkills = useAgentSkills(skillAgentType, defaultPath ?? null)
-  // Expert skills are symlinked into the agent's skill directories, so they
-  // also show up in `acp_list_agent_skills`. Strip them out — experts remain
-  // reachable via the expert button, and the `$` list is skills-only.
-  const nonExpertSkills = useMemo(
-    () => availableSkills.filter((skill) => !expertIdSet.has(skill.id)),
-    [availableSkills, expertIdSet]
-  )
-  const expertPrefix = agentType === "codex" ? "$" : "/"
-  // Stable presentation order for expert categories in the button
-  // dropdown. Keep this in sync with experts-settings.tsx so both surfaces
-  // group experts the same way.
-  const groupedExperts = useMemo(() => {
-    const CATEGORY_SORT: Record<string, number> = {
-      discovery: 1,
-      planning: 2,
-      execution: 3,
-      quality: 4,
-      debugging: 5,
-      review: 6,
-      meta: 7,
-    }
-    const groups = new Map<string, typeof availableExperts>()
-    const sorted = [...availableExperts].sort((a, b) => {
-      const ca = CATEGORY_SORT[a.metadata.category] ?? 99
-      const cb = CATEGORY_SORT[b.metadata.category] ?? 99
-      if (ca !== cb) return ca - cb
-      const sa = a.metadata.sort_order ?? 0
-      const sb = b.metadata.sort_order ?? 0
-      if (sa !== sb) return sa - sb
-      return a.metadata.id.localeCompare(b.metadata.id)
-    })
-    for (const item of sorted) {
-      const list = groups.get(item.metadata.category) ?? []
-      list.push(item)
-      groups.set(item.metadata.category, list)
-    }
-    return Array.from(groups.entries()).sort(
-      (a, b) => (CATEGORY_SORT[a[0]] ?? 99) - (CATEGORY_SORT[b[0]] ?? 99)
-    )
-  }, [availableExperts])
-  const translateExpertCategory = useCallback(
-    (category: string): string => {
-      switch (category) {
-        case "discovery":
-          return tExperts("categories.discovery")
-        case "planning":
-          return tExperts("categories.planning")
-        case "execution":
-          return tExperts("categories.execution")
-        case "quality":
-          return tExperts("categories.quality")
-        case "debugging":
-          return tExperts("categories.debugging")
-        case "review":
-          return tExperts("categories.review")
-        case "meta":
-          return tExperts("categories.meta")
-        default:
-          return category
-      }
-    },
-    [tExperts]
-  )
+  const skillPrefix = agentType === "codex" ? "$" : "/"
   const { shortcuts } = useShortcutSettings()
   const effectiveDraftStorageKey = draftStorageKey ?? null
   const isExternalDraftEditing = isEditingQueueItem || isRetryEditingMessage
@@ -789,34 +721,49 @@ export function MessageInput({
   useEffect(() => {
     if (!composerReady || hydratedRef.current) return
     hydratedRef.current = true
-    const ed = editorRef.current
-    if (!ed) return
-    if (isExternalDraftEditing && editingDraftText != null) {
-      const editor = ed.getEditor()
-      if (
-        isEditingQueueItem &&
-        editingDraftBlocks &&
-        editingDraftBlocks.length > 0 &&
-        editor
-      ) {
-        // Full fidelity: restore inline badges + images from the blocks.
-        hydrateFromBlocks(editor, editingDraftBlocks)
-      } else {
-        ed.setMarkdown(editingDraftText)
-      }
-      prevEditingItemIdRef.current = isEditingQueueItem
-        ? (editingItemId ?? null)
-        : null
-    } else if (effectiveDraftStorageKey) {
-      const loaded = loadMessageInputDraftV2(effectiveDraftStorageKey)
-      if (loaded?.kind === "doc") {
-        ed.setDoc(loaded.doc)
-      } else if (loaded?.kind === "legacyMarkdown") {
-        ed.setMarkdown(loaded.markdown)
-      }
+    if (!editorRef.current) return
+    const shouldHydrateExternalDraft =
+      isExternalDraftEditing && editingDraftText != null
+    // Bookkeeping stays synchronous so the sibling re-hydrate effect below sees
+    // the claimed item and doesn't double-hydrate; only the editor mutation is
+    // deferred to the next frame. Restoring a draft/queue payload that contains
+    // a reference badge inserts a React NodeView, which @tiptap/react renders
+    // with a synchronous flushSync() — running that here in the effect body
+    // trips React's "flushSync from inside a lifecycle method" warning.
+    if (
+      isEditingQueueItem &&
+      (editingDraftBlocks != null || editingDraftText != null)
+    ) {
+      prevEditingItemIdRef.current = editingItemId ?? null
     }
-    const editor = ed.getEditor()
-    setComposerEmpty(editor ? isComposerEmpty(editor) : true)
+    const raf = requestAnimationFrame(() => {
+      const ed = editorRef.current
+      if (!ed) return
+      if (shouldHydrateExternalDraft) {
+        const editor = ed.getEditor()
+        if (
+          isEditingQueueItem &&
+          editingDraftBlocks &&
+          editingDraftBlocks.length > 0 &&
+          editor
+        ) {
+          // Full fidelity: restore inline badges + images from the blocks.
+          hydrateFromBlocks(editor, editingDraftBlocks)
+        } else {
+          ed.setMarkdown(editingDraftText)
+        }
+      } else if (effectiveDraftStorageKey) {
+        const loaded = loadMessageInputDraftV2(effectiveDraftStorageKey)
+        if (loaded?.kind === "doc") {
+          ed.setDoc(loaded.doc)
+        } else if (loaded?.kind === "legacyMarkdown") {
+          ed.setMarkdown(loaded.markdown)
+        }
+      }
+      const editor = ed.getEditor()
+      setComposerEmpty(editor ? isComposerEmpty(editor) : true)
+    })
+    return () => cancelAnimationFrame(raf)
   }, [
     composerReady,
     isExternalDraftEditing,
@@ -864,16 +811,20 @@ export function MessageInput({
       editingItemId !== prevEditingItemIdRef.current
     ) {
       prevEditingItemIdRef.current = editingItemId
-      const editor = editorRef.current?.getEditor()
-      if (editingDraftBlocks && editingDraftBlocks.length > 0 && editor) {
-        hydrateFromBlocks(editor, editingDraftBlocks)
-      } else if (editingDraftText != null) {
-        editorRef.current?.setMarkdown(editingDraftText)
-      }
-      setComposerEmpty(editor ? isComposerEmpty(editor) : true)
-      requestAnimationFrame(() => {
+      // Same flushSync deferral as the hydration effect above: hydrateFromBlocks
+      // can insert reference-badge NodeViews (synchronous @tiptap/react
+      // flushSync). Mutation + focus run next frame, off the commit phase.
+      const raf = requestAnimationFrame(() => {
+        const editor = editorRef.current?.getEditor()
+        if (editingDraftBlocks && editingDraftBlocks.length > 0 && editor) {
+          hydrateFromBlocks(editor, editingDraftBlocks)
+        } else if (editingDraftText != null) {
+          editorRef.current?.setMarkdown(editingDraftText)
+        }
+        setComposerEmpty(editor ? isComposerEmpty(editor) : true)
         editorRef.current?.focus()
       })
+      return () => cancelAnimationFrame(raf)
     } else if (!isEditingQueueItem) {
       prevEditingItemIdRef.current = null
     }
@@ -884,6 +835,43 @@ export function MessageInput({
     editingDraftBlocks,
     hydrateFromBlocks,
   ])
+
+  useEffect(() => {
+    if (!injectContent || !composerReady) return
+    const payload = injectContent
+    // Defer the editor mutation to the next frame. Inserting the skill badge
+    // creates a React NodeView, which @tiptap/react renders with a synchronous
+    // flushSync(); doing that here in the effect body runs flushSync during
+    // React's commit phase and trips the "flushSync was called from inside a
+    // lifecycle method" warning. Scheduling it out of the commit phase is the
+    // same rAF pattern the hydration effects above use. onInjectConsumed fires
+    // inside the frame so the synchronous body never flips injectContent → null
+    // and lets the cleanup cancel our own rAF before it runs.
+    const raf = requestAnimationFrame(() => {
+      const handle = editorRef.current
+      if (handle) {
+        handle.setMarkdown(payload.text)
+        // Prepend the skill as the leading invocation badge, so the sent
+        // message opens with `${prefix}${id}`.
+        if (payload.skill) {
+          const editor = handle.getEditor()
+          if (editor) {
+            applyExpertReference(editor, {
+              refType: "skill",
+              id: payload.skill.id,
+              label: payload.skill.label,
+              uri: null,
+              meta: { invocationPrefix: skillPrefix, scope: "expert" },
+            })
+          }
+        }
+        setComposerEmpty(false)
+        handle.focus()
+      }
+      onInjectConsumed?.()
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [injectContent, composerReady, skillPrefix, onInjectConsumed])
 
   const setDragActiveIfChanged = useCallback((next: boolean) => {
     if (dragActiveRef.current === next) return
@@ -954,12 +942,11 @@ export function MessageInput({
 
   // ── Slash command autocomplete ──
   //
-  // Built-in experts are always surfaced via the Sparkles button, so any
-  // agent-advertised command whose name matches an expert id is hidden
-  // from the slash list to avoid showing the same item twice. For non-Codex
-  // agents the dropdown only shows the agent's own `availableCommands` —
-  // Codex additionally gets a `$`-triggered skills list because its native
-  // command set is very small.
+  // The slash list shows the agent's own `availableCommands` verbatim —
+  // experts are advertised as commands and now appear here alongside the
+  // rest. Codex additionally gets a `$`-triggered skills list (experts are
+  // symlinked skills, so they surface there) because its native command set
+  // is very small.
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   // The trigger char (`/` for agent commands, `$` for Codex skills) and the
@@ -970,8 +957,8 @@ export function MessageInput({
   )
   const [slashFilter, setSlashFilter] = useState("")
   const slashCommands = useMemo(
-    () => (availableCommands ?? []).filter((cmd) => !expertIdSet.has(cmd.name)),
-    [availableCommands, expertIdSet]
+    () => availableCommands ?? [],
+    [availableCommands]
   )
   const [slashDropdownOpen, setSlashDropdownOpen] = useState(false)
   const [slashDropdownSearch, setSlashDropdownSearch] = useState("")
@@ -1016,13 +1003,13 @@ export function MessageInput({
   const filteredSlashSkills = useMemo(() => {
     // Skills autocomplete is Codex-only and triggered by `$`.
     if (agentType !== "codex") return []
-    if (!slashMenuOpen || nonExpertSkills.length === 0) return []
+    if (!slashMenuOpen || availableSkills.length === 0) return []
     if (slashTriggerChar !== "$") return []
     const filter = slashFilter.toLowerCase()
-    if (!filter) return nonExpertSkills
-    const nameMatches: typeof nonExpertSkills = []
-    const idOnlyMatches: typeof nonExpertSkills = []
-    for (const skill of nonExpertSkills) {
+    if (!filter) return availableSkills
+    const nameMatches: typeof availableSkills = []
+    const idOnlyMatches: typeof availableSkills = []
+    for (const skill of availableSkills) {
       if (skill.name.toLowerCase().includes(filter)) {
         nameMatches.push(skill)
       } else if (skill.id.toLowerCase().includes(filter)) {
@@ -1030,7 +1017,7 @@ export function MessageInput({
       }
     }
     return [...nameMatches, ...idOnlyMatches]
-  }, [slashMenuOpen, nonExpertSkills, agentType, slashTriggerChar, slashFilter])
+  }, [slashMenuOpen, availableSkills, agentType, slashTriggerChar, slashFilter])
   const slashAutocompleteCount =
     filteredSlashCommands.length + filteredSlashSkills.length
 
@@ -1077,9 +1064,7 @@ export function MessageInput({
   const detectSlashTrigger = useCallback(() => {
     const editor = editorRef.current?.getEditor()
     const hasSlashSource =
-      slashCommands.length > 0 ||
-      availableExperts.length > 0 ||
-      nonExpertSkills.length > 0
+      slashCommands.length > 0 || availableSkills.length > 0
     const close = () => {
       setSlashMenuOpen(false)
       setSlashTriggerChar(null)
@@ -1103,12 +1088,7 @@ export function MessageInput({
     setSlashFilter(match[3])
     setSlashSelectedIndex(0)
     setSlashMenuOpen(true)
-  }, [
-    slashCommands.length,
-    availableExperts.length,
-    nonExpertSkills.length,
-    agentType,
-  ])
+  }, [slashCommands.length, availableSkills.length, agentType])
 
   useEffect(() => {
     detectSlashTriggerRef.current = detectSlashTrigger
@@ -1807,9 +1787,9 @@ export function MessageInput({
   // Codex uses `$<id>`, other agents `/<id>` — matching the trigger prefix.
   const handleSkillAutocompleteSelect = useCallback(
     (skill: AgentSkillItem) => {
-      replaceTriggerWithReference(skillToReference(skill, expertPrefix))
+      replaceTriggerWithReference(skillToReference(skill, skillPrefix))
     },
-    [replaceTriggerWithReference, expertPrefix]
+    [replaceTriggerWithReference, skillPrefix]
   )
 
   // The "+" → Slash commands picker inserts a command badge at the current caret
@@ -1833,26 +1813,6 @@ export function MessageInput({
     if (needsSpace) chain = chain.insertContent(" ")
     chain.insertReference(commandToReference(cmd)).insertContent(" ").run()
   }, [])
-
-  // Experts always inject an expert badge at the very front of the input, never
-  // at the cursor — the expert skill is a whole-turn directive the agent inspects
-  // first. If an expert badge is already at the front (from a prior click), it is
-  // replaced instead of stacked (the agent only honors the first). The badge
-  // label matches the expert menu's localized name.
-  const handleExpertPopoverSelect = useCallback(
-    (expert: ExpertListItem) => {
-      const editor = editorRef.current?.getEditor()
-      if (!editor) return
-      const label =
-        pickExpertLocalized(expert.metadata.display_name, locale) ||
-        expert.metadata.id
-      applyExpertReference(
-        editor,
-        expertToReference(expert, expertPrefix, label)
-      )
-    },
-    [expertPrefix, locale]
-  )
 
   const handlePickFiles = useCallback(async () => {
     if (disabled) return
@@ -2445,12 +2405,15 @@ export function MessageInput({
   // textarea, instead of always jumping to the end.
   const handleChromeMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (disabled || !isComposerChromeClick(e.target)) return
+      // Not gated on `disabled`: the editor stays editable while connecting (see
+      // `handleSend`), so chrome clicks must focus too — else only the existing
+      // text line is clickable and the blank area below it is dead until ready.
+      if (!isComposerChromeClick(e.target)) return
       // Keep the editor from blurring before we refocus it.
       e.preventDefault()
       editorRef.current?.focusAtCoords(e.clientX, e.clientY)
     },
-    [disabled]
+    []
   )
 
   const handleContainerDragOver = useCallback(
@@ -2837,7 +2800,7 @@ export function MessageInput({
                       className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
                       title={skill.description ?? undefined}
                     >
-                      {skill.description ?? `${expertPrefix}${skill.id}`}
+                      {skill.description ?? `${skillPrefix}${skill.id}`}
                     </span>
                   </div>
                 </button>
@@ -3049,72 +3012,6 @@ export function MessageInput({
                           {t("liveFeedback")}
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuSub>
-                        <DropdownMenuSubTrigger>
-                          <Sparkles className="size-4" />
-                          {t("expertSkills")}
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent
-                          className="min-w-72 overflow-y-auto"
-                          style={{
-                            maxWidth: "min(20rem, calc(100vw - 1rem))",
-                            maxHeight:
-                              "min(32rem, var(--radix-dropdown-menu-content-available-height))",
-                          }}
-                        >
-                          {availableExperts.length === 0 ? (
-                            <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                              {t("expertsEmptyForAgent")}
-                            </div>
-                          ) : (
-                            groupedExperts.map(
-                              ([category, items], groupIndex) => (
-                                <div key={category}>
-                                  {groupIndex > 0 && <DropdownMenuSeparator />}
-                                  <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-wide">
-                                    {translateExpertCategory(category)}
-                                  </DropdownMenuLabel>
-                                  {items.map((expert) => {
-                                    const Icon = getExpertIcon(
-                                      expert.metadata.icon
-                                    )
-                                    const name =
-                                      pickExpertLocalized(
-                                        expert.metadata.display_name,
-                                        locale
-                                      ) || expert.metadata.id
-                                    const description = pickExpertLocalized(
-                                      expert.metadata.description,
-                                      locale
-                                    )
-                                    return (
-                                      <DropdownMenuItem
-                                        key={expert.metadata.id}
-                                        onClick={() =>
-                                          handleExpertPopoverSelect(expert)
-                                        }
-                                        className="items-start gap-2"
-                                      >
-                                        <Icon className="mt-0.5 size-4 shrink-0" />
-                                        <div className="min-w-0 flex-1">
-                                          <div className="truncate font-medium">
-                                            {name}
-                                          </div>
-                                          {description && (
-                                            <div className="line-clamp-2 text-xs text-muted-foreground">
-                                              {description}
-                                            </div>
-                                          )}
-                                        </div>
-                                      </DropdownMenuItem>
-                                    )
-                                  })}
-                                </div>
-                              )
-                            )
-                          )}
-                        </DropdownMenuSubContent>
-                      </DropdownMenuSub>
                       <DropdownMenuSub
                         open={slashDropdownOpen}
                         onOpenChange={handleSlashDropdownOpenChange}

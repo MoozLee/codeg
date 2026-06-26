@@ -55,3 +55,6 @@ log/
 # The binaries are platform-specific build artifacts; ship them through
 # release.yml, not git.
 src-tauri/binaries/
+
+# pnpm local store (pnpm 11+)
+.pnpm-store/

@@ -39,6 +39,8 @@ import type {
   AgentSkillContent,
   ExpertListItem,
   ExpertInstallStatus,
+  LinkOp,
+  LinkOpResult,
   FolderHistoryEntry,
   FolderDetail,
   CreateChatConversationResult,
@@ -111,6 +113,9 @@ import type {
   ProviderUsageConfigInfo,
   ProviderUsageResult,
   QuickMessage,
+  OfficecliInfo,
+  OfficecliSkill,
+  SkillSyncReport,
 } from "./types"
 
 export async function listConversations(params?: {
@@ -650,16 +655,24 @@ export async function expertsList(): Promise<ExpertListItem[]> {
   return getTransport().call("experts_list")
 }
 
-export async function expertsListForAgent(
-  agentType: AgentType
-): Promise<ExpertListItem[]> {
-  return getTransport().call("experts_list_for_agent", { agentType })
-}
-
 export async function expertsGetInstallStatus(
   expertId: string
 ): Promise<ExpertInstallStatus[]> {
   return getTransport().call("experts_get_install_status", { expertId })
+}
+
+/** One round-trip snapshot of every (expert, agent) link state for the matrix. */
+export async function expertsListAllInstallStatuses(): Promise<
+  ExpertInstallStatus[]
+> {
+  return getTransport().call("experts_list_all_install_statuses")
+}
+
+/** Apply a batch of enable/disable ops; returns one result per op. */
+export async function expertsApplyLinks(
+  ops: LinkOp[]
+): Promise<LinkOpResult[]> {
+  return getTransport().call("experts_apply_links", { ops })
 }
 
 export async function expertsLinkToAgent(params: {
@@ -702,6 +715,105 @@ export async function updateSystemFontSettings(
   settings: SystemFontSettings
 ): Promise<SystemFontSettings> {
   return getTransport().call("update_system_font_settings", { settings })
+}
+
+// ─── Office tools ───
+
+export async function officecliDetect(): Promise<OfficecliInfo> {
+  return getTransport().call("officecli_detect")
+}
+
+export async function officecliInstall(): Promise<OfficecliInfo> {
+  return getTransport().call("officecli_install")
+}
+
+export async function officecliUninstall(): Promise<OfficecliInfo> {
+  return getTransport().call("officecli_uninstall")
+}
+
+export async function officecliListSkills(): Promise<OfficecliSkill[]> {
+  return getTransport().call("officecli_list_skills")
+}
+
+export async function officecliSyncSkills(): Promise<SkillSyncReport> {
+  return getTransport().call("officecli_sync_skills")
+}
+
+export async function officecliSkillLinkToAgent(params: {
+  skillId: string
+  agentType: AgentType
+}): Promise<ExpertInstallStatus> {
+  return getTransport().call("officecli_skill_link_to_agent", params)
+}
+
+export async function officecliSkillUnlinkFromAgent(params: {
+  skillId: string
+  agentType: AgentType
+}): Promise<void> {
+  return getTransport().call("officecli_skill_unlink_from_agent", params)
+}
+
+export async function officecliSkillGetInstallStatus(
+  skillId: string
+): Promise<ExpertInstallStatus[]> {
+  return getTransport().call("officecli_skill_get_install_status", { skillId })
+}
+
+/** One round-trip snapshot of every (skill, agent) link state for the matrix. */
+export async function officecliSkillListAllInstallStatuses(): Promise<
+  ExpertInstallStatus[]
+> {
+  return getTransport().call("officecli_skill_list_all_install_statuses")
+}
+
+/** Apply a batch of enable/disable ops; returns one result per op. */
+export async function officecliSkillApplyLinks(
+  ops: LinkOp[]
+): Promise<LinkOpResult[]> {
+  return getTransport().call("officecli_skill_apply_links", { ops })
+}
+
+export async function officecliSkillReadContent(
+  skillId: string
+): Promise<string> {
+  return getTransport().call("officecli_skill_read_content", { skillId })
+}
+
+/**
+ * Render an office file (.docx/.xlsx/.pptx) to self-contained HTML via the
+ * OfficeCLI backend, for the in-app preview. `path` is relative to `rootPath`.
+ */
+export async function officecliRenderHtml(
+  rootPath: string,
+  path: string
+): Promise<string> {
+  return getTransport().call("officecli_render_html", { rootPath, path })
+}
+
+/**
+ * Start (or share, by ref-count) a long-lived `officecli watch` preview server
+ * for an office file and return its loopback `port` plus a per-watch `cap`
+ * capability. `path` is relative to `rootPath`. Live refresh is driven by
+ * officecli's own SSE channel, so the preview no longer re-reads (and locks)
+ * the file the way the one-shot {@link officecliRenderHtml} did.
+ *
+ * `cap` is only used by web/server mode, where the iframe loads the preview
+ * through the `/api/office-watch-proxy/{port}` reverse proxy and authenticates
+ * with `?cap=` (the master token never enters the iframe). Desktop ignores it.
+ */
+export async function startOfficeWatch(
+  rootPath: string,
+  path: string
+): Promise<{ port: number; cap: string }> {
+  return getTransport().call("start_office_watch", { rootPath, path })
+}
+
+/** Release one reference to an office file's watch preview server. */
+export async function stopOfficeWatch(
+  rootPath: string,
+  path: string
+): Promise<void> {
+  return getTransport().call("stop_office_watch", { rootPath, path })
 }
 
 export async function getSystemProxySettings(): Promise<SystemProxySettings> {
@@ -1728,6 +1840,8 @@ export type SettingsSection =
   | "agents"
   | "mcp"
   | "skills"
+  | "experts"
+  | "office-tools"
   | "shortcuts"
   | "system"
 
