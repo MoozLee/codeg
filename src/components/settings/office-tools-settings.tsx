@@ -1,0 +1,420 @@
+"use client"
+
+import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+  BarChart3,
+  Box,
+  Clapperboard,
+  ClipboardList,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  GraduationCap,
+  Loader2,
+  Presentation,
+  RefreshCw,
+  Rocket,
+  Trash2,
+  TrendingUp,
+  type LucideIcon,
+  FileStack,
+} from "lucide-react"
+import { useLocale, useTranslations } from "next-intl"
+import { toast } from "sonner"
+
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  SkillAgentMatrix,
+  type MatrixSkill,
+} from "@/components/settings/skill-agent-matrix"
+import { cn } from "@/lib/utils"
+import {
+  acpListAgents,
+  officecliDetect,
+  officecliInstall,
+  officecliListSkills,
+  officecliSkillApplyLinks,
+  officecliSkillListAllInstallStatuses,
+  officecliSkillReadContent,
+  officecliSyncSkills,
+  officecliUninstall,
+} from "@/lib/api"
+import { invalidateAgentExpertsCache } from "@/hooks/use-agent-experts"
+import { pickLocalized } from "@/lib/expert-presentation"
+import type {
+  AcpAgentInfo,
+  ExpertLinkState,
+  OfficecliInfo,
+  OfficecliSkill,
+} from "@/lib/types"
+import { toErrorMessage } from "@/lib/app-error"
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  FileStack,
+  Presentation,
+  Rocket,
+  Clapperboard,
+  Box,
+  FileText,
+  GraduationCap,
+  ClipboardList,
+  FileSpreadsheet,
+  TrendingUp,
+  BarChart3,
+}
+
+const CATEGORY_SORT: Record<string, number> = {
+  general: 0,
+  presentations: 1,
+  documents: 2,
+  spreadsheets: 3,
+}
+
+function getIcon(name: string | null | undefined): LucideIcon {
+  if (name && ICON_MAP[name]) return ICON_MAP[name]
+  return FileStack
+}
+
+// ─── Detection card ───────────────────────────────────────────────────
+
+function DetectionCard({
+  info,
+  detecting,
+  installing,
+  onInstall,
+  onUninstall,
+  onSync,
+  syncing,
+}: {
+  info: OfficecliInfo | null
+  detecting: boolean
+  installing: boolean
+  onInstall: () => void
+  onUninstall: () => void
+  onSync: () => void
+  syncing: boolean
+}) {
+  const t = useTranslations("OfficeToolsSettings")
+  const installed = info?.installed === true
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border p-4",
+        installed
+          ? "border-green-500/30 bg-green-500/5"
+          : "border-muted bg-muted/5"
+      )}
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold">OfficeCLI</h3>
+            {detecting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            ) : installed ? (
+              <Badge
+                variant="outline"
+                className="h-5 px-1.5 text-[10px] border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400"
+              >
+                {t("detection.installed")}
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className="h-5 px-1.5 text-[10px] text-muted-foreground"
+              >
+                {t("detection.notInstalled")}
+              </Badge>
+            )}
+          </div>
+          {installed && info && (
+            <div className="text-[11px] text-muted-foreground mt-1 space-x-3">
+              {info.version && <span>{info.version}</span>}
+              {info.path && (
+                <code className="font-mono text-[10px]">{info.path}</code>
+              )}
+            </div>
+          )}
+          {!installed && !detecting && (
+            <p className="text-xs text-muted-foreground mt-1">
+              {t("detection.installHint")}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {installed ? (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={syncing}
+                onClick={onSync}
+              >
+                {syncing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                {t("detection.syncSkills")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                onClick={onUninstall}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("detection.uninstall")}
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              disabled={installing || detecting}
+              onClick={onInstall}
+            >
+              {installing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              {t("detection.install")}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────
+
+export function OfficeToolsSettings() {
+  const t = useTranslations("OfficeToolsSettings")
+  const locale = useLocale()
+
+  const [info, setInfo] = useState<OfficecliInfo | null>(null)
+  const [detecting, setDetecting] = useState(true)
+  const [installing, setInstalling] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+
+  const [skills, setSkills] = useState<OfficecliSkill[]>([])
+  const [agents, setAgents] = useState<AcpAgentInfo[]>([])
+  const [reloadKey, setReloadKey] = useState(0)
+
+  const translatedState = useCallback(
+    (state: ExpertLinkState): string => {
+      switch (state) {
+        case "not_linked":
+          return t("states.not_linked")
+        case "linked_to_codeg":
+          return t("states.linked_to_codeg")
+        case "linked_elsewhere":
+          return t("states.linked_elsewhere")
+        case "blocked_by_real_directory":
+          return t("states.blocked_by_real_directory")
+        case "broken":
+          return t("states.broken")
+        default:
+          return state
+      }
+    },
+    [t]
+  )
+
+  const translatedCategory = useCallback(
+    (category: string): string => {
+      switch (category) {
+        case "general":
+          return t("categories.general")
+        case "presentations":
+          return t("categories.presentations")
+        case "documents":
+          return t("categories.documents")
+        case "spreadsheets":
+          return t("categories.spreadsheets")
+        default:
+          return category
+      }
+    },
+    [t]
+  )
+
+  const detect = useCallback(async () => {
+    setDetecting(true)
+    try {
+      const result = await officecliDetect()
+      setInfo(result)
+    } catch {
+      setInfo(null)
+    } finally {
+      setDetecting(false)
+    }
+  }, [])
+
+  const refreshSkills = useCallback(async () => {
+    try {
+      const [skillList, agentList] = await Promise.all([
+        officecliListSkills(),
+        acpListAgents(),
+      ])
+      setSkills(skillList)
+      setAgents(agentList)
+      // Remount the matrix so it re-fetches the authoritative status snapshot
+      // (newly synced skills become enableable).
+      setReloadKey((k) => k + 1)
+    } catch (err) {
+      toast.error(t("toasts.loadFailed"), { description: toErrorMessage(err) })
+    }
+  }, [t])
+
+  useEffect(() => {
+    Promise.all([detect(), refreshSkills()]).catch((err) => {
+      console.error("[OfficeToolsSettings] initial load failed:", err)
+    })
+  }, [detect, refreshSkills])
+
+  const matrixSkills = useMemo<MatrixSkill[]>(
+    () =>
+      skills.map((s) => ({
+        id: s.id,
+        category: s.category,
+        displayName: pickLocalized(s.displayName, locale) || s.id,
+        description: pickLocalized(s.description, locale),
+        icon: getIcon(s.icon),
+        ready: s.installedCentrally,
+        badge: s.installedCentrally
+          ? undefined
+          : { label: t("badges.notSynced"), tone: "muted" },
+      })),
+    [skills, locale, t]
+  )
+
+  // Un-synced skills have no SKILL.md on disk; return empty rather than letting
+  // the matrix's detail drawer surface a load error.
+  const loadContent = useCallback(
+    (skillId: string) => {
+      const skill = skills.find((s) => s.id === skillId)
+      return skill?.installedCentrally
+        ? officecliSkillReadContent(skillId)
+        : Promise.resolve("")
+    },
+    [skills]
+  )
+
+  const handleInstall = useCallback(async () => {
+    setInstalling(true)
+    try {
+      const result = await officecliInstall()
+      setInfo(result)
+      toast.success(t("toasts.installSuccess"))
+      await officecliSyncSkills()
+      await refreshSkills()
+    } catch (err) {
+      toast.error(t("toasts.installFailed"), {
+        description: toErrorMessage(err),
+      })
+    } finally {
+      setInstalling(false)
+    }
+  }, [t, refreshSkills])
+
+  const handleUninstall = useCallback(async () => {
+    try {
+      const result = await officecliUninstall()
+      setInfo(result)
+      await refreshSkills()
+      toast.success(t("toasts.uninstallSuccess"))
+    } catch (err) {
+      toast.error(t("toasts.uninstallFailed"), {
+        description: toErrorMessage(err),
+      })
+    }
+  }, [t, refreshSkills])
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true)
+    try {
+      const report = await officecliSyncSkills()
+      await refreshSkills()
+      if (report.errors.length > 0) {
+        toast.warning(
+          t("toasts.syncPartial", {
+            synced: report.synced,
+            errors: report.errors.length,
+          })
+        )
+      } else {
+        toast.success(t("toasts.syncSuccess", { synced: report.synced }))
+      }
+    } catch (err) {
+      toast.error(t("toasts.syncFailed"), { description: toErrorMessage(err) })
+    } finally {
+      setSyncing(false)
+    }
+  }, [t, refreshSkills])
+
+  const installed = info?.installed === true
+
+  return (
+    <div className="h-full flex flex-col p-3 md:p-4">
+      <div className="flex items-center justify-between gap-3 pb-4">
+        <div>
+          <h2 className="text-base font-semibold">{t("title")}</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            {t("description")}
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            Promise.all([detect(), refreshSkills()]).catch((err) => {
+              console.error("[OfficeToolsSettings] refresh failed:", err)
+            })
+          }}
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          {t("actions.refresh")}
+        </Button>
+      </div>
+
+      <DetectionCard
+        info={info}
+        detecting={detecting}
+        installing={installing}
+        onInstall={handleInstall}
+        onUninstall={handleUninstall}
+        onSync={handleSync}
+        syncing={syncing}
+      />
+
+      <div className="flex-1 min-h-0 min-w-0 mt-4">
+        {skills.length === 0 ? (
+          <div className="h-full rounded-lg border bg-card flex items-center justify-center text-sm text-muted-foreground">
+            {t("emptySkills")}
+          </div>
+        ) : (
+          <SkillAgentMatrix
+            key={reloadKey}
+            skills={matrixSkills}
+            agents={agents}
+            categoryOrder={CATEGORY_SORT}
+            translateCategory={translatedCategory}
+            translateState={translatedState}
+            loadAllStatuses={officecliSkillListAllInstallStatuses}
+            applyLinks={officecliSkillApplyLinks}
+            loadContent={loadContent}
+            onApplied={(touched) =>
+              touched.forEach((a) => invalidateAgentExpertsCache(a))
+            }
+            searchPlaceholder={t("searchPlaceholder")}
+            notReadyHint={installed ? t("syncFirst") : t("installFirst")}
+          />
+        )}
+      </div>
+    </div>
+  )
+}

@@ -38,6 +38,8 @@ import type {
   AgentSkillContent,
   ExpertListItem,
   ExpertInstallStatus,
+  LinkOp,
+  LinkOpResult,
   FolderHistoryEntry,
   FolderDetail,
   CreateChatConversationResult,
@@ -103,6 +105,9 @@ import type {
   UpdateModelProviderResult,
   PluginCheckSummary,
   QuickMessage,
+  OfficecliInfo,
+  OfficecliSkill,
+  SkillSyncReport,
 } from "./types"
 
 export async function listConversations(params?: {
@@ -636,6 +641,20 @@ export async function expertsGetInstallStatus(
   return getTransport().call("experts_get_install_status", { expertId })
 }
 
+/** One round-trip snapshot of every (expert, agent) link state for the matrix. */
+export async function expertsListAllInstallStatuses(): Promise<
+  ExpertInstallStatus[]
+> {
+  return getTransport().call("experts_list_all_install_statuses")
+}
+
+/** Apply a batch of enable/disable ops; returns one result per op. */
+export async function expertsApplyLinks(
+  ops: LinkOp[]
+): Promise<LinkOpResult[]> {
+  return getTransport().call("experts_apply_links", { ops })
+}
+
 export async function expertsLinkToAgent(params: {
   expertId: string
   agentType: AgentType
@@ -662,6 +681,79 @@ export async function expertsReadContent(expertId: string): Promise<string> {
 
 export async function expertsOpenCentralDir(): Promise<string> {
   return getTransport().call("experts_open_central_dir")
+}
+
+// ─── Office tools ───
+
+export async function officecliDetect(): Promise<OfficecliInfo> {
+  return getTransport().call("officecli_detect")
+}
+
+export async function officecliInstall(): Promise<OfficecliInfo> {
+  return getTransport().call("officecli_install")
+}
+
+export async function officecliUninstall(): Promise<OfficecliInfo> {
+  return getTransport().call("officecli_uninstall")
+}
+
+export async function officecliListSkills(): Promise<OfficecliSkill[]> {
+  return getTransport().call("officecli_list_skills")
+}
+
+export async function officecliSyncSkills(): Promise<SkillSyncReport> {
+  return getTransport().call("officecli_sync_skills")
+}
+
+export async function officecliSkillLinkToAgent(params: {
+  skillId: string
+  agentType: AgentType
+}): Promise<ExpertInstallStatus> {
+  return getTransport().call("officecli_skill_link_to_agent", params)
+}
+
+export async function officecliSkillUnlinkFromAgent(params: {
+  skillId: string
+  agentType: AgentType
+}): Promise<void> {
+  return getTransport().call("officecli_skill_unlink_from_agent", params)
+}
+
+export async function officecliSkillGetInstallStatus(
+  skillId: string
+): Promise<ExpertInstallStatus[]> {
+  return getTransport().call("officecli_skill_get_install_status", { skillId })
+}
+
+/** One round-trip snapshot of every (skill, agent) link state for the matrix. */
+export async function officecliSkillListAllInstallStatuses(): Promise<
+  ExpertInstallStatus[]
+> {
+  return getTransport().call("officecli_skill_list_all_install_statuses")
+}
+
+/** Apply a batch of enable/disable ops; returns one result per op. */
+export async function officecliSkillApplyLinks(
+  ops: LinkOp[]
+): Promise<LinkOpResult[]> {
+  return getTransport().call("officecli_skill_apply_links", { ops })
+}
+
+export async function officecliSkillReadContent(
+  skillId: string
+): Promise<string> {
+  return getTransport().call("officecli_skill_read_content", { skillId })
+}
+
+/**
+ * Render an office file (.docx/.xlsx/.pptx) to self-contained HTML via the
+ * OfficeCLI backend, for the in-app preview. `path` is relative to `rootPath`.
+ */
+export async function officecliRenderHtml(
+  rootPath: string,
+  path: string
+): Promise<string> {
+  return getTransport().call("officecli_render_html", { rootPath, path })
 }
 
 export async function getSystemProxySettings(): Promise<SystemProxySettings> {
@@ -1491,6 +1583,8 @@ export type SettingsSection =
   | "agents"
   | "mcp"
   | "skills"
+  | "experts"
+  | "office-tools"
   | "shortcuts"
   | "system"
 

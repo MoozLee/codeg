@@ -42,6 +42,8 @@ import { useSessionFeedback } from "@/hooks/use-session-feedback"
 import { AgentSelector } from "@/components/chat/agent-selector"
 import { ChatInput } from "@/components/chat/chat-input"
 import { WelcomeHero, WelcomeTip } from "@/components/chat/welcome-hero"
+import { QuickActions } from "@/components/chat/quick-actions"
+import type { ComposerInjectContent } from "@/components/chat/message-input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   acpFork,
@@ -248,6 +250,8 @@ const ConversationTabView = memo(function ConversationTabView({
     null
   )
   const [hasSentMessage, setHasSentMessage] = useState(false)
+  const [quickActionInject, setQuickActionInject] =
+    useState<ComposerInjectContent | null>(null)
 
   const hasPersistedConversation = dbConversationId != null
 
@@ -1238,6 +1242,14 @@ const ConversationTabView = memo(function ConversationTabView({
   const showDraftHeader = !hasPersistedConversation && !hasSentMessage
   const isWelcomeMode = showDraftHeader
 
+  const handleQuickAction = useCallback((payload: ComposerInjectContent) => {
+    setQuickActionInject(payload)
+  }, [])
+
+  const handleQuickActionConsumed = useCallback(() => {
+    setQuickActionInject(null)
+  }, [])
+
   const canShowDetailErrorActions =
     hasPersistedConversation && dbConversationId != null && !!folder
   const handleReloadDetail = useCallback(() => {
@@ -1373,8 +1385,12 @@ const ConversationTabView = memo(function ConversationTabView({
       {isWelcomeMode ? (
         <div className="relative isolate flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto">
           <div className="flex-1" />
-          <div className="mx-auto flex w-full max-w-2xl shrink-0 flex-col gap-6 px-4 py-4">
+          <div className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-6 px-4 py-4">
             <WelcomeHero />
+            <QuickActions
+              onSelect={handleQuickAction}
+              agentType={selectedAgent}
+            />
             <div className="flex justify-center">
               <AgentSelector
                 defaultAgentType={selectedAgent}
@@ -1433,10 +1449,14 @@ const ConversationTabView = memo(function ConversationTabView({
                 feedback.featureEnabled ? feedback.openDialog : undefined
               }
               feedbackAddDisabled={!feedback.canSubmit}
+              injectContent={quickActionInject}
+              onInjectConsumed={handleQuickActionConsumed}
+              flush
+              tall
             />
           </div>
           <div className="flex-1" />
-          <div className="mx-auto w-full max-w-2xl shrink-0 px-4 pb-6">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6">
             <WelcomeTip />
           </div>
         </div>

@@ -709,8 +709,16 @@ pub fn build_router(
             post(handlers::experts::experts_get_install_status),
         )
         .route(
+            "/experts_list_all_install_statuses",
+            post(handlers::experts::experts_list_all_install_statuses),
+        )
+        .route(
             "/experts_link_to_agent",
             post(handlers::experts::experts_link_to_agent),
+        )
+        .route(
+            "/experts_apply_links",
+            post(handlers::experts::experts_apply_links),
         )
         .route(
             "/experts_unlink_from_agent",
@@ -723,6 +731,55 @@ pub fn build_router(
         .route(
             "/experts_open_central_dir",
             post(handlers::experts::experts_open_central_dir),
+        )
+        // ─── Office tools ───
+        .route(
+            "/officecli_detect",
+            post(handlers::office_tools::officecli_detect),
+        )
+        .route(
+            "/officecli_install",
+            post(handlers::office_tools::officecli_install),
+        )
+        .route(
+            "/officecli_uninstall",
+            post(handlers::office_tools::officecli_uninstall),
+        )
+        .route(
+            "/officecli_list_skills",
+            post(handlers::office_tools::officecli_list_skills),
+        )
+        .route(
+            "/officecli_sync_skills",
+            post(handlers::office_tools::officecli_sync_skills),
+        )
+        .route(
+            "/officecli_skill_link_to_agent",
+            post(handlers::office_tools::officecli_skill_link_to_agent),
+        )
+        .route(
+            "/officecli_skill_unlink_from_agent",
+            post(handlers::office_tools::officecli_skill_unlink_from_agent),
+        )
+        .route(
+            "/officecli_skill_get_install_status",
+            post(handlers::office_tools::officecli_skill_get_install_status),
+        )
+        .route(
+            "/officecli_skill_list_all_install_statuses",
+            post(handlers::office_tools::officecli_skill_list_all_install_statuses),
+        )
+        .route(
+            "/officecli_skill_apply_links",
+            post(handlers::office_tools::officecli_skill_apply_links),
+        )
+        .route(
+            "/officecli_skill_read_content",
+            post(handlers::office_tools::officecli_skill_read_content),
+        )
+        .route(
+            "/officecli_render_html",
+            post(handlers::office_tools::officecli_render_html),
         )
         // ─── Project boot ───
         .route(

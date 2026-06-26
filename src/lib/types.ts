@@ -1563,6 +1563,45 @@ export interface ExpertInstallStatus {
   copyMode: boolean
 }
 
+/** A single enable/disable request for one (skill, agent) pair. For office
+ *  tools, `expertId` carries the office skill id. */
+export interface LinkOp {
+  expertId: string
+  agentType: AgentType
+  enable: boolean
+}
+
+/** Per-op outcome of a batch apply. A failed op never aborts the rest. */
+export interface LinkOpResult {
+  expertId: string
+  agentType: AgentType
+  ok: boolean
+  /** Present on a successful enable; null for disables and failures. */
+  status: ExpertInstallStatus | null
+  error: string | null
+}
+
+export interface OfficecliInfo {
+  installed: boolean
+  version: string | null
+  path: string | null
+}
+
+export interface OfficecliSkill {
+  id: string
+  category: string
+  icon: string
+  sortOrder: number
+  displayName: Record<string, string>
+  description: Record<string, string>
+  installedCentrally: boolean
+}
+
+export interface SkillSyncReport {
+  synced: number
+  errors: string[]
+}
+
 export interface SystemProxySettings {
   enabled: boolean
   proxy_url: string | null
