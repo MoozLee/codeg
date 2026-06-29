@@ -19,7 +19,7 @@
   <strong>العربية</strong>
 </p>
 
-Codeg (Code Generation) هو مساحة عمل للبرمجة متعددة الوكلاء. يجمع عدة وكلاء (Claude Code، Codex CLI، OpenCode، Gemini CLI، OpenClaw، Cline، Hermes Agent، وغيرها) في مساحة عمل واحدة، ويدعم تجميع المحادثات والتعاون بين عدة وكلاء، مع دعم التثبيت على سطح المكتب والنشر على الخادم/Docker.
+Codeg (Code Generation) هو مساحة عمل للبرمجة متعددة الوكلاء. يجمع عدة وكلاء (Claude Code، Codex CLI، OpenCode، Gemini CLI، OpenClaw، Cline، Hermes Agent، CodeBuddy، Kimi Code، Pi، وغيرها) في مساحة عمل واحدة، ويدعم تجميع المحادثات والتعاون بين عدة وكلاء، مع دعم التثبيت على سطح المكتب والنشر على الخادم/Docker.
 
 ## ملاحظة حول التفرّع وخط الإصدارات
 
@@ -52,10 +52,15 @@ Codeg (Code Generation) هو مساحة عمل للبرمجة متعددة ال�
 ![Codeg Light](../images/main-light.png#gh-light-mode-only)
 ![Codeg Dark](../images/main-dark.png#gh-dark-mode-only)
 
-## الإعدادات
+## التعاون متعدد الوكلاء
 
-![Codeg Light](../images/settings-light.png#gh-light-mode-only)
-![Codeg Dark](../images/settings-dark.png#gh-dark-mode-only)
+![Codeg Light](../images/collaboration-light.png#gh-light-mode-only)
+![Codeg Dark](../images/collaboration-dark.png#gh-dark-mode-only)
+
+## سير عمل المكتب
+
+![Codeg Light](../images/office-light.png#gh-light-mode-only)
+![Codeg Dark](../images/office-dark.png#gh-dark-mode-only)
 
 ## أبرز المزايا
 
@@ -63,6 +68,8 @@ Codeg (Code Generation) هو مساحة عمل للبرمجة متعددة ال�
 - **التعاون متعدد الوكلاء** — داخل جلسة واحدة، يفوّض الوكيل الرئيسي إلى وكلاء فرعيين من أنواع مختلفة (مثل Claude Code يستدعي Codex وGemini) لإنجاز مهمة بشكل مشترك، مع تشغيل كل وكيل فرعي كجلسة مستقلة
 - تطوير متوازي مع تدفقات `git worktree` مدمجة
 - **مُنشئ المشروع** — إنشاء مشاريع جديدة بصريًا مع معاينة حية
+- **مستندات Office** — أنشئ وحلِّل وراجع وحرِّر ملفات .docx / .xlsx / .pptx عبر مجموعة أدوات officecli المدمجة؛ مع معاينة حية في تبويب الملف تُحدَّث فورًا أثناء تعديلات الوكيل
+- **الأتمتة** — احفظ أي إعداد للمُحرِّر كمهمة أتمتة قابلة للإعادة تُنفَّذ بدون واجهة وفق جدول cron أو عند الطلب
 - **قنوات الدردشة** — ربط Telegram وLark (Feishu) وiLink (Weixin) والمزيد بوكلاء البرمجة لاستقبال الإشعارات الفورية والتفاعل الكامل مع الجلسات والتحكم عن بُعد في المهام
 - إدارة MCP (فحص محلي + بحث/تثبيت من السجل)
 - إدارة Skills (نطاق عام ونطاق المشروع)
@@ -70,6 +77,7 @@ Codeg (Code Generation) هو مساحة عمل للبرمجة متعددة ال�
 - وضع خدمة الويب — الوصول إلى Codeg من أي متصفح للعمل عن بُعد
 - **نشر خادم مستقل** — شغّل `codeg-server` على أي خادم Linux/macOS، والوصول عبر المتصفح
 - **دعم Docker** — `docker compose up` أو `docker run`، مع رمز مصادقة ومنفذ قابلين للتخصيص، واستمرارية البيانات وتحميل مجلدات المشاريع
+- سجلات وقت التشغيل — عارض سجلات في الوقت الفعلي مدمج مع دعم التصفية وضبط مستويات السجل لكل وحدة
 - حلقة هندسية متكاملة (شجرة الملفات، الفروقات، تغييرات git، الإيداع، الطرفية)
 
 ## الوكلاء المدعومون
@@ -83,6 +91,9 @@ Codeg (Code Generation) هو مساحة عمل للبرمجة متعددة ال�
 | OpenClaw     | —                                     | `~/.openclaw/agents`                  | `%USERPROFILE%\\.openclaw\\agents`                    |
 | Cline        | `$CLINE_DIR`                          | `~/.cline/data/tasks`                 | `%USERPROFILE%\\.cline\\data\\tasks`                  |
 | Hermes Agent | `$HERMES_HOME/state.db`               | `~/.hermes/state.db`                  | `%USERPROFILE%\\.hermes\\state.db`                    |
+| CodeBuddy    | `$CODEBUDDY_CONFIG_DIR/projects`      | `~/.codebuddy/projects`               | `%USERPROFILE%\\.codebuddy\\projects`                 |
+| Kimi Code    | `$KIMI_CODE_HOME/sessions`            | `~/.kimi-code/sessions`               | `%USERPROFILE%\\.kimi-code\\sessions`                 |
+| Pi           | `$PI_CODING_AGENT_SESSION_DIR`        | `~/.pi/agent/sessions`                | `%USERPROFILE%\\.pi\\agent\\sessions`                 |
 
 > ملاحظة: متغيرات البيئة لها الأولوية على المسارات الافتراضية.
 
@@ -120,6 +131,34 @@ Codeg (Code Generation) هو مساحة عمل للبرمجة متعددة ال�
 | iLink (Weixin) | WebSocket + REST API        | مدمج   |
 
 > يُخطَّط لدعم المزيد من القنوات (Discord وSlack وDingTalk وغيرها) في الإصدارات المستقبلية.
+
+</details>
+
+<details>
+<summary><h2>مستندات Office</h2></summary>
+
+تعامَل مع ملفات Word وExcel وPowerPoint كجزء أصيل من سير العمل. تتيح مجموعة أدوات **officecli** المدمجة لوكلائك إنشاء وتحليل ومراجعة وتحرير مستندات .docx و.xlsx و.pptx — مع إمكانية معاينة النتائج مباشرةً داخل Codeg.
+
+### الميزات
+
+- **إنشاء وتحرير** — أنشئ مستندات جديدة أو عدِّل ملفات .docx / .xlsx / .pptx الموجودة، بما في ذلك المخططات والجداول والتنسيق
+- **تحليل ومراجعة** — افحص بنية المستند، واكشف مشكلات التنسيق، وراجع المحتوى
+- **معاينة حية** — افتح ملف .docx / .xlsx / .pptx في تبويب الملف ليُعرَض تلقائيًا ويتحدّث فورًا مع كل تعديل من الوكيل — مدعومًا بخادم `officecli watch` دائم التشغيل (مع بروكسي عكسي ومصادقة قائمة على القدرات في بيئات الويب والخادم)
+- **الإجراءات السريعة** — تتضمن صفحة الترحيب تبويبَي «البرمجة» و«Office» يُتيحان بنقرة واحدة إدراج استدعاء المهارة المناسب ونموذج الأمر في المُحرِّر؛ المهارات غير المفعَّلة تظهر بشارة قفل وتوجّهك للتفعيل
+- **إعدادات أدوات Office** — صفحة إعدادات مخصصة لتثبيت `officecli` وإدارة مهاراته عبر مصفوفة مهارة×وكيل: بدِّل أي زوج (مهارة، وكيل) وطبِّق التغييرات على دفعات
+
+</details>
+
+<details>
+<summary><h2>الأتمتة</h2></summary>
+
+احفظ أي إعداد للمُحرِّر — الوكيل والنموذج والأمر ومجلد العمل والخيارات — كـ**مهمة أتمتة** قابلة للإعادة تعمل دون فتح الواجهة.
+
+### الميزات
+
+- **اضبط مرة، استخدم دائمًا** — احفظ إعداد المُحرِّر الكامل كمهمة أتمتة مُسمَّاة
+- **مجدوَلة أو عند الطلب** — شغِّلها وفق جدول cron أو افتحها يدويًا متى أردت
+- **تنفيذ بلا واجهة** — تعمل مهام الأتمتة في الخلفية وتُنشئ جلسات حقيقية يمكن فتحها في مساحة العمل في أي وقت؛ وبعد الإطلاق تعود الواجهة تلقائيًا إلى مساحة العمل
 
 </details>
 
@@ -334,6 +373,7 @@ Next.js 16 (Static Export) + React 19
               |- Chat Channels
               |- Git / File Tree / Terminal
               |- MCP marketplace + config
+              |- Office Tools (officecli) + Automations
               |- SeaORM + SQLite
                       |
               ┌───────┼───────┐
@@ -360,9 +400,18 @@ Next.js 16 (Static Export) + React 19
 
 - شكراً لمجتمع [LinuxDO](https://linux.do) على دعمه
 
+## Coffee
+
+- إذا كان Codeg مفيداً لك، يمكنك دعوتي إلى فنجان قهوة
+
+<img src="../images/weixin-sponsor-light.jpg#gh-light-mode-only" alt="دعم Codeg" width="240" />
+<img src="../images/weixin-sponsor-dark.jpg#gh-dark-mode-only" alt="دعم Codeg" width="240" />
+
 ## شكر وتقدير
 
 - [ACP](https://agentclientprotocol.com) — بروتوكول Agent Client (ACP) هو الأساس الذي يمكّن Codeg من الاتصال بعدة وكلاء
+- [Superpowers](https://github.com/obra/superpowers) — يُشغِّل وحدة مهارات الخبراء في Codeg
+- [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) — يُشغِّل سير عمل مستندات Office في Codeg
 
 ## الترخيص
 

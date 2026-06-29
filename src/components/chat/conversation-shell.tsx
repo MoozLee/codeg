@@ -69,6 +69,9 @@ interface ConversationShellProps {
   /** Grey out the live-feedback "+" entry when a note can't be sent right now. */
   feedbackAddDisabled?: boolean
   isActive?: boolean
+  /** Show the composer's flowing active-session border (tiled multi-session
+   *  active tab only). Threaded straight through to the composer. */
+  showActiveFlow?: boolean
   queue?: QueuedMessage[]
   onEnqueue?: (draft: PromptDraft, modeId: string | null) => void
   onQueueReorder?: (items: QueuedMessage[]) => void
@@ -124,6 +127,7 @@ export function ConversationShell({
   onAddFeedback,
   feedbackAddDisabled,
   isActive,
+  showActiveFlow,
   queue,
   onEnqueue,
   onQueueReorder,
@@ -250,6 +254,7 @@ export function ConversationShell({
               attachmentTabId={attachmentTabId}
               draftStorageKey={draftStorageKey}
               isActive={isActive}
+              showActiveFlow={showActiveFlow}
               queue={queue}
               onEnqueue={onEnqueue}
               onQueueReorder={onQueueReorder}
