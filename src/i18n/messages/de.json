@@ -881,6 +881,7 @@
       "customInstallSubmit": "Installieren"
     },
     "errors": {
+      "windowsFileLocked": "Die Dateien von {name} werden von einer laufenden Sitzung verwendet, daher kann Windows sie nicht ersetzen. Schließe alle {name}-Sitzungen und versuche es erneut.",
       "nativeJsonMustBeObject": "Native JSON-Konfiguration muss ein Objekt sein",
       "nativeJsonInvalid": "Formatfehler in nativer JSON-Konfiguration: {message}",
       "openCodeAuthMustBeObject": "OpenCode auth.json muss ein JSON-Objekt sein",
@@ -2619,6 +2620,18 @@
           "planLabel": "Plan",
           "submitted": "Plan eingereicht",
           "switched": "Modus gewechselt"
+        },
+        "backgroundTask": {
+          "title": "Hintergrundaufgabe",
+          "titleWithId": "Hintergrundaufgabe · {id}",
+          "running": "Läuft",
+          "completed": "Abgeschlossen",
+          "failed": "Fehlgeschlagen",
+          "stopped": "Gestoppt",
+          "exitCode": "Exit {code}",
+          "polledTimes": "{count}-mal abgefragt",
+          "runningInBackground": "Hintergrund",
+          "launchNote": "Läuft im Hintergrund · {id}"
         }
       },
       "subAgentOverlay": {

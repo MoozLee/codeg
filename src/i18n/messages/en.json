@@ -881,6 +881,7 @@
       "customInstallSubmit": "Install"
     },
     "errors": {
+      "windowsFileLocked": "{name}'s files are in use by a running session, so Windows can't replace them. Close all {name} sessions and try again.",
       "nativeJsonMustBeObject": "Native JSON config must be an object",
       "nativeJsonInvalid": "Native JSON config format error: {message}",
       "openCodeAuthMustBeObject": "OpenCode auth.json must be a JSON object",
@@ -2619,6 +2620,18 @@
           "planLabel": "Plan",
           "submitted": "Plan submitted",
           "switched": "Switched mode"
+        },
+        "backgroundTask": {
+          "title": "Background task",
+          "titleWithId": "Background task · {id}",
+          "running": "Running",
+          "completed": "Completed",
+          "failed": "Failed",
+          "stopped": "Stopped",
+          "exitCode": "exit {code}",
+          "polledTimes": "Polled {count} times",
+          "runningInBackground": "Background",
+          "launchNote": "Running in background · {id}"
         }
       },
       "subAgentOverlay": {

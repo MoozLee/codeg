@@ -17,6 +17,7 @@ import {
   groupGoalRuns,
   mergeAdjacentToolGroups,
   mergeAdjacentDelegationStatusGroups,
+  mergeAdjacentBackgroundTaskGroups,
   type AdaptedContentPart,
   type AdaptedMessage,
   type MessageTurnAdapter,
@@ -410,8 +411,13 @@ function mergeConsecutiveAssistantTurns(
       result.push(buffer[0])
     } else {
       const allParts = buffer.flatMap((it) => it.group.parts)
+      // Fold tool-groups straddling the turn boundary, then collapse runs of
+      // single-poll delegation-status and background-task groups (each polling
+      // round is its own turn) into one merged card.
       const mergedParts = groupGoalRuns(
-        mergeAdjacentDelegationStatusGroups(mergeAdjacentToolGroups(allParts))
+        mergeAdjacentBackgroundTaskGroups(
+          mergeAdjacentDelegationStatusGroups(mergeAdjacentToolGroups(allParts))
+        )
       )
       const last = buffer[buffer.length - 1]
       const first = buffer[0]
@@ -737,6 +743,10 @@ function buildContentPartSignature(part: AdaptedContentPart): string {
         .join(",")}`
     case "delegation-status-group":
       return `delegation-status-group:${part.polls
+        .map(buildContentPartSignature)
+        .join(",")}`
+    case "background-task-group":
+      return `background-task-group:${part.polls
         .map(buildContentPartSignature)
         .join(",")}`
     case "goal-run":

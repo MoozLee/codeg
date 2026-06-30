@@ -881,6 +881,7 @@
       "customInstallSubmit": "Installer"
     },
     "errors": {
+      "windowsFileLocked": "Les fichiers de {name} sont utilisés par une session en cours, Windows ne peut donc pas les remplacer. Fermez toutes les sessions {name}, puis réessayez.",
       "nativeJsonMustBeObject": "La configuration JSON native doit être un objet",
       "nativeJsonInvalid": "Erreur de format de configuration JSON native : {message}",
       "openCodeAuthMustBeObject": "OpenCode auth.json doit être un objet JSON",
@@ -2619,6 +2620,18 @@
           "planLabel": "Plan",
           "submitted": "Plan soumis",
           "switched": "Mode changé"
+        },
+        "backgroundTask": {
+          "title": "Tâche en arrière-plan",
+          "titleWithId": "Tâche en arrière-plan · {id}",
+          "running": "En cours",
+          "completed": "Terminée",
+          "failed": "Échouée",
+          "stopped": "Arrêtée",
+          "exitCode": "sortie {code}",
+          "polledTimes": "Interrogée {count} fois",
+          "runningInBackground": "Arrière-plan",
+          "launchNote": "En cours d'exécution en arrière-plan · {id}"
         }
       },
       "subAgentOverlay": {
