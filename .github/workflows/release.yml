@@ -514,15 +514,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Notarization temporarily disabled: the Apple notary service has been
-          # failing for over a day. Tauri only notarizes when these three env
-          # vars are present, so leaving them out skips notarization while the
-          # build is still code-signed (via the imported Developer ID cert +
-          # APPLE_SIGNING_IDENTITY). Restore all three to re-enable once the
-          # notary service is healthy again.
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Tauri notarizes the signed bundle when these three env vars are
+          # present (in addition to the imported Developer ID cert +
+          # APPLE_SIGNING_IDENTITY used for code signing).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           releaseId: ${{ needs.create-draft-release.outputs.release_id }}
           tagName: ${{ github.ref_name }}
