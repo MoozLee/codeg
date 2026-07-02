@@ -314,6 +314,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
           git_branch: gitBranch ?? null,
           external_id: externalId ?? null,
           message_count: messageCount ?? 0,
+          child_count: 0,
           created_at: createdAt ?? nextUpdatedAt,
           updated_at: nextUpdatedAt,
           pinned_at: null,

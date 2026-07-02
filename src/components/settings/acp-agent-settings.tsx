@@ -8783,7 +8783,7 @@ supports_websockets = true`}
                             event.target.value
                           )
                         }}
-                        placeholder="claude-sonnet-4-5-20250514"
+                        placeholder="claude-sonnet-5"
                       />
                     </div>
 
@@ -8816,7 +8816,7 @@ supports_websockets = true`}
                         placeholder={`{
   "apiProvider": "anthropic",
   "apiKey": "sk-...",
-  "model": "claude-sonnet-4-5-20250514"
+  "model": "claude-sonnet-5"
 }`}
                       />
                       {selectedConfigError && (
@@ -9545,7 +9545,7 @@ supports_websockets = true`}
                                   event.target.value
                                 )
                               }}
-                              placeholder="claude-sonnet-4-6"
+                              placeholder="claude-sonnet-5"
                             />
                           </div>
                           <div className="space-y-1.5">
@@ -9602,7 +9602,7 @@ supports_websockets = true`}
                                   event.target.value
                                 )
                               }}
-                              placeholder="claude-sonnet-4-6"
+                              placeholder="claude-sonnet-5"
                             />
                           </div>
                           <div className="space-y-1.5 md:col-span-2">
