@@ -33,7 +33,7 @@ import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import { useSessionStats } from "@/contexts/session-stats-context"
 import { useTaskContext } from "@/contexts/task-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { toErrorMessage } from "@/lib/app-error"
 import { findFirstWorkspaceFileTarget } from "@/lib/local-file-target"
 import { cn, copyTextFromMenu, randomUUID } from "@/lib/utils"
@@ -1782,7 +1782,7 @@ export function ConversationDetailPanel({
   } = useConversationRuntime()
   const { activeFolder: folder } = useActiveFolder()
   const { conversations, getFolder } = useAppWorkspace()
-  const { openFilePreview } = useWorkspaceContext()
+  const { openFilePreview } = useWorkspaceActions()
   const {
     tabs,
     activeTabId,

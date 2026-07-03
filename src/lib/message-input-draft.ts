@@ -57,11 +57,17 @@ function readDraftStorageItem(draftKey: string, v2 = false): string | null {
   const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
   return readScopedStorageItem(
     persistenceMode,
-    v2 ? storageKeyForDraftKeyV2(scopedDraftKey) : storageKeyForDraftKey(scopedDraftKey)
+    v2
+      ? storageKeyForDraftKeyV2(scopedDraftKey)
+      : storageKeyForDraftKey(scopedDraftKey)
   )
 }
 
-function writeDraftStorageItem(draftKey: string, value: string, v2 = false): boolean {
+function writeDraftStorageItem(
+  draftKey: string,
+  value: string,
+  v2 = false
+): boolean {
   if (typeof window === "undefined") return false
   const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
   const key = v2
@@ -69,7 +75,9 @@ function writeDraftStorageItem(draftKey: string, value: string, v2 = false): boo
     : storageKeyForDraftKey(scopedDraftKey)
   try {
     const storage =
-      persistenceMode === "window-local" ? window.sessionStorage : window.localStorage
+      persistenceMode === "window-local"
+        ? window.sessionStorage
+        : window.localStorage
     storage.setItem(key, value)
     return true
   } catch {
@@ -81,7 +89,9 @@ function removeDraftStorageItem(draftKey: string, v2 = false): void {
   const { persistenceMode, scopedDraftKey } = resolveDraftScope(draftKey)
   removeScopedStorageItem(
     persistenceMode,
-    v2 ? storageKeyForDraftKeyV2(scopedDraftKey) : storageKeyForDraftKey(scopedDraftKey)
+    v2
+      ? storageKeyForDraftKeyV2(scopedDraftKey)
+      : storageKeyForDraftKey(scopedDraftKey)
   )
 }
 

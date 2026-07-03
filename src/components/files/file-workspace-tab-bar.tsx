@@ -17,9 +17,13 @@ import { toast } from "sonner"
 import { getSystemOpenTargetSettings, openPathWithTarget } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import { isDesktop, openPath, revealItemInDir } from "@/lib/platform"
+import { splitAbsPath } from "@/lib/file-open-target"
 import { isHtmlPreviewable } from "@/lib/language-detect"
-import { useActiveFolder } from "@/contexts/active-folder-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import {
+  useWorkspaceActions,
+  useWorkspaceFileTabs,
+  useWorkspaceView,
+} from "@/contexts/workspace-context"
 import type { FileWorkspaceTab } from "@/contexts/workspace-context"
 import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -37,22 +41,18 @@ import {
 
 export function FileWorkspaceTabBar() {
   const t = useTranslations("Folder.fileWorkspace")
+  const { mode, activePane, filesMaximized } = useWorkspaceView()
+  const { fileTabs, activeFileTabId, previewFileTabIds } =
+    useWorkspaceFileTabs()
   const {
-    mode,
-    activePane,
-    fileTabs,
-    activeFileTabId,
     switchFileTab,
     closeFileTab,
     closeOtherFileTabs,
     closeAllFileTabs,
     reorderFileTabs,
-    previewFileTabIds,
     toggleFileTabPreview,
-    filesMaximized,
     toggleFilesMaximized,
-  } = useWorkspaceContext()
-  const { activeFolder: folder } = useActiveFolder()
+  } = useWorkspaceActions()
   const { shortcuts } = useShortcutSettings()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isCoarsePointer = useIsCoarsePointer()
@@ -125,8 +125,8 @@ export function FileWorkspaceTabBar() {
   )
 
   const activeTab = fileTabs.find((tab) => tab.id === activeFileTabId)
-  const activeFilePath = activeTab?.path ?? null
-  const activeFolderPath = folder?.path ?? null
+  const activeFilePath = activeTab?.kind === "file" ? activeTab.path : null
+  const activeFileIo = activeFilePath ? splitAbsPath(activeFilePath) : null
   const canPreview =
     activeTab?.kind === "file" &&
     (activeTab.language === "markdown" || isHtmlPreviewable(activeTab.path))
@@ -137,13 +137,13 @@ export function FileWorkspaceTabBar() {
     activeTab?.kind === "file" &&
     !activeTab.loading &&
     (activeTab.language === "html" || activeTab.language === "css") &&
-    Boolean(activeFilePath && activeFolderPath)
+    Boolean(activeFilePath)
   const canRevealInFolder =
     isDesktop() &&
     activeTab?.kind === "file" &&
     !activeTab.loading &&
     !canOpenWebFile &&
-    Boolean(activeFilePath && activeFolderPath)
+    Boolean(activeFilePath)
   const isPreviewActive =
     canPreview && activeFileTabId
       ? previewFileTabIds.has(activeFileTabId)
@@ -183,27 +183,25 @@ export function FileWorkspaceTabBar() {
             : ["pb-1.5", "[&::-webkit-scrollbar]:h-0"]
         )}
       >
-        {fileTabs.map((tab) => {
-          return (
-            <FileWorkspaceTabItem
-              key={tab.id}
-              tab={tab}
-              active={tab.id === activeFileTabId}
-              closeLabel={t("closeFileTab")}
-              closeText={t("close")}
-              closeOthersText={t("closeOthers")}
-              closeAllText={t("closeAll")}
-              isCoarsePointer={isCoarsePointer}
-              isTouchSorting={touchSortingTabId === tab.id}
-              onSwitch={switchFileTab}
-              onClose={closeFileTab}
-              onCloseOthers={closeOtherFileTabs}
-              onCloseAll={closeAllFileTabs}
-              onTouchSortingStart={setTouchSortingTabId}
-              onTouchSortingEnd={handleTouchSortingEnd}
-            />
-          )
-        })}
+        {fileTabs.map((tab) => (
+          <FileWorkspaceTabItem
+            key={tab.id}
+            tab={tab}
+            active={tab.id === activeFileTabId}
+            closeLabel={t("closeFileTab")}
+            closeText={t("close")}
+            closeOthersText={t("closeOthers")}
+            closeAllText={t("closeAll")}
+            isCoarsePointer={isCoarsePointer}
+            isTouchSorting={touchSortingTabId === tab.id}
+            onSwitch={switchFileTab}
+            onClose={closeFileTab}
+            onCloseOthers={closeOtherFileTabs}
+            onCloseAll={closeAllFileTabs}
+            onTouchSortingStart={setTouchSortingTabId}
+            onTouchSortingEnd={handleTouchSortingEnd}
+          />
+        ))}
       </Reorder.Group>
       {canPreview && activeFileTabId && (
         <button
@@ -224,35 +222,43 @@ export function FileWorkspaceTabBar() {
         </button>
       )}
       {(canOpenInBrowser || canOpenWebFile || canRevealInFolder) &&
-        activeFilePath &&
-        activeFolderPath && (
+        activeFilePath && (
           <button
             type="button"
             onClick={() => {
-              const absolutePath = `${activeFolderPath}/${activeFilePath}`
               if (canOpenWebFile) {
                 void getSystemOpenTargetSettings()
                   .then((settings) => {
                     if (settings.web_file_open_method === "browser") {
-                      return openPath(absolutePath)
+                      return openPath(activeFilePath)
                     }
+                    if (!activeFileIo) return openPath(activeFilePath)
                     return openPathWithTarget({
-                      folderPath: activeFolderPath,
-                      relativePath: activeFilePath,
+                      folderPath: activeFileIo.rootPath,
+                      relativePath: activeFileIo.ioPath,
                       target: settings.target,
                     })
                   })
                   .catch((error) => {
-                    console.error("[FileWorkspaceTabBar] open file failed:", error)
-                    toast.error(t("openInEditorFailed", { message: toErrorMessage(error) }))
+                    console.error(
+                      "[FileWorkspaceTabBar] open file failed:",
+                      error
+                    )
+                    toast.error(
+                      t("openInEditorFailed", {
+                        message: toErrorMessage(error),
+                      })
+                    )
                   })
                 return
               }
-              if (canRevealInFolder) {
-                revealItemInDir(absolutePath).catch(() => {})
+              if (canOpenInBrowser) {
+                openPath(activeFilePath).catch(() => {})
                 return
               }
-              openPath(absolutePath).catch(() => {})
+              if (canRevealInFolder) {
+                revealItemInDir(activeFilePath).catch(() => {})
+              }
             }}
             className="shrink-0 flex items-center justify-center w-10 border-b border-border hover:bg-primary/8 transition-colors"
             aria-label={t("preview")}

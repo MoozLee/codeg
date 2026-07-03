@@ -30,7 +30,7 @@ import {
   type WindowLocalOpenedTab,
   type WorkspaceBootstrapState,
 } from "@/contexts/tab-shared"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { useSortedAvailableAgents } from "@/hooks/use-sorted-available-agents"
 import {
   getFolderConversation,
@@ -171,7 +171,7 @@ export function TabProvider({
   bootstrapState,
 }: TabProviderProps) {
   const t = useTranslations("Folder.tabContext")
-  const { activateConversationPane } = useWorkspaceContext()
+  const { activateConversationPane } = useWorkspaceActions()
   const {
     conversations,
     conversationsLoading,

@@ -10,7 +10,7 @@ import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { listAllConversations } from "@/lib/api"
 import { useOpenConversation } from "@/hooks/use-open-conversation"
 import type {
@@ -61,7 +61,7 @@ export function SearchCommandDialog({
   )
   const openConversation = useOpenConversation()
   const { openConversations } = useWorkbenchRoute()
-  const { openFilePreview } = useWorkspaceContext()
+  const { openFilePreview } = useWorkspaceActions()
   const { revealInFileTree } = useAuxPanelContext()
 
   const [activeTab, setActiveTab] = useState<SearchTab>("conversations")

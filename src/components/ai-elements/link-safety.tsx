@@ -9,12 +9,13 @@ import { toErrorMessage } from "@/lib/app-error"
 import type { LinkSafetyConfig, LinkSafetyModalProps } from "streamdown"
 import { toast } from "sonner"
 import { useActiveFolder } from "@/contexts/active-folder-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useWorkspaceActions } from "@/contexts/workspace-context"
+import { isHomeRelativePath } from "@/lib/file-open-target"
+import { isAbsoluteFilePath } from "@/lib/file-path-display"
 import { cn } from "@/lib/utils"
 import {
   parseLocalFileTarget,
   resolveToolFilePath,
-  toWorkspaceRelativePath,
 } from "@/lib/local-file-target"
 
 const WINDOWS_ABSOLUTE_PATH = /^[a-zA-Z]:[\\/]/
@@ -34,8 +35,12 @@ function parseExternalUrl(rawUrl: string): URL | null {
   if (!trimmed) return null
 
   if (trimmed.startsWith("//")) {
+    // Protocol-relative: pin to https rather than the page protocol — a
+    // Tauri webview's own scheme (tauri://localhost) would otherwise
+    // classify these as an unsupported protocol, and the desktop opener
+    // capability only allows concrete http(s) URLs.
     try {
-      return new URL(trimmed, window.location.href)
+      return new URL(`https:${trimmed}`)
     } catch {
       return null
     }
@@ -96,6 +101,13 @@ function dispatchOsHandlerUrl(url: string): void {
   }
 }
 
+// True when the opener needs no folder context at all: absolute paths and
+// `~/` paths are self-locating (openFilePreview expands the home dir and
+// routes them by absolute path — inside a registered folder or not).
+function isSelfLocatingPath(path: string): boolean {
+  return isAbsoluteFilePath(path) || isHomeRelativePath(path)
+}
+
 /**
  * Streamdown's link-safety contract renders this component whenever
  * `onLinkCheck` declines a click. We render nothing — instead we hijack
@@ -152,32 +164,24 @@ export function useOpenLinkOrFile() {
   const t = useTranslations("Folder.chat.linkSafety")
   const { activeFolder: folder } = useActiveFolder()
   const folderPath = folder?.path
-  const { openFilePreview } = useWorkspaceContext()
+  const { openFilePreview } = useWorkspaceActions()
 
   return useCallback(
     async (url: string) => {
       const localTarget = parseLocalFileTarget(url)
       if (localTarget) {
-        if (!folderPath) {
+        // Absolute and ~ paths open with no folder context (works in chat
+        // mode too); only folder-relative paths still need an active
+        // folder to resolve against.
+        if (!isSelfLocatingPath(localTarget.path) && !folderPath) {
           toast.error(t("errorCannotOpen"), {
             description: t("errorNoWorkspace"),
           })
           return
         }
 
-        const relativePath = toWorkspaceRelativePath(
-          localTarget.path,
-          folderPath
-        )
-        if (!relativePath) {
-          toast.error(t("errorCannotOpen"), {
-            description: t("errorOutsideWorkspace"),
-          })
-          return
-        }
-
         try {
-          await openFilePreview(relativePath, {
+          await openFilePreview(localTarget.path.replace(/^\.\/+/, ""), {
             line: localTarget.line ?? undefined,
           })
         } catch (error) {
@@ -196,11 +200,19 @@ export function useOpenLinkOrFile() {
         return
       }
 
+      // Dispatch the CANONICAL form: a protocol-relative "//host/…" must
+      // reach the desktop opener as a concrete https URL — the opener
+      // capability only allows http(s), and raw "//…" would resolve
+      // against the webview's own scheme.
+      const openTarget = url.trim().startsWith("//")
+        ? `https:${url.trim()}`
+        : url
+
       try {
         if (OS_HANDLER_PROTOCOLS.has(protocol) && isWebOpenerEnvironment()) {
-          dispatchOsHandlerUrl(url)
+          dispatchOsHandlerUrl(openTarget)
         } else {
-          await openUrl(url)
+          await openUrl(openTarget)
         }
       } catch (error) {
         toast.error(t("errorFailedLink"), {
@@ -238,9 +250,7 @@ export function useStreamdownLinkSafety(): LinkSafetyConfig {
 }
 
 /**
- * Clickable file-path label that opens the same "open local file" path used for
- * markdown links inside agent messages, then routes the file into the workspace
- * file panel.
+ * Clickable file-path label that routes the file into the workspace file panel.
  */
 export function FilePathLink({
   filePath,
@@ -258,7 +268,7 @@ export function FilePathLink({
   const t = useTranslations("Folder.chat.linkSafety")
   const { activeFolder: folder } = useActiveFolder()
   const folderPath = folder?.path ?? null
-  const { openFilePreview } = useWorkspaceContext()
+  const { openFilePreview } = useWorkspaceActions()
   // `opening` drives the visual busy state. `openingRef` is the synchronous
   // gate that survives rapid double-fires within a single event tick —
   // React batches the `setOpening(true)` commit, so relying purely on the
@@ -269,23 +279,20 @@ export function FilePathLink({
 
   const handleOpen = useCallback(() => {
     if (openingRef.current) return
-    if (!folderPath) {
+    const target = resolveToolFilePath(filePath)
+    if (!target) return
+    // Only folder-relative paths need an active folder; absolute and ~
+    // paths are self-locating.
+    if (!isSelfLocatingPath(target) && !folderPath) {
       toast.error(t("errorCannotOpen"), {
         description: t("errorNoWorkspace"),
-      })
-      return
-    }
-    const relativePath = resolveToolFilePath(filePath, folderPath)
-    if (!relativePath) {
-      toast.error(t("errorCannotOpen"), {
-        description: t("errorOutsideWorkspace"),
       })
       return
     }
 
     openingRef.current = true
     setOpening(true)
-    void openFilePreview(relativePath, {
+    void openFilePreview(target, {
       line: line ?? undefined,
     })
       .catch((error) => {

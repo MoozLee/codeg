@@ -85,7 +85,9 @@ export function useUiFontFamily() {
   return {
     uiFontFamily: uiFont.custom || uiFont.id,
     setUiFontFamily: (fontFamily: string | null) =>
-      fontFamily ? setUiFont("custom", fontFamily) : setUiFont("jetbrains-mono"),
+      fontFamily
+        ? setUiFont("custom", fontFamily)
+        : setUiFont("jetbrains-mono"),
     uiFontFamilyStack: uiFontStack,
   }
 }
@@ -95,7 +97,9 @@ export function useCodeFontFamily() {
   return {
     codeFontFamily: editorFont.custom || editorFont.id,
     setCodeFontFamily: (fontFamily: string | null) =>
-      fontFamily ? setEditorFont("custom", fontFamily) : setEditorFont("system-mono"),
+      fontFamily
+        ? setEditorFont("custom", fontFamily)
+        : setEditorFont("system-mono"),
     codeFontFamilyStack: editorFontStack,
   }
 }

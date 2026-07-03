@@ -18,12 +18,35 @@ const eslintConfig = defineConfig([
     "src-tauri/target/**",
     "src-tauri/experts/**",
     "public/vs/**",
+    "relay/dist/**",
   ]),
   eslintConfigPrettier,
   eslintPluginPrettierRecommended,
   {
     rules: {
       "prettier/prettier": "error",
+    },
+  },
+  {
+    // Conversation render path: the aggregate workspace hook subscribes to
+    // the high-frequency fileTabs slice, so any consumer here would
+    // re-render on every keystroke / watcher reload in the file editor.
+    // Use the narrow slice hooks instead.
+    files: [
+      "src/components/chat/**",
+      "src/components/message/**",
+      "src/components/ai-elements/**",
+      "src/components/conversations/**",
+    ],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.name='useWorkspaceContext']",
+          message:
+            "Hot path: use useWorkspaceActions / useWorkspaceView / useWorkspaceFileTabs instead of the aggregate useWorkspaceContext (it re-renders on every fileTabs change).",
+        },
+      ],
     },
   },
 ])

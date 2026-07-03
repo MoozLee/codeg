@@ -194,7 +194,10 @@ export function FontSettingsSection() {
   const editorLigAvailable = fontSupportsLigatures(editorFont.id)
   const terminalLigAvailable = fontSupportsLigatures(terminalFont.id)
   const { fontList } = useAppearance()
-  const discoveredFonts = useMemo(() => buildDiscoveredFonts(fontList), [fontList])
+  const discoveredFonts = useMemo(
+    () => buildDiscoveredFonts(fontList),
+    [fontList]
+  )
   const uiFonts = useMemo(
     () => [...FONTS, ...discoveredFonts],
     [discoveredFonts]

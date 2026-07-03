@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { useAppWorkspace } from "@/contexts/app-workspace-context"
 import { useTabContext } from "@/contexts/tab-context"
 import type { TabItem as TabItemData } from "@/contexts/tab-context"
-import { useWorkspaceContext } from "@/contexts/workspace-context"
+import { useWorkspaceView } from "@/contexts/workspace-context"
 import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useOpenConversation } from "@/hooks/use-open-conversation"
@@ -29,7 +29,7 @@ export function TabBar() {
     reorderTabs,
   } = useTabContext()
   const { allFolders, branches } = useAppWorkspace()
-  const { mode, activePane, filesMaximized } = useWorkspaceContext()
+  const { mode, activePane, filesMaximized } = useWorkspaceView()
   const openConversation = useOpenConversation()
 
   const folderIndex = useMemo(() => {

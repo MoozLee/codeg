@@ -74,8 +74,12 @@ function splitPathAndLine(rawPath: string): LocalFileTarget {
 }
 
 function isLocalPathLike(path: string): boolean {
+  // "//host/..." (forward slashes) is protocol-relative: a web URL, not a
+  // local path. A "\\server\share" path is a local UNC path and must route to
+  // the file opener after slash normalization.
   return (
-    path.startsWith("/") ||
+    (path.startsWith("/") && !path.startsWith("//")) ||
+    path.startsWith("\\\\") ||
     path.startsWith("./") ||
     path.startsWith("../") ||
     path.startsWith("~/") ||
@@ -90,9 +94,12 @@ export function parseLocalFileTarget(rawUrl: string): LocalFileTarget | null {
   if (trimmed.toLowerCase().startsWith("file://")) {
     try {
       const parsed = new URL(trimmed)
-      if (parsed.hostname && parsed.hostname !== "localhost") return null
       const rawPathname = decodeUriSafely(parsed.pathname)
-      const normalizedPathname = stripLeadingSlashOnWindows(rawPathname)
+      // A non-empty host is a UNC authority (file://server/share/x) — preserve
+      // it as //server/share/x rather than collapsing to local /share/x.
+      const normalizedPathname = parsed.host
+        ? `//${parsed.host}${rawPathname}`
+        : stripLeadingSlashOnWindows(rawPathname)
       const pathAndLine = splitPathAndLine(normalizedPathname)
       if (!pathAndLine.path) return null
       return {
@@ -110,7 +117,7 @@ export function parseLocalFileTarget(rawUrl: string): LocalFileTarget | null {
 
   // Split on raw # / ? before decoding so encoded `%23` / `%3F` inside the
   // path don't get promoted to fragment/query separators (which would point
-  // the open-file dialog at the wrong file).
+  // the file opener at the wrong file).
   const hashIndex = trimmed.indexOf("#")
   const rawHash = hashIndex >= 0 ? trimmed.slice(hashIndex) : ""
   const beforeHash = hashIndex >= 0 ? trimmed.slice(0, hashIndex) : trimmed
@@ -161,11 +168,13 @@ export function toWorkspaceRelativePath(
     return normalizeWorkspaceRelativePath(normalizedPath)
   }
 
-  const isWindows = WINDOWS_ABSOLUTE_PATH.test(normalizedWorkspace)
-  const pathForCompare = isWindows
+  const isCaseInsensitive =
+    WINDOWS_ABSOLUTE_PATH.test(normalizedWorkspace) ||
+    normalizedWorkspace.startsWith("//")
+  const pathForCompare = isCaseInsensitive
     ? normalizedPath.toLowerCase()
     : normalizedPath
-  const workspaceForCompare = isWindows
+  const workspaceForCompare = isCaseInsensitive
     ? normalizedWorkspace.toLowerCase()
     : normalizedWorkspace
 
@@ -178,26 +187,22 @@ export function toWorkspaceRelativePath(
 }
 
 /**
- * Resolve a tool-call file path (which may be absolute, workspace-relative, or
- * a bare relative path) into something `openFilePreview` can consume. Falls
- * back to the raw input when no other heuristic matches so the dialog can
- * still surface a useful error toast.
+ * Normalize a tool-call file path (absolute, `~/`, workspace-relative, or a
+ * bare relative path) into something `openFilePreview` can consume. Only
+ * relative paths still depend on the active folder; the caller checks that.
  */
-export function resolveToolFilePath(
-  rawPath: string,
-  workspacePath: string | null
-): string | null {
+export function resolveToolFilePath(rawPath: string): string | null {
   const normalized = normalizeSlashPath(rawPath.trim())
   if (!normalized) return null
-
-  const isAbsolute =
-    normalized.startsWith("/") || WINDOWS_ABSOLUTE_PATH.test(normalized)
-  if (isAbsolute) {
-    if (!workspacePath) return null
-    return toWorkspaceRelativePath(normalized, workspacePath)
+  if (
+    normalized.startsWith("/") ||
+    WINDOWS_ABSOLUTE_PATH.test(normalized) ||
+    normalized === "~" ||
+    normalized.startsWith("~/")
+  ) {
+    return normalized
   }
-
-  return normalizeWorkspaceRelativePath(normalized)
+  return normalized.replace(/^\.\/+/, "")
 }
 
 function trimSelectedCandidate(candidate: string): string {

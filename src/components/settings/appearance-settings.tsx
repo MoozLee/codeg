@@ -12,7 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useAppearance, useThemeColor, useZoomLevel } from "@/hooks/use-appearance"
+import {
+  useAppearance,
+  useThemeColor,
+  useZoomLevel,
+} from "@/hooks/use-appearance"
 import {
   DEFAULT_EDITOR_FONT_ID,
   DEFAULT_EDITOR_FONT_SIZE,
