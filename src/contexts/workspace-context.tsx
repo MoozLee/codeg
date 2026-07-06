@@ -12,7 +12,7 @@ import {
 } from "react"
 import { useTranslations } from "next-intl"
 import { useActiveFolder } from "@/contexts/active-folder-context"
-import { useAppWorkspace } from "@/contexts/app-workspace-context"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { buildFileTabId } from "@/lib/file-tab-id"
 import {
   gitDiff,
@@ -347,7 +347,9 @@ export function WorkspaceProvider({
 }: WorkspaceProviderProps) {
   const t = useTranslations("Folder.workspaceContext")
   const { activeFolder } = useActiveFolder()
-  const { getFolder, allFolders } = useAppWorkspace()
+  // Reactive: `useOpenFileTabsWatch` re-derives its per-root FS subscriptions
+  // when the registered-folder set changes. Low-frequency (open/close folder).
+  const allFolders = useAppWorkspaceStore((s) => s.allFolders)
   const folderPath = activeFolder?.path
   // `persistenceMode` remains part of the provider props because desktop
   // workspace routing supplies it, but workspace mode itself is now derived from
@@ -388,8 +390,6 @@ export function WorkspaceProvider({
   // recreated closure would have had — never fresher, never older.
   const activeFileTabIdRef = useRef<string | null>(null)
   const activeFolderRef = useRef<{ id: number; path: string } | null>(null)
-  const getFolderRef = useRef(getFolder)
-  const allFoldersRef = useRef(allFolders)
   const fileRevealRequestIdRef = useRef(0)
   // tabId -> generation of its current in-flight fetch. Serves two roles:
   //   (a) Dedup: `has(tabId)` collapses rapid re-clicks within one event
@@ -417,14 +417,6 @@ export function WorkspaceProvider({
       ? { id: activeFolder.id, path: activeFolder.path }
       : null
   }, [activeFolder])
-
-  useEffect(() => {
-    getFolderRef.current = getFolder
-  }, [getFolder])
-
-  useEffect(() => {
-    allFoldersRef.current = allFolders
-  }, [allFolders])
 
   useEffect(() => {
     externalConflictQueueRef.current = externalConflictQueue
@@ -464,7 +456,9 @@ export function WorkspaceProvider({
   const resolveTargetFolder = useCallback(
     (explicitFolderId?: number): { id: number; path: string } | null => {
       if (explicitFolderId != null) {
-        const folder = getFolderRef.current(explicitFolderId)
+        const folder = useAppWorkspaceStore
+          .getState()
+          .getFolder(explicitFolderId)
         return folder ? { id: folder.id, path: folder.path } : null
       }
       return activeFolderRef.current
@@ -488,7 +482,10 @@ export function WorkspaceProvider({
         // different casing (c:/repo vs C:/Repo), and watch events join the
         // FOLDER's stored casing — canonicalizing here collapses those
         // aliases into the one identity the watcher reproduces.
-        const owning = findOwningFolder(abs, allFoldersRef.current)
+        const owning = findOwningFolder(
+          abs,
+          useAppWorkspaceStore.getState().allFolders
+        )
         return owning ? joinRootRel(owning.rootPath, owning.relPath) : abs
       }
       const base = resolveTargetFolder(baseFolderId)
@@ -505,7 +502,10 @@ export function WorkspaceProvider({
   // misleading gutters.
   const fetchGitBase = useCallback(
     async (absPath: string): Promise<string | undefined> => {
-      const owning = findOwningFolder(absPath, allFoldersRef.current)
+      const owning = findOwningFolder(
+        absPath,
+        useAppWorkspaceStore.getState().allFolders
+      )
       if (!owning) return undefined
       const tracked = await gitIsTracked(owning.rootPath, owning.relPath).catch(
         () => false
@@ -1874,7 +1874,10 @@ export function WorkspaceProvider({
       // echo) and the save proceeds; a different etag is a real divergence
       // — surface the conflict prompt and refuse the save. `force: true`
       // (the conflict dialog's own overwrite path) bypasses.
-      const unwatched = !findOwningFolder(tab.path, allFoldersRef.current)
+      const unwatched = !findOwningFolder(
+        tab.path,
+        useAppWorkspaceStore.getState().allFolders
+      )
       if ((tab.stale || unwatched) && !options?.force) {
         try {
           const latest = await readFileForEdit(io.rootPath, io.ioPath)

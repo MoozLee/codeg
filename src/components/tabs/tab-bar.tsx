@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Reorder } from "motion/react"
 import { toast } from "sonner"
-import { useAppWorkspace } from "@/contexts/app-workspace-context"
-import { useTabContext } from "@/contexts/tab-context"
+import { useTabActions, useTabStore } from "@/contexts/tab-context"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import type { TabItem as TabItemData } from "@/contexts/tab-context"
 import { useWorkspaceView } from "@/contexts/workspace-context"
 import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
@@ -16,10 +16,10 @@ import { TabItem } from "./tab-item"
 import { cn } from "@/lib/utils"
 
 export function TabBar() {
+  const tabs = useTabStore((s) => s.tabs)
+  const activeTabId = useTabStore((s) => s.activeTabId)
+  const isTileMode = useTabStore((s) => s.isTileMode)
   const {
-    tabs,
-    activeTabId,
-    isTileMode,
     switchTab,
     closeTab,
     closeOtherTabs,
@@ -27,8 +27,9 @@ export function TabBar() {
     pinTab,
     toggleTileMode,
     reorderTabs,
-  } = useTabContext()
-  const { allFolders, branches } = useAppWorkspace()
+  } = useTabActions()
+  const allFolders = useAppWorkspaceStore((s) => s.allFolders)
+  const branches = useAppWorkspaceStore((s) => s.branches)
   const { mode, activePane, filesMaximized } = useWorkspaceView()
   const openConversation = useOpenConversation()
 

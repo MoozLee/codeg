@@ -1,6 +1,6 @@
 "use client"
 
-import { Monitor, Moon, RotateCcw, Sun, Type } from "lucide-react"
+import { LayoutGrid, Monitor, Moon, RotateCcw, Sun, Type } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -12,9 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import {
   useAppearance,
   useThemeColor,
+  useWelcomeQuickActions,
   useZoomLevel,
 } from "@/hooks/use-appearance"
 import {
@@ -60,6 +62,8 @@ export function AppearanceSettings() {
     terminalLigatures,
     setTerminalLigatures,
   } = useAppearance()
+  const { showWelcomeQuickActions, setShowWelcomeQuickActions } =
+    useWelcomeQuickActions()
 
   const resolvedThemeLabel =
     resolvedTheme === "dark"
@@ -266,6 +270,30 @@ export function AppearanceSettings() {
             {t("resetToDefaults")}
           </Button>
         </div>
+
+        {/* ===== New conversation — mode selection area ===== */}
+        <section className="rounded-xl border bg-card p-4 space-y-4">
+          <div className="flex items-center gap-2">
+            <LayoutGrid className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">
+              {t("welcomePanel.sectionTitle")}
+            </h2>
+          </div>
+
+          <p className="text-xs text-muted-foreground leading-5">
+            {t("welcomePanel.sectionDescription")}
+          </p>
+
+          <label className="flex items-center gap-2">
+            <Switch
+              checked={showWelcomeQuickActions}
+              onCheckedChange={setShowWelcomeQuickActions}
+            />
+            <span className="text-xs text-muted-foreground">
+              {t("welcomePanel.showQuickActions")}
+            </span>
+          </label>
+        </section>
 
         {/* ===== Desktop Pet ===== */}
         <PetManagerSection />

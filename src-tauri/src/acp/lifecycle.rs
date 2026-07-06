@@ -185,9 +185,12 @@ pub(crate) async fn handle_event(
             };
             let conversation_id = state_arc.read().await.conversation_id;
             if let Some(cid) = conversation_id {
-                let external_id_was_filled =
-                    conversation_service::update_external_id_if_missing(db_conn, cid, session_id.clone())
-                        .await?;
+                let external_id_was_filled = conversation_service::update_external_id_if_missing(
+                    db_conn,
+                    cid,
+                    session_id.clone(),
+                )
+                .await?;
                 // The external_id just landed on the row. The create-time
                 // sidebar upsert carried `external_id: null` (no session yet),
                 // so re-broadcast the full summary on `conversation://changed`

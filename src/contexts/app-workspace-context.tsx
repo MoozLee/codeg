@@ -1,396 +1,35 @@
 "use client"
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react"
-import {
-  getGitHead,
-  listAllConversations,
-  listAllFolderDetails,
-  listOpenFolderDetails,
-  openFolder as apiOpenFolder,
-  openWorktreeFolder as apiOpenWorktreeFolder,
-  openFolderById as apiOpenFolderById,
-  removeFolderFromWorkspace as apiRemoveFolderFromWorkspace,
-  reorderFolders as apiReorderFolders,
-  getFolder as apiGetFolder,
-  updateFolderPinned as apiUpdateFolderPinned,
-} from "@/lib/api"
-import { toErrorMessage } from "@/lib/app-error"
+import { useEffect, type ReactNode } from "react"
+import { getGitHead } from "@/lib/api"
 import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { useAcpEvent } from "@/contexts/acp-connections-context"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import {
   CONVERSATION_CHANGED_EVENT,
   FOLDER_CHANGED_EVENT,
-  type AgentStats,
-  type AgentType,
   type ConversationChange,
-  type DbConversationSummary,
   type EventEnvelope,
   type FolderChange,
-  type FolderDetail,
-  type GitHeadInfo,
 } from "@/lib/types"
-
-interface ConversationSummaryLocalSync {
-  id: number
-  folderId?: number
-  agentType?: AgentType
-  title?: string | null
-  status?: DbConversationSummary["status"]
-  model?: string | null
-  gitBranch?: string | null
-  externalId?: string | null
-  messageCount?: number
-  createdAt?: string
-  updatedAt?: string
-}
-
-interface AppWorkspaceContextValue {
-  folders: FolderDetail[]
-  allFolders: FolderDetail[]
-  foldersHydrated: boolean
-  foldersLoading: boolean
-  getFolder: (id: number) => FolderDetail | undefined
-
-  conversations: DbConversationSummary[]
-  conversationsLoading: boolean
-  conversationsError: string | null
-  refreshConversations: () => Promise<void>
-  updateConversationLocal: (
-    id: number,
-    patch: Partial<
-      Pick<DbConversationSummary, "status" | "title" | "pinned_at">
-    >
-  ) => void
-  syncConversationSummaryLocal: (sync: ConversationSummaryLocalSync) => void
-
-  branches: Map<number, string | null>
-  getBranch: (folderId: number) => string | null | undefined
-  setBranch: (folderId: number, branch: string | null) => void
-
-  /**
-   * Full HEAD state per folder (repo-ness, detached, short sha). The poll keeps
-   * this in sync alongside `branches`; consumers that only need the display
-   * branch name keep reading `branches`. `BranchDropdown` reads this to tell a
-   * detached HEAD apart from a non-git folder (issue #279).
-   */
-  gitHeads: Map<number, GitHeadInfo | null>
-
-  /**
-   * Insert/replace a folder in local state, mirroring the backend's list
-   * split: a `kind === "chat"` folder goes into `allFolders` only (matching
-   * `list_open_folder_details`, which excludes chat folders from the
-   * user-facing list), every other kind into both lists.
-   */
-  upsertFolder: (detail: FolderDetail) => void
-  openFolder: (path: string) => Promise<FolderDetail>
-  openWorktreeFolder: (
-    path: string,
-    sourceFolderId: number
-  ) => Promise<FolderDetail>
-  addFolderToWorkspaceById: (folderId: number) => Promise<FolderDetail>
-  removeFolderFromWorkspace: (folderId: number) => Promise<void>
-  reorderFolders: (ids: number[]) => Promise<void>
-  togglePinFolder: (folderId: number) => Promise<void>
-  refreshFolder: (id: number) => Promise<void>
-  refreshFolders: () => Promise<void>
-
-  stats: AgentStats | null
-
-  /**
-   * Currently-active folder id as driven by the active tab.
-   * TabProvider sets this; ActiveFolderProvider / other consumers read it.
-   */
-  activeFolderId: number | null
-  setActiveFolderId: (id: number | null) => void
-}
-
-const AppWorkspaceContext = createContext<AppWorkspaceContextValue | null>(null)
-
-export function useAppWorkspace() {
-  const ctx = useContext(AppWorkspaceContext)
-  if (!ctx) {
-    throw new Error("useAppWorkspace must be used within AppWorkspaceProvider")
-  }
-  return ctx
-}
-
-function computeStats(conversations: DbConversationSummary[]): AgentStats {
-  const byAgent = new Map<AgentType, number>()
-  let totalMessages = 0
-
-  for (const s of conversations) {
-    byAgent.set(s.agent_type, (byAgent.get(s.agent_type) ?? 0) + 1)
-    totalMessages += s.message_count
-  }
-
-  return {
-    total_conversations: conversations.length,
-    total_messages: totalMessages,
-    by_agent: Array.from(byAgent.entries()).map(([agent_type, count]) => ({
-      agent_type,
-      conversation_count: count,
-    })),
-  }
-}
-
-// Bound on the soft-delete tombstone set (see `deletedIdsRef`). The eviction
-// window — 512 deletions — far exceeds any realistic late/out-of-order event
-// delay, so a row can never be resurrected in practice while memory stays
-// bounded across a long-lived session.
-const DELETED_TOMBSTONE_CAP = 512
 
 interface AppWorkspaceProviderProps {
   children: ReactNode
 }
 
+/**
+ * Event wiring for `useAppWorkspaceStore` — state itself lives in the store
+ * (components subscribe to slices via selectors, not through a context value).
+ * This component owns the pieces that need a React lifecycle: initial fetches,
+ * the cross-client side-channel subscriptions, and the active-folder branch
+ * poll.
+ */
 export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
-  const [folders, setFolders] = useState<FolderDetail[]>([])
-  const [allFolders, setAllFolders] = useState<FolderDetail[]>([])
-  const [foldersHydrated, setFoldersHydrated] = useState(false)
-  const [foldersLoading, setFoldersLoading] = useState(true)
-
-  const [conversations, setConversations] = useState<DbConversationSummary[]>(
-    []
-  )
-  const [conversationsLoading, setConversationsLoading] = useState(true)
-  const [conversationsError, setConversationsError] = useState<string | null>(
-    null
-  )
-
-  const [branches, setBranches] = useState<Map<number, string | null>>(
-    new Map()
-  )
-  const [gitHeads, setGitHeads] = useState<Map<number, GitHeadInfo | null>>(
-    new Map()
-  )
-  const [activeFolderId, setActiveFolderId] = useState<number | null>(null)
-
-  const mountedRef = useRef(true)
   useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
-  const fetchFolders = useCallback(async () => {
-    setFoldersLoading(true)
-    try {
-      const [openList, allList] = await Promise.all([
-        listOpenFolderDetails(),
-        listAllFolderDetails(),
-      ])
-      if (!mountedRef.current) return
-      setFolders(openList)
-      setAllFolders(allList)
-      setBranches((prev) => {
-        const next = new Map(prev)
-        for (const f of allList) {
-          if (!next.has(f.id)) {
-            next.set(f.id, f.git_branch ?? null)
-          }
-        }
-        return next
-      })
-    } catch (err) {
-      console.error("[AppWorkspace] fetchFolders failed:", err)
-    } finally {
-      if (mountedRef.current) {
-        setFoldersLoading(false)
-        setFoldersHydrated(true)
-      }
-    }
-  }, [])
-
-  const refreshConversations = useCallback(async (): Promise<void> => {
-    setConversationsLoading(true)
-    try {
-      const list = await listAllConversations()
-      if (!mountedRef.current) return
-      setConversations(list)
-      setConversationsError(null)
-    } catch (err) {
-      if (!mountedRef.current) return
-      setConversationsError(toErrorMessage(err))
-    } finally {
-      if (mountedRef.current) {
-        setConversationsLoading(false)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
+    const { fetchFolders, refreshConversations } =
+      useAppWorkspaceStore.getState()
     void fetchFolders()
     void refreshConversations()
-  }, [fetchFolders, refreshConversations])
-
-  const getFolder = useCallback(
-    (id: number) => allFolders.find((f) => f.id === id),
-    [allFolders]
-  )
-
-  const syncConversationSummaryLocal = useCallback(
-    ({
-      id,
-      folderId,
-      agentType,
-      title,
-      status,
-      model,
-      gitBranch,
-      externalId,
-      messageCount,
-      createdAt,
-      updatedAt,
-    }: ConversationSummaryLocalSync) => {
-      setConversations((prev) => {
-        const now = new Date().toISOString()
-        const nextUpdatedAt = updatedAt ?? now
-        const existingIndex = prev.findIndex(
-          (conversation) => conversation.id === id
-        )
-
-        if (existingIndex >= 0) {
-          const existing = prev[existingIndex]
-          const nextMessageCount =
-            messageCount !== undefined
-              ? Math.max(existing.message_count, messageCount)
-              : existing.message_count
-          const nextConversation: DbConversationSummary = {
-            ...existing,
-            ...(folderId != null ? { folder_id: folderId } : {}),
-            ...(agentType ? { agent_type: agentType } : {}),
-            ...(title !== undefined ? { title } : {}),
-            ...(status ? { status } : {}),
-            ...(model !== undefined ? { model } : {}),
-            ...(gitBranch !== undefined ? { git_branch: gitBranch } : {}),
-            ...(externalId !== undefined ? { external_id: externalId } : {}),
-            message_count: nextMessageCount,
-            updated_at: nextUpdatedAt,
-          }
-
-          const changed =
-            nextConversation.folder_id !== existing.folder_id ||
-            nextConversation.agent_type !== existing.agent_type ||
-            nextConversation.title !== existing.title ||
-            nextConversation.status !== existing.status ||
-            nextConversation.model !== existing.model ||
-            nextConversation.git_branch !== existing.git_branch ||
-            nextConversation.external_id !== existing.external_id ||
-            nextConversation.message_count !== existing.message_count ||
-            nextConversation.updated_at !== existing.updated_at
-
-          if (!changed) {
-            return prev
-          }
-
-          const next = [...prev]
-          next[existingIndex] = nextConversation
-          return next
-        }
-
-        if (folderId == null || !agentType) {
-          return prev
-        }
-
-        const newConversation: DbConversationSummary = {
-          id,
-          folder_id: folderId,
-          title: title ?? null,
-          title_locked: false,
-          agent_type: agentType,
-          kind: "regular",
-          status: status ?? "in_progress",
-          model: model ?? null,
-          git_branch: gitBranch ?? null,
-          external_id: externalId ?? null,
-          message_count: messageCount ?? 0,
-          child_count: 0,
-          created_at: createdAt ?? nextUpdatedAt,
-          updated_at: nextUpdatedAt,
-          pinned_at: null,
-        }
-
-        return [...prev, newConversation]
-      })
-    },
-    []
-  )
-
-  const updateConversationLocal = useCallback(
-    (
-      id: number,
-      patch: Partial<
-        Pick<DbConversationSummary, "status" | "title" | "pinned_at">
-      >
-    ) => {
-      setConversations((prev) => {
-        const idx = prev.findIndex((c) => c.id === id)
-        if (idx < 0) return prev
-        const next = prev.slice()
-        const bumpUpdatedAt = !("pinned_at" in patch)
-        next[idx] = {
-          ...next[idx],
-          ...patch,
-          ...(bumpUpdatedAt ? { updated_at: new Date().toISOString() } : {}),
-        }
-        return next
-      })
-    },
-    []
-  )
-
-  // ── Cross-client list/status sync ──────────────────────────────────────
-  // Tombstones for soft-deleted ids: a stale/out-of-order `upsert` that lands
-  // after a `deleted` (e.g. a concurrent rename racing a delete from another
-  // client) must not resurrect the row. Ids are DB autoincrement and never
-  // reused, so the tombstone is permanent; the set is FIFO-bounded.
-  const deletedIdsRef = useRef<Set<number>>(new Set())
-
-  // Insert-or-replace a conversation by id (create + field updates). Root-only:
-  // delegation children (parent_id set) are not sidebar rows. New rows prepend
-  // (most-recent-first); existing rows replace in place to keep their position.
-  const applyConversationUpsert = useCallback(
-    (summary: DbConversationSummary) => {
-      if (summary.parent_id != null) return
-      if (deletedIdsRef.current.has(summary.id)) return
-      setConversations((prev) => {
-        const idx = prev.findIndex((c) => c.id === summary.id)
-        if (idx < 0) return [summary, ...prev]
-        const next = prev.slice()
-        next[idx] = summary
-        return next
-      })
-    },
-    []
-  )
-
-  // Remove a conversation by id. Idempotent: unknown id returns the same
-  // reference (no re-render; keeps the `stats` memo stable).
-  const applyConversationRemove = useCallback((id: number) => {
-    const tombstones = deletedIdsRef.current
-    tombstones.add(id)
-    if (tombstones.size > DELETED_TOMBSTONE_CAP) {
-      // FIFO eviction — Set preserves insertion order.
-      const oldest = tombstones.values().next().value
-      if (oldest !== undefined) tombstones.delete(oldest)
-    }
-    setConversations((prev) => {
-      const idx = prev.findIndex((c) => c.id === id)
-      if (idx < 0) return prev
-      const next = prev.slice()
-      next.splice(idx, 1)
-      return next
-    })
   }, [])
 
   // Subscribe to the global `conversation://changed` side-channel so any
@@ -404,12 +43,15 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       const dispose = await subscribe<ConversationChange>(
         CONVERSATION_CHANGED_EVENT,
         (change) => {
+          const store = useAppWorkspaceStore.getState()
           if (change.kind === "upsert") {
-            applyConversationUpsert(change.summary)
+            store.applyConversationUpsert(change.summary)
           } else if (change.kind === "deleted") {
-            applyConversationRemove(change.id)
+            store.applyConversationRemove(change.id)
           } else {
-            updateConversationLocal(change.id, { status: change.status })
+            store.updateConversationLocal(change.id, {
+              status: change.status,
+            })
           }
         }
       )
@@ -421,7 +63,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     // (receiver_count == 0). A full re-fetch on reconnect reconciles. Returns
     // null on desktop IPC (no disconnect window) → no-op there.
     const offReconnect = onTransportReconnect(() => {
-      void refreshConversations()
+      void useAppWorkspaceStore.getState().refreshConversations()
     })
 
     return () => {
@@ -429,45 +71,6 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       unlisten?.()
       offReconnect?.()
     }
-  }, [
-    applyConversationUpsert,
-    applyConversationRemove,
-    updateConversationLocal,
-    refreshConversations,
-  ])
-
-  const getBranch = useCallback(
-    (folderId: number) => branches.get(folderId),
-    [branches]
-  )
-
-  const setBranch = useCallback((folderId: number, branch: string | null) => {
-    setBranches((prev) => {
-      const next = new Map(prev)
-      next.set(folderId, branch)
-      return next
-    })
-  }, [])
-
-  const upsertFolder = useCallback((detail: FolderDetail) => {
-    const upsert = (prev: FolderDetail[]) => {
-      const idx = prev.findIndex((f) => f.id === detail.id)
-      if (idx >= 0) {
-        const updated = [...prev]
-        updated[idx] = detail
-        return updated
-      }
-      return [...prev, detail]
-    }
-    // Mirror the backend's list split: hidden chat folders are excluded from
-    // `list_open_folder_details` (the user-facing `folders` list) but kept in
-    // `list_all_folder_details` (`allFolders`, for by-id cwd / active-folder
-    // lookups). Seeding a chat folder into `folders` would render a "Chat"
-    // header row in the sidebar until the next refetch.
-    if (detail.kind !== "chat") {
-      setFolders(upsert)
-    }
-    setAllFolders(upsert)
   }, [])
 
   // Subscribe to the global `folder://changed` side-channel so a folder created
@@ -485,13 +88,14 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
         FOLDER_CHANGED_EVENT,
         (change) => {
           if (change.kind === "upsert") {
-            upsertFolder(change.folder)
+            const store = useAppWorkspaceStore.getState()
+            store.upsertFolder(change.folder)
             // Only seed the branch when the event actually carries one. A
             // freshly-minted worktree row stores `git_branch: null` (resolved
             // later by git-head detection), and re-broadcasting an existing root
             // must not clobber its already-known in-memory branch with null.
             if (change.folder.git_branch) {
-              setBranch(change.folder.id, change.folder.git_branch)
+              store.setBranch(change.folder.id, change.folder.git_branch)
             }
           }
         }
@@ -504,7 +108,7 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     // broadcaster (receiver_count == 0); a full folder re-fetch on reconnect
     // reconciles. Returns null on desktop IPC (no disconnect window) → no-op.
     const offReconnect = onTransportReconnect(() => {
-      void fetchFolders()
+      void useAppWorkspaceStore.getState().fetchFolders()
     })
 
     return () => {
@@ -512,193 +116,29 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       unlisten?.()
       offReconnect?.()
     }
-  }, [upsertFolder, setBranch, fetchFolders])
-
-  const openFolder = useCallback(
-    async (path: string) => {
-      const detail = await apiOpenFolder(path)
-      upsertFolder(detail)
-      setBranches((prev) => {
-        const next = new Map(prev)
-        next.set(detail.id, detail.git_branch ?? null)
-        return next
-      })
-      void refreshConversations()
-      return detail
-    },
-    [refreshConversations, upsertFolder]
-  )
-
-  const openWorktreeFolder = useCallback(
-    async (path: string, sourceFolderId: number) => {
-      const detail = await apiOpenWorktreeFolder(path, sourceFolderId)
-      upsertFolder(detail)
-      setBranches((prev) => {
-        const next = new Map(prev)
-        next.set(detail.id, detail.git_branch ?? null)
-        return next
-      })
-      void refreshConversations()
-      return detail
-    },
-    [refreshConversations, upsertFolder]
-  )
-
-  const addFolderToWorkspaceById = useCallback(
-    async (folderId: number) => {
-      const detail = await apiOpenFolderById(folderId)
-      upsertFolder(detail)
-      setBranches((prev) => {
-        const next = new Map(prev)
-        next.set(detail.id, detail.git_branch ?? null)
-        return next
-      })
-      void refreshConversations()
-      return detail
-    },
-    [refreshConversations, upsertFolder]
-  )
-
-  const removeFolderFromWorkspace = useCallback(
-    async (folderId: number) => {
-      await apiRemoveFolderFromWorkspace(folderId)
-      setFolders((prev) => prev.filter((f) => f.id !== folderId))
-      setBranches((prev) => {
-        if (!prev.has(folderId)) return prev
-        const next = new Map(prev)
-        next.delete(folderId)
-        return next
-      })
-      void refreshConversations()
-    },
-    [refreshConversations]
-  )
-
-  const reorderFolders = useCallback(async (ids: number[]) => {
-    let prevFoldersSnapshot: FolderDetail[] | null = null
-    let prevAllFoldersSnapshot: FolderDetail[] | null = null
-
-    const reorderByIds = (prev: FolderDetail[]) => {
-      const byId = new Map(prev.map((f) => [f.id, f]))
-      const next: FolderDetail[] = []
-      ids.forEach((id, idx) => {
-        const folder = byId.get(id)
-        if (folder) {
-          next.push({ ...folder, sort_order: idx + 1 })
-          byId.delete(id)
-        }
-      })
-      // Keep folders not included in `ids` at the end, preserving relative order.
-      for (const f of prev) {
-        if (byId.has(f.id)) next.push(f)
-      }
-      return next
-    }
-
-    setFolders((prev) => {
-      prevFoldersSnapshot = prev
-      return reorderByIds(prev)
-    })
-    setAllFolders((prev) => {
-      prevAllFoldersSnapshot = prev
-      return reorderByIds(prev)
-    })
-
-    try {
-      await apiReorderFolders(ids)
-    } catch (err) {
-      if (prevFoldersSnapshot) setFolders(prevFoldersSnapshot)
-      if (prevAllFoldersSnapshot) setAllFolders(prevAllFoldersSnapshot)
-      throw err
-    }
   }, [])
 
-  const refreshFolder = useCallback(async (id: number) => {
-    try {
-      const detail = await apiGetFolder(id)
-      const patch = (prev: FolderDetail[]) => {
-        const idx = prev.findIndex((f) => f.id === id)
-        if (idx < 0) return prev
-        const updated = [...prev]
-        updated[idx] = detail
-        return updated
-      }
-      setFolders(patch)
-      setAllFolders(patch)
-      setBranches((prev) => {
-        const next = new Map(prev)
-        next.set(id, detail.git_branch ?? null)
-        return next
-      })
-    } catch (err) {
-      console.error("[AppWorkspace] refreshFolder failed:", err)
-    }
-  }, [])
-
-  const refreshFolders = useCallback(async () => {
-    await fetchFolders()
-  }, [fetchFolders])
-
-  const togglePinFolder = useCallback(
-    async (folderId: number) => {
-      // Look up the current pin state from either list (folders is the open
-      // list, allFolders is the full list) before flipping it on the server.
-      const existing =
-        folders.find((f) => f.id === folderId) ??
-        allFolders.find((f) => f.id === folderId)
-      if (!existing) return
-      const nextPinned = !existing.is_pinned
-      try {
-        await apiUpdateFolderPinned(folderId, nextPinned)
-        // Reload ordering from the backend so both sections reflect the
-        // canonical sort_order after the transactional top-insert.
-        await fetchFolders()
-      } catch (err) {
-        console.error("[AppWorkspace] togglePinFolder failed:", err)
-        throw err
-      }
-    },
-    [folders, allFolders, fetchFolders]
+  // Branch polling: only poll the active folder. Subscribes to the resolved
+  // path (a primitive) rather than `allFolders`, so folder-list churn doesn't
+  // restart the poll — only an actual active-folder change does.
+  const activeFolderId = useAppWorkspaceStore((s) => s.activeFolderId)
+  const activeFolderPath = useAppWorkspaceStore((s) =>
+    s.activeFolderId == null
+      ? null
+      : (s.allFolders.find((f) => f.id === s.activeFolderId)?.path ?? null)
   )
-
-  // Branch polling: only poll the active folder.
   useEffect(() => {
-    if (activeFolderId == null) return
+    if (activeFolderId == null || activeFolderPath == null) return
     const folderId = activeFolderId
-    const folder = allFolders.find((f) => f.id === folderId)
-    if (!folder) return
 
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const poll = async () => {
       try {
-        const head = await getGitHead(folder.path)
+        const head = await getGitHead(activeFolderPath)
         if (cancelled) return
-        // `branches` stays the display branch name (null when detached or
-        // non-repo) — unchanged contract for tab-bar/context-bar consumers.
-        setBranches((prev) => {
-          const existing = prev.get(folderId)
-          if (existing === head.branch) return prev
-          const next = new Map(prev)
-          next.set(folderId, head.branch)
-          return next
-        })
-        setGitHeads((prev) => {
-          const existing = prev.get(folderId)
-          if (
-            existing &&
-            existing.is_repo === head.is_repo &&
-            existing.branch === head.branch &&
-            existing.detached === head.detached &&
-            existing.short_sha === head.short_sha
-          ) {
-            return prev
-          }
-          const next = new Map(prev)
-          next.set(folderId, head)
-          return next
-        })
+        useAppWorkspaceStore.getState().applyGitHead(folderId, head)
         // Poll a repo briskly to catch branch switches; back off otherwise.
         const delay = head.is_repo ? 10_000 : 60_000
         timer = setTimeout(poll, delay)
@@ -715,102 +155,28 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [activeFolderId, allFolders])
+  }, [activeFolderId, activeFolderPath])
 
-  const stats = useMemo(
-    () => (conversations.length > 0 ? computeStats(conversations) : null),
-    [conversations]
-  )
-
-  const value = useMemo<AppWorkspaceContextValue>(
-    () => ({
-      folders,
-      allFolders,
-      foldersHydrated,
-      foldersLoading,
-      getFolder,
-      conversations,
-      conversationsLoading,
-      conversationsError,
-      refreshConversations,
-      updateConversationLocal,
-      syncConversationSummaryLocal,
-      branches,
-      gitHeads,
-      getBranch,
-      setBranch,
-      upsertFolder,
-      openFolder,
-      openWorktreeFolder,
-      addFolderToWorkspaceById,
-      removeFolderFromWorkspace,
-      reorderFolders,
-      togglePinFolder,
-      refreshFolder,
-      refreshFolders,
-      stats,
-      activeFolderId,
-      setActiveFolderId,
-    }),
-    [
-      folders,
-      allFolders,
-      foldersHydrated,
-      foldersLoading,
-      getFolder,
-      conversations,
-      conversationsLoading,
-      conversationsError,
-      refreshConversations,
-      updateConversationLocal,
-      syncConversationSummaryLocal,
-      branches,
-      gitHeads,
-      getBranch,
-      setBranch,
-      upsertFolder,
-      openFolder,
-      openWorktreeFolder,
-      addFolderToWorkspaceById,
-      removeFolderFromWorkspace,
-      reorderFolders,
-      togglePinFolder,
-      refreshFolder,
-      refreshFolders,
-      stats,
-      activeFolderId,
-    ]
-  )
-
-  return (
-    <AppWorkspaceContext.Provider value={value}>
-      {children}
-    </AppWorkspaceContext.Provider>
-  )
+  return <>{children}</>
 }
 
 /**
- * Bridges backend `conversation_status_changed` events into the workspace's
- * local conversations list. The DB row is already updated by the backend
- * before this event fires, so this only patches the in-memory summary.
+ * Bridges backend conversation lifecycle events into the workspace's local
+ * conversations list. The DB row is already updated by the backend before these
+ * events fire, so status can patch in memory; a newly linked conversation may
+ * not have a complete local summary yet, so it reconciles with a list refresh.
  *
- * Must be rendered inside both `AppWorkspaceProvider` (for
- * `useAppWorkspace`) and `AcpConnectionsProvider` (for `useAcpEvent`).
+ * Must be rendered inside `AcpConnectionsProvider` (for `useAcpEvent`).
  */
 export function ConversationStatusEventBridge() {
-  const { syncConversationSummaryLocal, updateConversationLocal } =
-    useAppWorkspace()
   useAcpEvent((envelope: EventEnvelope) => {
+    const store = useAppWorkspaceStore.getState()
     switch (envelope.type) {
       case "conversation_linked":
-        syncConversationSummaryLocal({
-          id: envelope.conversation_id,
-          folderId: envelope.folder_id,
-          status: "in_progress",
-        })
+        void store.refreshConversations()
         return
       case "conversation_status_changed":
-        updateConversationLocal(envelope.conversation_id, {
+        store.updateConversationLocal(envelope.conversation_id, {
           status: envelope.status,
         })
         return

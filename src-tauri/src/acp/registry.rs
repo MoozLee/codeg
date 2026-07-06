@@ -300,8 +300,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "CodeBuddy",
             description: "Tencent Cloud's official AI coding assistant (ACP)",
             distribution: AgentDistribution::Npx {
-                version: "2.114.2",
-                package: "@tencent-ai/codebuddy-code@2.114.2",
+                version: "2.117.0",
+                package: "@tencent-ai/codebuddy-code@2.117.0",
                 cmd: "codebuddy",
                 args: &["--acp"],
                 env: &[],
@@ -314,8 +314,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             name: "Kimi Code",
             description: "Moonshot AI's official CLI coding assistant (ACP)",
             distribution: AgentDistribution::Npx {
-                version: "0.22.1",
-                package: "@moonshot-ai/kimi-code@0.22.1",
+                version: "0.22.3",
+                package: "@moonshot-ai/kimi-code@0.22.3",
                 cmd: "kimi",
                 args: &["acp"],
                 env: &[],
@@ -459,14 +459,14 @@ mod tests {
         assert_npx_version(AgentType::Cline, "3.0.34", "cline@3.0.34", None);
         assert_npx_version(
             AgentType::CodeBuddy,
-            "2.114.2",
-            "@tencent-ai/codebuddy-code@2.114.2",
+            "2.117.0",
+            "@tencent-ai/codebuddy-code@2.117.0",
             Some("22.0.0"),
         );
         assert_npx_version(
             AgentType::KimiCode,
-            "0.22.1",
-            "@moonshot-ai/kimi-code@0.22.1",
+            "0.22.3",
+            "@moonshot-ai/kimi-code@0.22.3",
             Some("22.19.0"),
         );
         assert_npx_version(
@@ -476,7 +476,11 @@ mod tests {
             None,
         );
         assert_npx_version(AgentType::Pi, "0.0.31", "pi-acp@0.0.31", Some("22.0.0"));
-        assert_binary_version(AgentType::OpenCode, "1.17.13", "/releases/download/v1.17.13/");
+        assert_binary_version(
+            AgentType::OpenCode,
+            "1.17.13",
+            "/releases/download/v1.17.13/",
+        );
         assert_uvx_version(
             AgentType::Hermes,
             "0.18.0",

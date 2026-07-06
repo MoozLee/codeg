@@ -8,7 +8,7 @@ import { useLocale, useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
-import { useAppWorkspace } from "@/contexts/app-workspace-context"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { listAllConversations } from "@/lib/api"
@@ -50,7 +50,7 @@ export function SearchCommandDialog({
   const dateFnsLocale =
     locale === "zh-CN" ? zhCN : locale === "zh-TW" ? zhTW : enUS
   const { activeFolder: folder, activeFolderId } = useActiveFolder()
-  const { conversations: allConversations } = useAppWorkspace()
+  const allConversations = useAppWorkspaceStore((s) => s.conversations)
   const folderId = activeFolderId ?? 0
   const conversations = useMemo(
     () =>

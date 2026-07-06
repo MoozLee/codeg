@@ -111,6 +111,22 @@ describe("rehypeCommandBadges", () => {
     expect(skillAnchors(tree)).toEqual([])
   })
 
+  it("skips raw single-dollar math before the math plugin loads", () => {
+    const tree = run(root([el("p", [text("the value $x$ holds")])]))
+    expect(skillAnchors(tree)).toEqual([])
+  })
+
+  it("skips raw dollar math expressions with command-like text", () => {
+    const tree = run(root([el("p", [text("solve $x + /y$ next")])]))
+    expect(skillAnchors(tree)).toEqual([])
+  })
+
+  it("does not treat two unclosed `$skill` tokens as math", () => {
+    const tree = run(root([el("p", [text("$deploy now $rollback")])]))
+    const anchors = skillAnchors(tree)
+    expect(anchors.map(anchorText)).toEqual(["$deploy", "$rollback"])
+  })
+
   it("leaves a token-free tree untouched (same text node identity)", () => {
     const original = text("hello world")
     const tree = run(root([el("p", [original])]))

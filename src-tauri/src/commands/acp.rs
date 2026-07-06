@@ -8358,10 +8358,10 @@ wire_api = "chat"
 
     #[test]
     fn fingerprint_config_is_deterministic_and_excludes_volatile_keys() {
-        let agent = AgentType::Codex;
+        let agent = AgentType::OpenClaw;
         let mut env = BTreeMap::new();
-        env.insert("OPENAI_BASE_URL".to_string(), "https://a".to_string());
-        env.insert("OPENAI_API_KEY".to_string(), "k1".to_string());
+        env.insert("OPENCLAW_BASE_URL".to_string(), "https://a".to_string());
+        env.insert("OPENCLAW_API_KEY".to_string(), "k1".to_string());
 
         // Same inputs → same fingerprint (the native-config read is identical
         // across all calls in this test, so only the env varies).

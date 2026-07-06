@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef } from "react"
 import { usePathname } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { useAppWorkspace } from "@/contexts/app-workspace-context"
+import { useTabActions, useTabStore } from "@/contexts/tab-context"
 import {
   buildWorkspaceUrlAfterBootstrap,
   hasAnyConsumedWorkspaceBootstrap,
@@ -12,7 +12,7 @@ import {
   parseWorkspaceBootstrap,
   rememberTabPersistenceMode,
 } from "@/contexts/tab-shared"
-import { useTabContext } from "@/contexts/tab-context"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import {
   focusConversationWindowIfOpen,
   getFolderConversation,
@@ -37,10 +37,9 @@ function parseConversationIdFromWindowLabel(
 export function DeepLinkBootstrap() {
   const tSidebar = useTranslations("Folder.sidebar")
   const tSidebarToasts = useTranslations("Folder.sidebar.toasts")
-  const { foldersHydrated, folders, addFolderToWorkspaceById, conversations } =
-    useAppWorkspace()
-  const { tabsHydrated, tabs, activeTabId, openTab, openNewConversationTab } =
-    useTabContext()
+  const foldersHydrated = useAppWorkspaceStore((s) => s.foldersHydrated)
+  const tabsHydrated = useTabStore((s) => s.tabsHydrated)
+  const { openTab, openNewConversationTab } = useTabActions()
   const pathname = usePathname()
   const lastHandledSearchRef = useRef<string | null>(null)
 
@@ -107,11 +106,12 @@ export function DeepLinkBootstrap() {
         if (resolvedBootstrapTarget?.kind === "conversation") {
           const { folderId, conversationId, agentType } =
             resolvedBootstrapTarget
+          const store = useAppWorkspaceStore.getState()
 
-          let folder = folders.find((f) => f.id === folderId)
+          let folder = store.folders.find((f) => f.id === folderId)
           if (!folder) {
             try {
-              folder = await addFolderToWorkspaceById(folderId)
+              folder = await store.addFolderToWorkspaceById(folderId)
             } catch (err) {
               console.error("[DeepLinkBootstrap] open folder failed:", err)
               toast.error(tSidebarToasts("openFolderFailed"))
@@ -119,6 +119,7 @@ export function DeepLinkBootstrap() {
             }
           }
 
+          const { conversations } = useAppWorkspaceStore.getState()
           const hasConversation = conversations.some(
             (conversation) =>
               conversation.id === conversationId &&
@@ -166,10 +167,11 @@ export function DeepLinkBootstrap() {
             return
           }
 
-          let folder = folders.find((entry) => entry.id === folderId)
+          const store = useAppWorkspaceStore.getState()
+          let folder = store.folders.find((entry) => entry.id === folderId)
           if (!folder) {
             try {
-              folder = await addFolderToWorkspaceById(folderId)
+              folder = await store.addFolderToWorkspaceById(folderId)
             } catch (err) {
               console.error(
                 "[DeepLinkBootstrap] open draft folder failed:",
@@ -189,9 +191,6 @@ export function DeepLinkBootstrap() {
       }
     })()
   }, [
-    addFolderToWorkspaceById,
-    conversations,
-    folders,
     foldersHydrated,
     openNewConversationTab,
     openTab,
@@ -199,8 +198,6 @@ export function DeepLinkBootstrap() {
     tSidebar,
     tSidebarToasts,
     tabsHydrated,
-    activeTabId,
-    tabs.length,
   ])
 
   useEffect(() => {
@@ -228,10 +225,11 @@ export function DeepLinkBootstrap() {
           const detail = await getFolderConversation(conversationId)
           const folderId = detail.summary.folder_id
           const agentType = detail.summary.agent_type
+          const store = useAppWorkspaceStore.getState()
 
-          let folder = folders.find((entry) => entry.id === folderId)
+          let folder = store.folders.find((entry) => entry.id === folderId)
           if (!folder) {
-            folder = await addFolderToWorkspaceById(folderId)
+            folder = await store.addFolderToWorkspaceById(folderId)
           }
 
           openTab(
@@ -254,7 +252,7 @@ export function DeepLinkBootstrap() {
       disposed = true
       unlisten?.()
     }
-  }, [addFolderToWorkspaceById, folders, openTab])
+  }, [openTab])
 
   return null
 }
@@ -276,32 +274,16 @@ type FocusRequest = {
  * arrives before folders/tabs hydrate is queued and replayed.
  */
 export function PetFocusBridge() {
-  const { foldersHydrated, folders, addFolderToWorkspaceById } =
-    useAppWorkspace()
-  const { tabsHydrated, openTab } = useTabContext()
+  const foldersHydrated = useAppWorkspaceStore((s) => s.foldersHydrated)
+  const tabsHydrated = useTabStore((s) => s.tabsHydrated)
+  const { openTab } = useTabActions()
 
-  const stateRef = useRef({
-    foldersHydrated,
-    folders,
-    addFolderToWorkspaceById,
-    tabsHydrated,
-    openTab,
-  })
+  // Workspace state is read via getState() at attempt time; only the tab
+  // half still needs a ref mirror (it lives in a context, not a store).
+  const stateRef = useRef({ tabsHydrated, openTab })
   useEffect(() => {
-    stateRef.current = {
-      foldersHydrated,
-      folders,
-      addFolderToWorkspaceById,
-      tabsHydrated,
-      openTab,
-    }
-  }, [
-    foldersHydrated,
-    folders,
-    addFolderToWorkspaceById,
-    tabsHydrated,
-    openTab,
-  ])
+    stateRef.current = { tabsHydrated, openTab }
+  }, [tabsHydrated, openTab])
 
   // Holds the latest focus request until the workspace has hydrated. The event
   // is one-shot, so a pet-panel click during startup/reload (before folders &
@@ -311,16 +293,16 @@ export function PetFocusBridge() {
   const attempt = useCallback(() => {
     const req = pendingRef.current
     if (!req) return
-    const s = stateRef.current
-    if (!s.foldersHydrated || !s.tabsHydrated) return // wait for hydration
+    const workspace = useAppWorkspaceStore.getState()
+    if (!workspace.foldersHydrated || !stateRef.current.tabsHydrated) return
     // One-shot after hydration (mirrors DeepLinkBootstrap): clear before the
     // async work so a later state change can't double-open.
     pendingRef.current = null
     void (async () => {
       // Ensure the folder is in the workspace so the tab has a home.
-      if (!s.folders.some((f) => f.id === req.folderId)) {
+      if (!workspace.folders.some((f) => f.id === req.folderId)) {
         try {
-          await s.addFolderToWorkspaceById(req.folderId)
+          await workspace.addFolderToWorkspaceById(req.folderId)
         } catch (err) {
           console.error("[PetFocusBridge] open folder failed:", err)
           return

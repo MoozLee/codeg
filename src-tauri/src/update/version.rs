@@ -20,8 +20,7 @@ pub const UPDATE_MANIFEST_URL: &str =
 
 /// Deterministic base for "latest" release assets (server tarballs + their
 /// `.sig` detached signatures). Same channel as the manifest.
-pub const RELEASE_DOWNLOAD_BASE: &str =
-    "https://github.com/MoozLee/codeg/releases/latest/download";
+pub const RELEASE_DOWNLOAD_BASE: &str = "https://github.com/MoozLee/codeg/releases/latest/download";
 
 /// Short-timeout client for the small manifest fetch. Proxy env vars are
 /// sampled at build time, so `init_proxy_from_db` must run before the first
