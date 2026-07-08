@@ -64,6 +64,7 @@ import {
   PetFocusBridge,
 } from "@/components/workspace/deep-link-bootstrap"
 import { WorkspaceOpenFolderListener } from "@/components/workspace/workspace-open-folder-listener"
+import { HeavyPluginsWarmup } from "@/components/ai-elements/heavy-plugins-warmup"
 import { parseWorkspaceBootstrap } from "@/contexts/tab-shared"
 import {
   ResizableHandle,
@@ -893,6 +894,7 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                     >
                       <WorkspaceDocumentTitle />
                       <TabKeysSync />
+                      <HeavyPluginsWarmup />
                       <DeepLinkBootstrap />
                       <PetFocusBridge />
                       {/* Always mounted: external-change conflicts must be

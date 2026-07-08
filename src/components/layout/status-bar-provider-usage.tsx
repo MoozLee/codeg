@@ -119,6 +119,9 @@ export function StatusBarProviderUsage() {
     subscribe<ProviderUsageResult>(PROVIDER_USAGE_UPDATED_EVENT, (payload) => {
       if (!payload) return
       setResults((prev) => ({ ...prev, [payload.config_id]: payload }))
+      void listProviderUsageConfigs()
+        .then(setConfigs)
+        .catch(() => {})
     })
       .then((fn) => {
         if (cancelled) {

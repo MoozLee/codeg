@@ -31,6 +31,13 @@ function prefixOf(value: string): string | null {
   return value.slice(0, idx)
 }
 
+function isValidSelectOption(option: SessionConfigSelectOptionInfo): boolean {
+  const value = option.value.trim()
+  if (!value) return false
+  const lower = value.toLowerCase()
+  return lower !== "null" && lower !== "undefined"
+}
+
 // Split a display name on its first "/", trimming both sides. Returns null when
 // there's no clean split (no slash, or an empty head/tail).
 function splitNamePrefix(name: string): { head: string; tail: string } | null {
@@ -122,14 +129,15 @@ export function deriveModelGroups(
   const kind = option.kind
   if (kind.groups.length > 0) return null
 
-  const prefixes = kind.options.map((opt) => prefixOf(opt.value))
+  const options = kind.options.filter(isValidSelectOption)
+  const prefixes = options.map((opt) => prefixOf(opt.value))
   if (!prefixes.some((prefix) => prefix !== null)) return null
 
   const floating: SessionConfigSelectOptionInfo[] = []
   const order: string[] = []
   const byPrefix = new Map<string, SessionConfigSelectOptionInfo[]>()
 
-  kind.options.forEach((opt, index) => {
+  options.forEach((opt, index) => {
     const prefix = prefixes[index]
     if (prefix === null) {
       floating.push(opt)
@@ -182,13 +190,21 @@ export function modelListGroups(
   const derived = deriveModelGroups(option)
   if (derived) return derived
   if (kind.groups.length > 0) {
-    return kind.groups.map((group) => ({
-      key: group.group,
-      name: group.name,
-      options: group.options,
-    }))
+    return kind.groups
+      .map((group) => ({
+        key: group.group,
+        name: group.name,
+        options: group.options.filter(isValidSelectOption),
+      }))
+      .filter((group) => group.options.length > 0)
   }
-  return [{ key: "__all__", name: null, options: kind.options }]
+  return [
+    {
+      key: "__all__",
+      name: null,
+      options: kind.options.filter(isValidSelectOption),
+    },
+  ]
 }
 
 // Filter a group list by a search query, matching each option's display name OR

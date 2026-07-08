@@ -85,6 +85,13 @@ vi.mock("@/lib/api", () => ({
   acpCancel: vi.fn(),
   acpRespondPermission: vi.fn(),
   acpTouchConnection: vi.fn(),
+  // Imported by the conversation runtime store (a real dependency of the
+  // provider via the background-activity bridge). The settled path fires a
+  // refetchDetail; reject it so the store's error path absorbs it (these
+  // tests assert the refetch was ISSUED, not its payload).
+  getFolderConversation: vi.fn(async () => {
+    throw new Error("detail not seeded in this suite")
+  }),
 }))
 
 function Probe() {
@@ -711,5 +718,267 @@ describe("AcpConnectionsProvider liveMessage sink (mirror out of React)", () => 
     expect(order[0]).toBe("sink")
     expect(order.filter((x) => x === "sink")).toHaveLength(1)
     expect(order.indexOf("sink")).toBeLessThan(order.indexOf("notify"))
+  })
+})
+
+describe("out-of-turn wire guard + background activity", () => {
+  async function mountOwnerConnection() {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    return latestAttachHandlers()
+  }
+
+  it("drops streaming deltas while the connection is not prompting (Bug-A guard)", async () => {
+    const handlers = await mountOwnerConnection()
+
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "connected",
+    })
+    // Out-of-turn delta (the backend idle loop forwards these between turns):
+    // must NOT graft onto a liveMessage. The next status_changed flushes the
+    // streaming queue BEFORE the status dispatch, so the drop is exercised
+    // deterministically with the pre-flip status still "connected".
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "content_delta",
+      text: "out-of-turn garbage",
+    })
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+    // Prompting resets liveMessage to an empty shell; the dropped delta must
+    // not appear in it.
+    const afterPrompting = h.store!.getConnection(TAB)
+    expect(afterPrompting?.liveMessage?.content ?? []).toEqual([])
+
+    // In-turn delta flows normally (flushed by the next non-streaming event).
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "content_delta",
+      text: "real reply",
+    })
+    emitAcpEvent(handlers, {
+      seq: 5,
+      connection_id: "spawned-conn",
+      type: "usage_update",
+      used: 1,
+      size: 100,
+    })
+    const conn = h.store!.getConnection(TAB)
+    expect(conn?.liveMessage?.content).toEqual([
+      { type: "text", text: "real reply" },
+    ])
+  })
+
+  it("stale snapshots still recover background and config-stale fields", async () => {
+    const handlers = await mountOwnerConnection()
+    emitAcpEvent(handlers, {
+      seq: 5,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "connected",
+    })
+    h.denormalizeSnapshot.mockReturnValue({
+      connectionId: "spawned-conn",
+      status: "connected",
+      sessionId: "sess-1",
+      modes: null,
+      configOptions: null,
+      availableCommands: [],
+      usage: null,
+      liveMessage: null,
+      pendingPermission: null,
+      pendingAskQuestion: null,
+      pendingUserMessage: null,
+      promptCapabilities: null,
+      selectorsReady: true,
+      supportsFork: false,
+      configStale: true,
+      configStaleKind: "agent_config",
+      backgroundOutstanding: 2,
+      eventSeq: 4,
+      activeDelegations: [],
+    })
+
+    hydrateSnapshot(handlers, {
+      connection_id: "spawned-conn",
+      conversation_id: 42,
+      folder_id: null,
+      status: "connected",
+      external_id: "sess-1",
+      live_message: null,
+      active_tool_calls: [],
+      pending_permission: null,
+      pending_question: null,
+      pending_user_message: null,
+      active_delegations: [],
+      feedback: [],
+      background_outstanding: 2,
+      feedback_tool_available: false,
+      modes: null,
+      current_mode: null,
+      config_options: null,
+      prompt_capabilities: null,
+      usage: null,
+      fork_supported: false,
+      available_commands: [],
+      selectors_ready: true,
+      config_stale: true,
+      config_stale_kind: "agent_config",
+      event_seq: 4,
+    })
+
+    const conn = h.store!.getConnection(TAB)
+    expect(conn?.lastAppliedSeq).toBe(5)
+    expect(conn?.backgroundOutstanding).toBe(2)
+    expect(conn?.configStale).toBe(true)
+    expect(conn?.configStaleKind).toBe("agent_config")
+  })
+
+  it("background_activity mirrors outstanding, applies overlay turns, and notifies settled tasks", async () => {
+    const { useConversationRuntimeStore, resetConversationRuntimeStore } =
+      await import("@/stores/conversation-runtime-store")
+    const { sendSystemNotification } = await import("@/lib/notification")
+    const notify = vi.mocked(sendSystemNotification)
+    notify.mockClear()
+    resetConversationRuntimeStore()
+    // Bind the agent session id to a runtime conversation so the overlay
+    // bridge can resolve it. Model the draft-started shape (the common QA
+    // flow): the runtime session key is a virtual NEGATIVE id and the real
+    // DB row id (42) is bound separately — the settle refetch must fetch
+    // with 42, not the virtual key (which the backend would reject,
+    // silently leaving the launch card frozen on its ack).
+    const VIRTUAL = -9
+    useConversationRuntimeStore
+      .getState()
+      .actions.setExternalId(VIRTUAL, "sess-1")
+    useConversationRuntimeStore
+      .getState()
+      .actions.setDbConversationId(VIRTUAL, 42)
+
+    const handlers = await mountOwnerConnection()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "background_activity",
+      session_id: "sess-1",
+      turns: [
+        {
+          id: "bg-100-0",
+          role: "assistant",
+          blocks: [{ type: "text", text: "build finished cleanly" }],
+          timestamp: "2026-07-07T03:47:08.000Z",
+        },
+      ],
+      outstanding: 2,
+      settled: [
+        {
+          task_id: "agent1",
+          status: "completed",
+          summary: 'Agent "Run pnpm build" finished',
+        },
+      ],
+      watermark: 4096,
+    })
+
+    // 1. outstanding mirrored onto the connection (sweep exemption + chip).
+    //    This event already carries visible turns, so the settled task must not
+    //    leave the chip in a stale "syncing results" state.
+    expect(h.store!.getConnection(TAB)?.backgroundOutstanding).toBe(2)
+    expect(h.store!.getConnection(TAB)?.backgroundSettleSyncingSince).toBeNull()
+
+    // 2. overlay turn upserted into the runtime session — under the RUNTIME
+    //    key (that's the session the panel renders).
+    const session = useConversationRuntimeStore
+      .getState()
+      .byConversationId.get(VIRTUAL)
+    expect(session?.backgroundTurns).toHaveLength(1)
+    expect(session?.backgroundTurns[0]).toMatchObject({
+      watermark: 4096,
+      turn: { id: "bg-100-0" },
+    })
+
+    // 3. one OS notification per settled task, carrying its summary.
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify.mock.calls[0][1]).toContain('Agent "Run pnpm build" finished')
+
+    // 4. a settlement folds into persisted turns via a detail refetch (the
+    //    parser joins ack + notification into the card's terminal state).
+    //    The fetch must go out with the DB row id, not the runtime key.
+    const { getFolderConversation } = await import("@/lib/api")
+    expect(vi.mocked(getFolderConversation)).toHaveBeenCalledWith(42)
+
+    // Accounting-only follow-up (work settles to zero): mirror updates, no
+    // duplicate overlay entries, no extra notification.
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "background_activity",
+      session_id: "sess-1",
+      outstanding: 0,
+      watermark: 4200,
+    })
+    expect(h.store!.getConnection(TAB)?.backgroundOutstanding).toBe(0)
+    expect(
+      useConversationRuntimeStore.getState().byConversationId.get(VIRTUAL)
+        ?.backgroundTurns
+    ).toHaveLength(1)
+    expect(notify).toHaveBeenCalledTimes(1)
+    // Accounting-only events preserve the current bridge state.
+    expect(h.store!.getConnection(TAB)?.backgroundSettleSyncingSince).toBeNull()
+
+    // A settlement without visible turns arms the syncing bridge while the
+    // agent's reaction is still being generated.
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "background_activity",
+      session_id: "sess-1",
+      outstanding: 0,
+      settled: [
+        {
+          task_id: "agent2",
+          status: "completed",
+          summary: "Second background task finished",
+        },
+      ],
+      watermark: 4300,
+    })
+    expect(h.store!.getConnection(TAB)?.backgroundSettleSyncingSince).toEqual(
+      expect.any(Number)
+    )
+    expect(notify).toHaveBeenCalledTimes(2)
+
+    // The reaction turn arriving (turns-only event) disarms the bridge.
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "background_activity",
+      session_id: "sess-1",
+      turns: [
+        {
+          id: "bg-100-1",
+          role: "assistant",
+          blocks: [{ type: "text", text: "here is what the build produced" }],
+          timestamp: "2026-07-07T03:47:12.000Z",
+        },
+      ],
+      outstanding: 0,
+      watermark: 4400,
+    })
+    expect(h.store!.getConnection(TAB)?.backgroundSettleSyncingSince).toBeNull()
+
+    resetConversationRuntimeStore()
   })
 })

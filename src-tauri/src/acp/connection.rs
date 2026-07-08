@@ -29,6 +29,7 @@ use sacp::{
 use sacp_tokio::AcpAgent;
 use tokio::sync::{mpsc, RwLock};
 
+use crate::acp::background_watch;
 use crate::acp::error::AcpError;
 use crate::acp::file_system_runtime::{FileSystemRuntime, FileSystemRuntimeError};
 use crate::acp::registry::{self, AgentDistribution};
@@ -80,7 +81,7 @@ fn merge_agent_env(
     merged.into_iter().collect()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionConfigCommandValue {
     ValueId(String),
     Boolean(bool),
@@ -1707,6 +1708,30 @@ async fn run_connection(
     let perms = pending_perms.clone();
     let state_outer = Arc::clone(&state);
 
+    // Claude-only: tail this connection's session transcript for OUT-OF-TURN
+    // activity (async sub-agent / background-shell completions, the agent's
+    // continued work after them, cron//loop autonomous turns — none of which
+    // the wire reliably represents) and surface it as `BackgroundActivity`
+    // events; also feeds the keep-alive accounting that exempts the
+    // connection from the idle sweeps while such work is pending. Created
+    // HERE — per CONNECTION, not per conversation loop — so ONE watcher (and
+    // one prompt ledger) spans fork restarts: `run_watch` observes the
+    // session-id change and re-arms in place, carrying still-outstanding
+    // tasks and settled ids across the fork (a post-fork `SendMessage`
+    // resume must re-arm the keep-alive). The guard aborts the watcher when
+    // this connection ends. Its spawn epoch (captured before the session
+    // exists) is what lets the first arm process records written before the
+    // transcript file is discovered.
+    let prompt_ledger = background_watch::PromptLedger::shared();
+    let _bg_watch = background_watch::spawn_if_claude(
+        &connection_id,
+        agent_type,
+        Arc::clone(&state),
+        emitter.clone(),
+        cwd_string.clone(),
+        Arc::clone(&prompt_ledger),
+    );
+
     Client
         .builder()
         .name("codeg")
@@ -2065,6 +2090,7 @@ async fn run_connection(
                                 terminal_runtime.clone(),
                                 &cwd_string,
                                 supports_fork,
+                                &prompt_ledger,
                                 delegation_injection.as_ref(),
                             )
                             .await;
@@ -2085,6 +2111,7 @@ async fn run_connection(
                                 terminal_runtime.clone(),
                                 &cwd,
                                 &cwd_string,
+                                &prompt_ledger,
                                 delegation_injection.as_ref(),
                             )
                             .await;
@@ -2223,6 +2250,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd_string,
                             supports_fork,
+                            &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
                         .await;
@@ -2239,6 +2267,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd,
                             &cwd_string,
+                            &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
                         .await
@@ -2366,6 +2395,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd_string,
                             supports_fork,
+                            &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
                         .await;
@@ -2384,6 +2414,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd,
                             &cwd_string,
+                            &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
                         .await
@@ -2445,6 +2476,7 @@ async fn run_connection(
                     terminal_runtime.clone(),
                     &cwd_string,
                     supports_fork,
+                    &prompt_ledger,
                     delegation_injection.as_ref(),
                 )
                 .await;
@@ -2461,6 +2493,7 @@ async fn run_connection(
                     terminal_runtime.clone(),
                     &cwd,
                     &cwd_string,
+                    &prompt_ledger,
                     delegation_injection.as_ref(),
                 )
                 .await
@@ -2635,6 +2668,48 @@ async fn set_session_config_option_inner(
     Ok(response.config_options)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PreferredConfigResolution {
+    Skip,
+    Apply(SessionConfigCommandValue),
+    InvalidBoolean,
+}
+
+fn resolve_preferred_config_command(
+    option: Option<&SessionConfigOption>,
+    value: &str,
+) -> PreferredConfigResolution {
+    match option.map(|o| &o.kind) {
+        Some(SessionConfigKind::Select(select)) => {
+            if select.current_value.to_string() == value {
+                PreferredConfigResolution::Skip
+            } else {
+                PreferredConfigResolution::Apply(SessionConfigCommandValue::ValueId(
+                    value.to_string(),
+                ))
+            }
+        }
+        Some(SessionConfigKind::Boolean(boolean)) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            let Some(preferred) = (match normalized.as_str() {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            }) else {
+                return PreferredConfigResolution::InvalidBoolean;
+            };
+            if boolean.current_value == preferred {
+                PreferredConfigResolution::Skip
+            } else {
+                PreferredConfigResolution::Apply(SessionConfigCommandValue::Boolean(preferred))
+            }
+        }
+        Some(_) | None => {
+            PreferredConfigResolution::Apply(SessionConfigCommandValue::ValueId(value.to_string()))
+        }
+    }
+}
+
 /// Apply user-saved mode and config-option preferences to a freshly-attached
 /// session BEFORE the initial `session_modes` / `session_config_options`
 /// events are emitted to the frontend.
@@ -2692,23 +2767,20 @@ async fn apply_preferred_session_options(
         // requested config_id is absent from the advertised options — older or
         // edge-case builds accept `set_config_option` for an unadvertised "mode"
         // (see `ensure_codex_mode_option`), so let the agent decide.
-        let already_matches = options.iter().any(|o| {
-            o.id.to_string() == *config_id
-                && matches!(
-                    &o.kind,
-                    SessionConfigKind::Select(s) if s.current_value.to_string() == *value
-                )
-        });
-        if already_matches {
-            continue;
-        }
-        match set_session_config_option_inner(
-            cx,
-            &session_id,
-            config_id.clone(),
-            SessionConfigCommandValue::ValueId(value.clone()),
-        )
-        .await
+        let advertised = options.iter().find(|o| o.id.to_string() == *config_id);
+        let command_value = match resolve_preferred_config_command(advertised, value) {
+            PreferredConfigResolution::Skip => continue,
+            PreferredConfigResolution::Apply(value) => value,
+            PreferredConfigResolution::InvalidBoolean => {
+                tracing::warn!(
+                    "[ACP] skip invalid boolean preferred config \
+                     '{config_id}'='{value}' on connect"
+                );
+                continue;
+            }
+        };
+        match set_session_config_option_inner(cx, &session_id, config_id.clone(), command_value)
+            .await
         {
             Ok(updated) => options = updated,
             Err(e) => tracing::error!(
@@ -3321,6 +3393,10 @@ async fn handle_fork_or_exit(
     terminal_runtime: Arc<TerminalRuntime>,
     _cwd: &std::path::Path,
     cwd_string: &str,
+    // Threaded through from run_connection: the connection-scoped prompt
+    // ledger (the forked session's loop keeps fingerprinting into the SAME
+    // ledger the still-running watcher consumes from).
+    prompt_ledger: &background_watch::PromptLedger,
     // Threaded through from run_connection so the forked session's
     // run_conversation_loop call has the same delegation cascade
     // capability as the original.
@@ -3389,6 +3465,7 @@ async fn handle_fork_or_exit(
         terminal_runtime.clone(),
         cwd_string,
         true, // fork already succeeded on this process
+        prompt_ledger,
         delegation_injection,
     )
     .await;
@@ -3407,6 +3484,7 @@ async fn handle_fork_or_exit(
         terminal_runtime,
         _cwd,
         cwd_string,
+        prompt_ledger,
         delegation_injection,
     ))
     .await
@@ -3514,6 +3592,10 @@ async fn run_conversation_loop<'a>(
     terminal_runtime: Arc<TerminalRuntime>,
     cwd: &str,
     supports_fork: bool,
+    // Connection-scoped (created once in `run_connection`, shared across fork
+    // restarts of this loop): outgoing prompts are fingerprinted here so the
+    // transcript watcher can classify their turns as wire-rendered foreground.
+    prompt_ledger: &background_watch::PromptLedger,
     // Source of the broker reference used to cascade-cancel pending
     // delegations on parent prompt cancel / non-success TurnComplete.
     // `None` for test paths that don't wire delegation.
@@ -3570,6 +3652,11 @@ async fn run_conversation_loop<'a>(
                 blocks,
                 user_message,
             }) => {
+                // Fingerprint the outgoing prompt for the background watcher's
+                // foreground/out-of-turn classifier BEFORE the blocks are
+                // consumed: the transcript record this prompt becomes must
+                // classify as wire-rendered foreground, not overlay.
+                prompt_ledger.record_prompt_blocks(&blocks);
                 let prompt_blocks = map_prompt_blocks(blocks);
                 if prompt_blocks.is_empty() {
                     // Defensive: the manager rejects empty prompts before the
@@ -5204,6 +5291,56 @@ mod tests {
             d = d.old_text(o.to_string());
         }
         ToolCallContent::Diff(d)
+    }
+
+    #[test]
+    fn preferred_boolean_config_replays_as_boolean_command() {
+        let enabled = SessionConfigOption::boolean("enabled", "Enabled", false);
+        assert_eq!(
+            resolve_preferred_config_command(Some(&enabled), "true"),
+            PreferredConfigResolution::Apply(SessionConfigCommandValue::Boolean(true))
+        );
+
+        let disabled = SessionConfigOption::boolean("enabled", "Enabled", true);
+        assert_eq!(
+            resolve_preferred_config_command(Some(&disabled), " false "),
+            PreferredConfigResolution::Apply(SessionConfigCommandValue::Boolean(false))
+        );
+    }
+
+    #[test]
+    fn preferred_config_skips_matching_and_invalid_boolean_values() {
+        let enabled = SessionConfigOption::boolean("enabled", "Enabled", true);
+        assert_eq!(
+            resolve_preferred_config_command(Some(&enabled), "true"),
+            PreferredConfigResolution::Skip
+        );
+        assert_eq!(
+            resolve_preferred_config_command(Some(&enabled), "yes"),
+            PreferredConfigResolution::InvalidBoolean
+        );
+    }
+
+    #[test]
+    fn preferred_select_config_replays_as_value_id() {
+        let model = SessionConfigOption::select(
+            "model",
+            "Model",
+            "sonnet",
+            Vec::<SessionConfigSelectOption>::new(),
+        );
+        assert_eq!(
+            resolve_preferred_config_command(Some(&model), "opus"),
+            PreferredConfigResolution::Apply(SessionConfigCommandValue::ValueId("opus".into()))
+        );
+        assert_eq!(
+            resolve_preferred_config_command(Some(&model), "sonnet"),
+            PreferredConfigResolution::Skip
+        );
+        assert_eq!(
+            resolve_preferred_config_command(None, "yolo"),
+            PreferredConfigResolution::Apply(SessionConfigCommandValue::ValueId("yolo".into()))
+        );
     }
 
     #[test]

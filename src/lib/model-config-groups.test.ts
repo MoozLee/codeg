@@ -331,6 +331,33 @@ describe("modelListGroups", () => {
     expect(groups[0].name).toBeNull()
     expect(groups[0].options.map((o) => o.value)).toEqual(["a", "b", "c"])
   })
+
+  it("filters invalid model values from flat lists", () => {
+    const option = modelOption([
+      opt("a", "A"),
+      opt("null", "Null"),
+      opt(" undefined ", "Undefined"),
+      opt("", "Empty"),
+    ])
+    expect(modelListGroups(option)[0].options.map((o) => o.value)).toEqual([
+      "a",
+    ])
+  })
+
+  it("filters invalid model values from server groups", () => {
+    const option = modelOption([])
+    option.kind.groups = [
+      {
+        group: "fast",
+        name: "Fast",
+        options: [opt("null", "Null"), opt("a", "A")],
+      },
+      { group: "empty", name: "Empty", options: [opt("undefined", "Bad")] },
+    ]
+    const groups = modelListGroups(option)
+    expect(groups.map((g) => g.key)).toEqual(["fast"])
+    expect(groups[0].options.map((o) => o.value)).toEqual(["a"])
+  })
 })
 
 describe("filterModelGroups", () => {

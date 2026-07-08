@@ -51,12 +51,17 @@ function normalizeConfigValues(
   if (!isRecord(value)) return undefined
   const entries = Object.entries(value).flatMap(([configId, configValue]) => {
     const normalizedConfigId = nonEmptyString(configId)
-    const normalizedConfigValue = nonEmptyString(configValue)
+    const normalizedConfigValue = normalizeConfigValue(configValue)
     return normalizedConfigId && normalizedConfigValue
       ? [[normalizedConfigId, normalizedConfigValue]]
       : []
   })
   return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
+function normalizeConfigValue(value: unknown): string | undefined {
+  if (typeof value === "boolean") return value ? "true" : "false"
+  return nonEmptyString(value)
 }
 
 function normalizePrefs(value: unknown): SelectorPrefs | undefined {
@@ -163,10 +168,12 @@ export function saveModePreference(
 export function saveConfigPreference(
   agentType: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ) {
+  const normalizedValue = normalizeConfigValue(value)
+  if (!normalizedValue) return
   updatePrefs(agentType, (prefs) => ({
     ...prefs,
-    configValues: { ...prefs.configValues, [configId]: valueId },
+    configValues: { ...prefs.configValues, [configId]: normalizedValue },
   }))
 }

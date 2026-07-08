@@ -211,6 +211,7 @@ impl HermesParser {
             summary,
             turns,
             session_stats,
+            transcript_watermark: None,
         })
     }
 
