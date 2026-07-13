@@ -3998,6 +3998,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                 return t("backendErrors.turnFailedEmpty", {
                   agent: agentLabel,
                 })
+              case "grok_model_switch_incompatible_agent":
+                return t("backendErrors.grokModelSwitchIncompatibleAgent", {
+                  agent: agentLabel,
+                })
               default:
                 return e.message
             }
@@ -4031,6 +4035,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             switch (e.code) {
               case "resource_not_found":
                 return t("backendErrors.sessionLoadResourceNotFound", {
+                  agent: agentLabel,
+                })
+              case "session_unavailable":
+                return t("backendErrors.sessionLoadUnavailable", {
                   agent: agentLabel,
                 })
               default:

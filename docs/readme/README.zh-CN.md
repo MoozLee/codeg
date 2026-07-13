@@ -19,7 +19,7 @@
   <a href="./README.ar.md">العربية</a>
 </p>
 
-Codeg（Code Generation）是一个多智能体编码工作台，它将多个智能体（Claude Code、Codex CLI、OpenCode、Gemini CLI、OpenClaw、Cline、Hermes Agent、CodeBuddy、Kimi Code、Pi 等）统一到一个工作区中，支持会话聚合和多智能体协作，支持桌面安装，服务器/Docker 部署。
+Codeg（Code Generation）是一个多智能体编码工作台，它将多个智能体（Claude Code、Codex CLI、OpenCode、Gemini CLI、OpenClaw、Cline、Hermes Agent、CodeBuddy、Kimi Code、Pi、Grok Build 等）统一到一个工作区中，支持会话聚合和多智能体协作，支持桌面安装，服务器/Docker 部署。
 
 ## Fork / 发布线说明
 
@@ -30,12 +30,6 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
 ## 赞助
 
 <table>
-  <tr>
-    <td colspan="2" align="center">
-      <a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg" target="_blank"><img src="https://raw.githubusercontent.com/LeoYeAI/myclaw-sponsor-preview/main/banner.svg" alt="MyClaw.ai — Your OpenClaw Agent, Always On." /></a><br/>
-      <strong><a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg">MyClaw.ai</a></strong> — 全托管的 OpenClaw 云端实例服务，一键部署、7×24 全天候在线、数据完全由用户掌控，无需自行管理服务器。
-    </td>
-  </tr>
   <tr>
     <td align="center" width="220">
       <a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg" target="_blank"><img src="../images/compshare.png" alt="优云智算" width="160" /></a><br/>
@@ -49,6 +43,13 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
       <strong><a href="https://sui-xiang.com/register?aff=JPFCRHHBE8HE">随想AI中转站</a></strong>
     </td>
     <td>感谢随想AI中转站对本项目的赞助！随想AI中转站是一家可靠高效的 API 中继服务提供商，提供 Claude、Codex、Gemini 等的中继服务。新账户<a href="https://sui-xiang.com/register?aff=JPFCRHHBE8HE">注册</a>后每日签到就送 0.5 元测试额度，充值额度 1:1，无需订阅，按量付费。多线路冗余、跨区域容灾、自动故障切换，长链路 SSE 不中断。</td>
+  </tr>
+  <tr>
+    <td align="center" width="220">
+      <a href="https://hezu.ink/sign-up?aff=0wVz" target="_blank"><img src="../images/hezu-ink.jpg" alt="合租巴士" width="200" /></a><br/>
+      <strong><a href="https://hezu.ink/sign-up?aff=0wVz">合租巴士</a></strong>
+    </td>
+    <td>感谢合租巴士对本项目的赞助！合租巴士是一家可靠高效的 AI 中转服务平台，主要提供 Codex、Claude Code 等主流模型的高稳定中转能力，充值比例透明（1:1），Codex 倍率补贴低至 0.08。<a href="https://hezu.ink/sign-up?aff=0wVz">官网进群送 5 刀体验金</a>。</td>
   </tr>
 </table>
 
@@ -76,6 +77,7 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
 - 内置 `git worktree` 并行开发流程
 - **项目启动器** — 可视化创建新项目，实时预览效果
 - **Office 文档** — 通过内置的 officecli 工具集创建、分析、校对和编辑 .docx / .xlsx / .pptx 文件，支持在文件标签页内实时预览，随智能体编辑即时刷新
+- **科学研究** — 内置科研技能（假设生成、实验设计、统计、可视化、批判性评估、文献检索），任意智能体均可调用，按智能体管理
 - **自动化** — 将任意输入框配置保存为可复用的自动化任务，按 cron 计划或手动触发、无界面自动运行
 - **消息渠道** — 连接 Telegram、飞书、iLink（微信）等即时通讯应用到编码代理，实时接收通知、完整会话交互、远程任务控制
 - MCP 管理（本地扫描 + 市场搜索/安装）
@@ -101,6 +103,7 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
 | CodeBuddy    | `$CODEBUDDY_CONFIG_DIR/projects`      | `~/.codebuddy/projects`               | `%USERPROFILE%\\.codebuddy\\projects`                 |
 | Kimi Code    | `$KIMI_CODE_HOME/sessions`            | `~/.kimi-code/sessions`               | `%USERPROFILE%\\.kimi-code\\sessions`                 |
 | Pi           | `$PI_CODING_AGENT_SESSION_DIR`        | `~/.pi/agent/sessions`                | `%USERPROFILE%\\.pi\\agent\\sessions`                 |
+| Grok Build   | `$GROK_HOME/sessions`                 | `~/.grok/sessions`                    | `%USERPROFILE%\\.grok\\sessions`                      |
 
 > 注意：环境变量的优先级高于默认路径。
 
@@ -151,8 +154,21 @@ Codeg（Code Generation）是一个多智能体编码工作台，它将多个智
 - **创建与编辑** — 生成新文档或修改现有 .docx / .xlsx / .pptx 文件，支持图表、表格和格式设置
 - **分析与校对** — 检查文档结构、发现格式问题、校对内容
 - **实时预览** — 在文件标签页中打开 .docx / .xlsx / .pptx，即可内联渲染，随智能体编辑自动刷新——底层由常驻的 `officecli watch` 服务支撑（在 Web 和独立服务器部署中经反向代理转发，按能力鉴权）
-- **快捷操作** — 欢迎页提供「编码」和「Office」两个标签，一键将对应技能调用和提示词模板填入输入框；未对所选智能体启用的技能会显示锁定标记，并引导你前往可开启的位置
+- **快捷操作** — 欢迎页提供「编码」、「Office」和「科学研究」三个标签，一键将对应技能调用和提示词模板填入输入框；未对所选智能体启用的技能会显示锁定标记，并引导你前往可开启的位置
 - **Office 工具设置** — 专属设置页可安装 `officecli` 并通过技能×智能体矩阵管理文档技能：切换任意（技能，智能体）组合，支持一键批量启停
+
+</details>
+
+<details>
+<summary><h2>科学研究</h2></summary>
+
+将任意智能体变为严谨的科研助手。Codeg 内置一套精选的、采用 MIT 许可证的**科研技能**——从选题构思到分析再到论文撰写——它们会安装到共享的中央技能库，并按你的选择链接到相应智能体，与专家和 Office 工具集的方式完全一致。
+
+### 功能特性
+
+- **精选技能** — 假设生成、实验设计、统计功效、统计分析、探索性数据分析、科学可视化、批判性评估、同行评审、引文管理、学者评估、论文检索以及 AI 示意图
+- **快捷操作** — 欢迎页的「科学研究」标签一键将对应的技能调用和本地化提示词模板填入输入框
+- **科学研究设置** — 专属设置页通过技能×智能体矩阵管理这些技能，并以徽标标记需要 API 密钥或 Python 环境的技能
 
 </details>
 
@@ -304,6 +320,8 @@ cd codeg-server-linux-x64
 CODEG_STATIC_DIR=./web ./codeg-server
 ```
 
+> 对于无人值守的部署，请以 `--supervise` 启动，这样在就地升级失败时会自动回滚——参见[就地更新](#就地更新)。
+
 #### 方式四：Docker
 
 ```bash
@@ -334,6 +352,20 @@ CODEG_STATIC_DIR=../out ./target/release/codeg-server          # codeg-mcp 会�
 ```
 
 > 如果两个二进制分别存放在不同目录，请设置 `CODEG_MCP_BIN=/abs/path/to/codeg-mcp`，运行时才能找到协作进程；否则多智能体委托会被静默禁用。
+
+#### 就地更新
+
+服务器可从**设置 → 软件更新**自行更新：它会下载对应平台的已签名发布包，替换磁盘上的二进制文件和 Web 前端资源，然后重启——无需手动重新部署。此功能仅支持 Linux/macOS（Windows 上已禁用）。上一版本会保留为备份，因此同一界面上还提供**回滚**操作以退回到该版本。
+
+**在监护进程下运行以启用自动回滚。** 使用 `--supervise` 启动独立服务器，这样刚完成升级的进程若未能在试运行窗口内启动，便会自动还原到上一版本：
+
+```bash
+CODEG_STATIC_DIR=./web ./codeg-server --supervise
+```
+
+若不加 `--supervise`，服务器仍会就地更新（它会对自身执行 re-exec），但升级只是尽力而为：没有监护进程来自动回滚无法启动的版本。Docker 镜像已在监护进程下运行。
+
+**Docker 升级改变的是容器，而非镜像。** 就地升级会重写正在运行的容器可写层内的二进制文件和 Web 前端资源，因此它们只存在于该容器中。`/data` 卷会持久保存，但升级后的文件**不会**保留：重建容器——`docker compose up --force-recreate`、全新的 `docker run`，或在 `docker pull` 之后重建——都会重新从镜像启动，并丢弃就地升级。（单独执行 `docker pull` 只会刷新本地镜像；在重建容器之前不会有任何回退。）要让升级永久生效，请构建或拉取新版本的镜像，并基于它重建容器。
 
 #### 配置
 
@@ -407,18 +439,12 @@ Next.js 16 (Static Export) + React 19
 
 - 感谢 [LinuxDO](https://linux.do) 社区的支持
 
-## Coffee
-
-- 如果 Codeg 对你有帮助，不如请我喝杯咖啡吧
-
-<img src="../images/weixin-sponsor-light.jpg#gh-light-mode-only" alt="赞助 Codeg" width="240" />
-<img src="../images/weixin-sponsor-dark.jpg#gh-dark-mode-only" alt="赞助 Codeg" width="240" />
-
 ## 鸣谢
 
 - [ACP](https://agentclientprotocol.com)：智能体客户端协议 (ACP) 是 codeg 实现多智能体连接的基础
 - [Superpowers](https://github.com/obra/superpowers)：为 Codeg 的专家技能模块提供支持
 - [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)：为 Codeg 的 Office 文档工作流提供支持
+- [scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills)：为 Codeg 的科学研究技能提供支持（MIT 许可的子集）
 
 ## 许可证
 

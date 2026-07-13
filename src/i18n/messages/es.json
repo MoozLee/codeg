@@ -49,7 +49,9 @@
       "web_service": "Servicio Web",
       "model_providers": "Proveedores de Modelos",
       "experts": "Expertos",
+      "science": "Ciencia",
       "office_tools": "Herramientas de oficina",
+      "skill_packs": "Paquetes de habilidades",
       "quick_messages": "Mensajes rápidos",
       "logs": "Registros de ejecución"
     }
@@ -603,6 +605,7 @@
       "uninstalling": "Desinstalando...",
       "saveEnvVars": "Guardar variables de entorno",
       "saving": "Guardando...",
+      "saveGrokConfig": "Guardar configuración de Grok",
       "saveCodexConfig": "Guardar configuración de Codex",
       "saveGeminiConfig": "Guardar configuración de Gemini",
       "saveOpenCodeConfig": "Guardar configuración de OpenCode",
@@ -637,6 +640,43 @@
     "preflight": {
       "count": "Elementos de preflight: {count}",
       "notRun": "Las comprobaciones aún no se han ejecutado."
+    },
+    "grok": {
+      "configDescription": "Configura Grok aquí. Los controles siguientes —modo de permisos, esfuerzo de razonamiento, un modelo personalizado opcional (endpoint propio) y la compactación— se combinan en ~/.grok/config.toml, conservando tus otras claves y comentarios. El inicio de sesión usa tu XAI_API_KEY o `grok login`. Las demás claves siguen siendo editables en Avanzado.",
+      "permissionModeLabel": "Modo de permisos",
+      "permissionAsk": "Preguntar siempre",
+      "permissionAlwaysApprove": "Aprobar siempre",
+      "reasoningEffortLabel": "Esfuerzo de razonamiento",
+      "effortLow": "Bajo (más rápido)",
+      "effortMedium": "Medio (equilibrado)",
+      "effortHigh": "Alto",
+      "effortXhigh": "Máximo",
+      "optionDefault": "Usar predeterminado",
+      "authTitle": "Autenticación",
+      "authKeyConfigured": "XAI_API_KEY está configurada.",
+      "authKeyMissing": "No hay XAI_API_KEY configurada.",
+      "authLoginHint": "Configura XAI_API_KEY aquí o ejecuta `grok login` para iniciar sesión con suscripción (SuperGrok / X Premium+).",
+      "advancedToggle": "Avanzado (config.toml sin procesar)",
+      "configTomlNative": "config.toml (nativo)",
+      "configTomlHint": "Se guarda literalmente como todo el ~/.grok/config.toml. El TOML no válido se rechaza para que una errata no trunque tu archivo.",
+      "configTomlPlaceholder": "# Claves distintas de los controles de arriba, p. ej.\n# [mcp_servers.*], [cli], reglas [permission].",
+      "customModelTitle": "Modelo personalizado (endpoint propio)",
+      "customModelHint": "Apunta Grok a un endpoint personalizado o autoalojado. codeg escribe un bloque `[model.*]` por modelo y lo establece como predeterminado. Deja el ID de modelo vacío para eliminarlo.",
+      "customModelIdLabel": "ID del modelo",
+      "customModelIdPlaceholder": "p. ej. grok-custom",
+      "customModelIdHint": "Se registra como un bloque `[model.*]` y se envía a la API como nombre del modelo; también se establece como `[models].default`.",
+      "customBaseUrlLabel": "URL base",
+      "customBaseUrlPlaceholder": "https://api.x.ai/v1 (predeterminado)",
+      "customApiBackendLabel": "Backend de la API",
+      "backendResponses": "Responses",
+      "backendChatCompletions": "Chat Completions",
+      "backendMessages": "Messages (Anthropic)",
+      "customApiKeyLabel": "Clave de API",
+      "customApiKeyHint": "Se guarda en línea en `[model.*].api_key`, limitada a este endpoint.",
+      "customContextWindowLabel": "Ventana de contexto (tokens)",
+      "customContextWindowHint": "Opcional. Determina el momento de la autocompactación; déjalo vacío para el valor predeterminado del endpoint.",
+      "autoCompactLabel": "Umbral de autocompactación (%)",
+      "autoCompactHint": "Compacta la conversación cuando el uso del contexto alcanza este porcentaje (predeterminado de Grok: 85). Se escribe en `[session]`."
     },
     "codex": {
       "configDescription": "Admite configuración rápida de URL de API, API Key, nombre del modelo y reasoning effort, y sincroniza con `auth.json` / `config.toml`.",
@@ -916,6 +956,9 @@
       "saveAgentOrderFailed": "No se pudo guardar el orden de Agent",
       "saveAgentSwitchFailed": "No se pudo guardar el switch de Agent",
       "saveEnvFailed": "No se pudieron guardar las variables de entorno",
+      "grokSaved": "Configuración de Grok guardada",
+      "saveGrokNativeFailed": "No se pudo guardar la configuración nativa de Grok",
+      "saveGrokApiKeyFailed": "Ajustes guardados, pero no se pudo guardar la clave API",
       "codexSaved": "Configuración de Codex guardada",
       "saveCodexNativeFailed": "No se pudo guardar la configuración nativa de Codex",
       "geminiSaved": "Configuración de Gemini guardada",
@@ -1046,7 +1089,8 @@
     }
   },
   "SettingsPages": {
-    "agentsLoading": "Cargando configuración de agentes..."
+    "agentsLoading": "Cargando configuración de agentes...",
+    "skillPacksLoading": "Cargando paquetes de habilidades…"
   },
   "GeneralSettings": {
     "loading": "Cargando...",
@@ -2165,10 +2209,12 @@
           "spawnFailed": "No se pudo iniciar {agent}: {message}",
           "downloadFailed": "La descarga de {agent} falló: {message}",
           "sessionLoadResourceNotFound": "Error al cargar la sesión de {agent}. Recarga para reintentar o inicia una nueva conversación.",
+          "sessionLoadUnavailable": "{agent} no pudo restaurar esta sesión; es posible que haya finalizado o que el agente se haya detenido. Recarga para reintentar o inicia una nueva conversación.",
           "turnFailedRefusal": "{agent} rechazó continuar este turno. Suele indicar un error de backend o pasarela. Revisa los registros del agente.",
           "turnFailedMaxTokens": "{agent} alcanzó el límite máximo de tokens para este turno.",
           "turnFailedMaxTurnRequests": "{agent} alcanzó el número máximo de solicitudes permitidas para este turno.",
           "turnFailedUnknown": "{agent} finalizó el turno con un motivo de parada no reconocido.",
+          "grokModelSwitchIncompatibleAgent": "{agent} no puede cambiar a ese modelo en una conversación existente. Inicia una nueva sesión para usarlo.",
           "turnFailedEmpty": "{agent} finalizó el turno sin producir ninguna respuesta. Revisa la configuración del agente."
         },
         "unableReadAgentConfig": "No se puede leer la configuración del agente: {message}",
@@ -2252,6 +2298,7 @@
         "restoreInput": "Restaurar entrada",
         "experts": "Expertos",
         "office": "Ofimática",
+        "research": "Investigación",
         "attachLocalUpload": "Subir archivo local",
         "attachServerFile": "Seleccionar archivo del servidor",
         "attachUploadTooLarge": "{names} supera el límite de carga de {limit}MB y se omitió.",
@@ -2336,11 +2383,39 @@
             "morph3d": "Crea una presentación Morph 3D con modelos GLB y movimientos de cámara:\n\n[describe aquí tu tema y concepto visual en 3D]",
             "academic": "Escribe un artículo académico en Word con los siguientes requisitos:\n\n[describe aquí tu tema de investigación, metodología y hallazgos clave]",
             "financial": "Crea un modelo financiero en Excel con los siguientes requisitos:\n\n[describe aquí tus estados financieros, proyecciones y análisis]",
-            "dashboard": "Crea un panel de datos en Excel con los siguientes requisitos:\n\n[describe aquí tu fuente de datos, KPIs y gráficos]"
+            "dashboard": "Crea un panel de datos en Excel con los siguientes requisitos:\n\n[describe aquí tu fuente de datos, KPIs y gráficos]",
+            "scientific-brainstorming": "Ayúdame a generar ideas de investigación: explora conexiones interdisciplinares, cuestiona supuestos y detecta vacíos prometedores. El área que exploro: ",
+            "hypothesis-generation": "Ayúdame a convertir estas observaciones en hipótesis comprobables, con predicciones claras, mecanismos plausibles y experimentos para probarlas. Mis observaciones: ",
+            "experimental-design": "Ayúdame a diseñar un experimento riguroso antes de recolectar datos: el diseño, la aleatorización, los controles y cómo evitar la confusión. Lo que quiero estudiar: ",
+            "statistical-power": "Ayúdame a determinar el tamaño muestral que necesito: guíame en un análisis de potencia (tamaño del efecto, alfa, potencia) para mi diseño. Detalles: ",
+            "statistical-analysis": "Ayúdame a analizar estos datos correctamente: elige la prueba adecuada, verifica los supuestos, informa los tamaños de efecto y redáctalo. Mis datos y pregunta: ",
+            "exploratory-data-analysis": "Haz un análisis exploratorio de mi archivo de datos: resume su estructura, calidad y patrones destacados, y sugiere próximos pasos. El archivo es: ",
+            "scientific-visualization": "Ayúdame a crear una figura de calidad de publicación: diseño claro, barras de error honestas, una paleta apta para daltónicos y formato de revista. Lo que quiero mostrar: ",
+            "scientific-critical-thinking": "Ayúdame a evaluar críticamente este estudio o afirmación: valora la calidad de la evidencia, detecta sesgos y confusores, y pondera las conclusiones. Aquí está: ",
+            "paper-lookup": "Ayúdame a encontrar artículos relevantes y texto completo de acceso abierto en bases de datos académicas, con citas que pueda reutilizar. Busco: "
           },
+          "paper-lookup": "Búsqueda de artículos",
+          "paper-lookupDesc": "Busca en 10 API académicas (PubMed, arXiv, OpenAlex, Crossref…) artículos, citas y texto completo de acceso abierto.",
+          "scientific-critical-thinking": "Pensamiento crítico",
+          "scientific-critical-thinkingDesc": "Evalúa afirmaciones científicas y calidad de la evidencia: detecta sesgos y confusores, aplica GRADE y riesgo de sesgo.",
+          "scientific-visualization": "Visualización científica",
+          "scientific-visualizationDesc": "Figuras listas para publicar: diseños multipanel, anotaciones de significancia y formato específico de revista.",
+          "exploratory-data-analysis": "Análisis exploratorio de datos",
+          "exploratory-data-analysisDesc": "Exploración automatizada de archivos de datos científicos en más de 200 formatos con métricas de calidad e informes.",
+          "statistical-analysis": "Análisis estadístico",
+          "statistical-analysisDesc": "Análisis estadístico guiado: selección de pruebas, verificación de supuestos, tamaños de efecto e informe estilo APA.",
+          "statistical-power": "Potencia estadística",
+          "statistical-powerDesc": "Análisis de tamaño muestral y potencia: cuántos sujetos necesitas, efectos mínimos detectables y curvas de potencia.",
+          "experimental-design": "Diseño experimental",
+          "experimental-designDesc": "Diseña estudios rigurosos antes de recolectar datos: aleatorización, bloqueo, controles y diseños factoriales/DOE.",
+          "hypothesis-generation": "Generación de hipótesis",
+          "hypothesis-generationDesc": "Convierte observaciones en hipótesis comprobables con predicciones, mecanismos y experimentos para probarlas.",
+          "scientific-brainstorming": "Lluvia de ideas científica",
+          "scientific-brainstormingDesc": "Ideación abierta de investigación: explora conexiones interdisciplinares, cuestiona supuestos y detecta vacíos.",
           "tabs": {
             "office": "Ofimática",
-            "coding": "Desarrollo de código"
+            "coding": "Desarrollo de código",
+            "research": "Investigación"
           },
           "coding": {
             "brainstormingDesc": "Explora intención y requisitos antes de construir",
@@ -3268,6 +3343,40 @@
       "openFolderFailed": "Error al abrir la carpeta"
     }
   },
+  "ScienceSettings": {
+    "title": "Habilidades de investigación científica",
+    "description": "Habilita habilidades de investigación científica seleccionadas para tus agentes de código con IA: generación de hipótesis, diseño experimental, estadística, visualización, evaluación crítica y búsqueda bibliográfica. codeg gestiona una copia central y enlaza cada habilidad a los agentes que elijas.",
+    "loading": "Cargando habilidades científicas…",
+    "emptySkills": "No hay habilidades científicas disponibles. Revisa los registros de la aplicación.",
+    "searchPlaceholder": "Buscar habilidades científicas por nombre, id o descripción",
+    "categories": {
+      "ideation": "Ideación",
+      "design": "Diseño de estudios",
+      "analysis": "Análisis",
+      "visualization": "Visualización",
+      "evaluation": "Evaluación",
+      "literature": "Literatura"
+    },
+    "states": {
+      "not_linked": "No habilitado",
+      "linked_to_codeg": "Habilitado",
+      "linked_elsewhere": "Bloqueado — existe otro vínculo",
+      "blocked_by_real_directory": "Bloqueado — una habilidad personalizada ocupa este nombre",
+      "broken": "Vínculo roto"
+    },
+    "badges": {
+      "userModified": "Modificado por el usuario",
+      "needsKey": "Requiere clave",
+      "needsSetup": "Puede requerir configuración"
+    },
+    "actions": {
+      "openCentralDir": "Abrir carpeta central",
+      "refresh": "Actualizar"
+    },
+    "toasts": {
+      "openFolderFailed": "Error al abrir la carpeta"
+    }
+  },
   "OfficeToolsSettings": {
     "title": "Herramientas Office",
     "description": "Gestiona las habilidades de OfficeCLI para crear archivos Excel, Word y PowerPoint. Instala OfficeCLI, sincroniza habilidades y actívalas por agente.",
@@ -3327,6 +3436,22 @@
     },
     "autoPreviewLabel": "Abrir vista previa automáticamente",
     "autoPreviewHint": "Cuando un agente crea o edita un archivo de Word, Excel o PowerPoint, abre su vista previa en vivo automáticamente."
+  },
+  "SkillPacksSettings": {
+    "title": "Paquetes de habilidades",
+    "description": "Paquetes de habilidades seleccionados que codeg gestiona de forma centralizada y vincula a tus agentes de IA: expertos en programación, investigación científica y herramientas de documentos de oficina. Actívalos por agente abajo.",
+    "tabs": {
+      "experts": "Expertos",
+      "science": "Ciencia",
+      "office": "Herramientas de oficina"
+    },
+    "actions": {
+      "openCentralDir": "Abrir carpeta central",
+      "refresh": "Actualizar"
+    },
+    "toasts": {
+      "openFolderFailed": "Error al abrir la carpeta"
+    }
   },
   "QuickMessagesSettings": {
     "title": "Mensajes rápidos",

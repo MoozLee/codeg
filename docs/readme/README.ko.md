@@ -19,7 +19,7 @@
   <a href="./README.ar.md">العربية</a>
 </p>
 
-Codeg(Code Generation)는 멀티 에이전트 코딩 워크스페이스입니다. Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline, Hermes Agent, CodeBuddy, Kimi Code, Pi 등의 여러 에이전트를 하나의 워크스페이스로 통합하며, 대화 집계와 멀티 에이전트 협업을 지원하고 데스크톱 설치와 서버/Docker 배포를 지원합니다.
+Codeg(Code Generation)는 멀티 에이전트 코딩 워크스페이스입니다. Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline, Hermes Agent, CodeBuddy, Kimi Code, Pi, Grok Build 등의 여러 에이전트를 하나의 워크스페이스로 통합하며, 대화 집계와 멀티 에이전트 협업을 지원하고 데스크톱 설치와 서버/Docker 배포를 지원합니다.
 
 ## 포크 / 릴리스 라인 안내
 
@@ -30,12 +30,6 @@ Codeg(Code Generation)는 멀티 에이전트 코딩 워크스페이스입니다
 ## 스폰서
 
 <table>
-  <tr>
-    <td colspan="2" align="center">
-      <a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg" target="_blank"><img src="https://raw.githubusercontent.com/LeoYeAI/myclaw-sponsor-preview/main/banner.svg" alt="MyClaw.ai — Your OpenClaw Agent, Always On." /></a><br/>
-      <strong><a href="https://myclaw.ai/?utm_source=github&utm_campaign=codeg">MyClaw.ai</a></strong> — 완전관리형 OpenClaw 클라우드 인스턴스 서비스. 원클릭 배포, 24/7 상시 운영, 데이터 완전 소유권 보장 — 서버를 직접 관리할 필요가 없습니다.
-    </td>
-  </tr>
   <tr>
     <td align="center" width="220">
       <a href="https://www.compshare.cn/?ytag=GPU_YY_git_codeg" target="_blank"><img src="../images/compshare.png" alt="Compshare" width="160" /></a><br/>
@@ -49,6 +43,13 @@ Codeg(Code Generation)는 멀티 에이전트 코딩 워크스페이스입니다
       <strong><a href="https://sui-xiang.com/register?aff=JPFCRHHBE8HE">随想AI中转站</a></strong>
     </td>
     <td>본 프로젝트를 후원해 주신 随想AI中转站에 감사드립니다! 随想AI中转站는 Claude, Codex, Gemini 등의 중계 서비스를 제공하는 신뢰할 수 있고 효율적인 API 중계 서비스 제공업체입니다. 신규 계정은 <a href="https://sui-xiang.com/register?aff=JPFCRHHBE8HE">가입</a> 후 매일 출석 체크만 해도 0.5위안의 테스트 크레딧을 받을 수 있으며, 충전 금액은 1:1로 적립되고 구독 없이 사용한 만큼만 결제합니다. 다중 회선 이중화, 리전 간 재해 복구, 자동 장애 조치로 장시간 SSE 연결이 끊기지 않습니다.</td>
+  </tr>
+  <tr>
+    <td align="center" width="220">
+      <a href="https://hezu.ink/sign-up?aff=0wVz" target="_blank"><img src="../images/hezu-ink.jpg" alt="合租巴士" width="200" /></a><br/>
+      <strong><a href="https://hezu.ink/sign-up?aff=0wVz">合租巴士</a></strong>
+    </td>
+    <td>본 프로젝트를 후원해 주신 合租巴士에 감사드립니다! 合租巴士는 Codex, Claude Code 등 주요 모델에 대한 높은 안정성의 중계 기능을 제공하는 신뢰할 수 있고 효율적인 AI 중계 서비스 플랫폼입니다. 충전 비율이 투명하며(1:1), Codex 요율 보조는 최저 0.08까지 제공됩니다. <a href="https://hezu.ink/sign-up?aff=0wVz">공식 웹사이트에서 그룹에 참여하면 $5 체험 크레딧을 받을 수 있습니다</a>.</td>
   </tr>
 </table>
 
@@ -76,6 +77,7 @@ Codeg(Code Generation)는 멀티 에이전트 코딩 워크스페이스입니다
 - 내장 `git worktree` 플로를 통한 병렬 개발
 - **프로젝트 부트** — 시각적 설정과 실시간 미리보기로 새 프로젝트 생성
 - **Office 문서** — 내장 officecli 툴셋으로 .docx / .xlsx / .pptx 파일 생성, 분석, 교정, 편집. 파일 탭 내 실시간 미리보기 지원, 에이전트 편집 시 즉시 갱신
+- **과학 연구** — 모든 에이전트가 호출할 수 있는 내장 과학 스킬(가설 생성, 실험 설계, 통계, 시각화, 비판적 평가, 문헌 검색); 에이전트별로 관리
 - **자동화** — 컴포저 설정을 재사용 가능한 자동화로 저장하고, cron 스케줄 또는 수동 트리거로 헤드리스 실행
 - **채팅 채널** — Telegram, Lark(Feishu), iLink(Weixin) 등을 코딩 에이전트에 연결하여 실시간 알림 수신, 전체 세션 상호작용 및 원격 작업 제어
 - MCP 관리 (로컬 스캔 + 레지스트리 검색/설치)
@@ -101,6 +103,7 @@ Codeg(Code Generation)는 멀티 에이전트 코딩 워크스페이스입니다
 | CodeBuddy    | `$CODEBUDDY_CONFIG_DIR/projects`      | `~/.codebuddy/projects`               | `%USERPROFILE%\\.codebuddy\\projects`                 |
 | Kimi Code    | `$KIMI_CODE_HOME/sessions`            | `~/.kimi-code/sessions`               | `%USERPROFILE%\\.kimi-code\\sessions`                 |
 | Pi           | `$PI_CODING_AGENT_SESSION_DIR`        | `~/.pi/agent/sessions`                | `%USERPROFILE%\\.pi\\agent\\sessions`                 |
+| Grok Build   | `$GROK_HOME/sessions`                 | `~/.grok/sessions`                    | `%USERPROFILE%\\.grok\\sessions`                      |
 
 > 참고: 환경 변수가 기본 경로보다 우선합니다.
 
@@ -151,8 +154,21 @@ Word, Excel, PowerPoint 파일을 일급 워크플로우로 사용하세요. 내
 - **생성 및 편집** — 새 문서 생성 또는 기존 .docx / .xlsx / .pptx 파일 수정 (차트, 표, 서식 포함)
 - **분석 및 교정** — 문서 구조 검사, 서식 문제 발견, 내용 교정
 - **실시간 미리보기** — 파일 탭에서 .docx / .xlsx / .pptx 를 열면 인라인으로 렌더링되고, 에이전트 편집 시 자동 갱신——상시 실행되는 `officecli watch` 서버가 지원 (웹 및 독립 서버 환경에서는 리버스 프록시를 통해 제공, 기능 인증 적용)
-- **빠른 실행** — 웰컴 페이지의 「코딩」과 「Office」 탭에서 해당 스킬 호출과 프롬프트 템플릿을 한 번의 클릭으로 입력창에 삽입; 선택된 에이전트에 활성화되지 않은 스킬은 잠금 뱃지로 표시되며 활성화 위치로 안내
+- **빠른 실행** — 웰컴 페이지의 「코딩」, 「Office」, 「과학 연구」 탭에서 해당 스킬 호출과 프롬프트 템플릿을 한 번의 클릭으로 입력창에 삽입; 선택된 에이전트에 활성화되지 않은 스킬은 잠금 뱃지로 표시되며 활성화 위치로 안내
 - **Office 도구 설정** — 전용 설정 페이지에서 `officecli` 설치 및 스킬×에이전트 매트릭스로 문서 스킬 관리: 임의의 (스킬, 에이전트) 쌍 토글, 일괄 활성화/비활성화 지원
+
+</details>
+
+<details>
+<summary><h2>과학 연구</h2></summary>
+
+모든 에이전트를 엄밀한 연구 조수로 탈바꿈시키세요. Codeg는 아이디어 구상부터 분석, 작성까지 아우르는 엄선된 MIT 라이선스 **과학 연구 스킬** 세트를 내장하며, 이 스킬들은 전문가 및 Office 툴셋과 똑같이 공유 중앙 스킬 저장소에 설치되어 원하는 에이전트에 연결됩니다.
+
+### 기능
+
+- **엄선된 스킬** — 가설 생성, 실험 설계, 통계적 검정력, 통계 분석, 탐색적 데이터 분석, 과학적 시각화, 비판적 평가, 동료 심사, 인용 관리, 학자 평가, 논문 검색, AI 도식
+- **빠른 실행** — 웰컴 페이지의 「과학 연구」 탭에서 해당 스킬 호출과 현지화된 프롬프트 템플릿을 한 번의 클릭으로 입력창에 삽입
+- **과학 설정** — 전용 설정 페이지에서 스킬×에이전트 매트릭스로 스킬을 관리하며, API 키나 Python 환경이 필요한 스킬은 뱃지로 표시
 
 </details>
 
@@ -304,6 +320,8 @@ cd codeg-server-linux-x64
 CODEG_STATIC_DIR=./web ./codeg-server
 ```
 
+> 무인 배포 환경에서는 `--supervise` 옵션과 함께 시작하면 인플레이스 업그레이드 실패 시 자동으로 롤백됩니다 — [인플레이스 업데이트](#인플레이스-업데이트)를 참고하세요.
+
 #### 옵션 4: Docker
 
 ```bash
@@ -334,6 +352,20 @@ CODEG_STATIC_DIR=../out ./target/release/codeg-server          # codeg-mcp는 �
 ```
 
 두 바이너리를 서로 다른 디렉토리에 두는 경우, 런타임이 컴패니언을 찾을 수 있도록 `CODEG_MCP_BIN=/abs/path/to/codeg-mcp`를 설정하십시오. 설정하지 않으면 멀티 에이전트 위임이 조용히 비활성화됩니다.
+
+#### 인플레이스 업데이트
+
+서버는 **설정 → 소프트웨어 업데이트**에서 스스로 업데이트할 수 있습니다: 해당 플랫폼용 서명된 릴리스를 다운로드하고, 디스크의 바이너리와 웹 에셋을 교체한 뒤 재시작합니다 — 수동 재배포가 필요 없습니다. 이 기능은 Linux/macOS 전용입니다(Windows에서는 비활성화). 이전 버전은 백업으로 보관되므로, 같은 화면에서 **롤백** 작업으로 이전 버전으로 되돌릴 수 있습니다.
+
+**자동 롤백을 위해 슈퍼바이저 아래에서 실행하세요.** 독립형 서버를 `--supervise` 옵션과 함께 시작하면, 새로 업그레이드된 프로세스가 시험 기간 내에 부팅에 실패할 경우 자동으로 이전 버전으로 되돌아갑니다:
+
+```bash
+CODEG_STATIC_DIR=./web ./codeg-server --supervise
+```
+
+`--supervise` 없이도 서버는 여전히 인플레이스 업데이트를 수행하지만(자기 자신을 re-exec 합니다), 이 업그레이드는 최선 노력(best-effort) 방식입니다: 시작하지 못하는 버전을 자동으로 롤백해 줄 슈퍼바이저가 없습니다. Docker 이미지는 이미 슈퍼바이저 아래에서 실행됩니다.
+
+**Docker 업그레이드는 이미지가 아니라 컨테이너를 변경합니다.** 인플레이스 업그레이드는 실행 중인 컨테이너의 쓰기 가능 계층 내부에 있는 바이너리와 웹 에셋을 다시 씁니다. 따라서 이 파일들은 해당 컨테이너에만 존재합니다. `/data` 볼륨은 유지되지만 업그레이드된 파일은 **그렇지 않습니다**: 컨테이너를 재생성하면 — `docker compose up --force-recreate`, 새로운 `docker run`, 또는 `docker pull` 이후의 재생성 — 다시 이미지에서 시작하여 인플레이스 업그레이드가 사라집니다. (`docker pull` 자체는 로컬 이미지만 새로 고칠 뿐, 컨테이너를 재생성하기 전까지는 아무것도 되돌아가지 않습니다.) 업그레이드를 영구적으로 적용하려면 새 버전의 이미지를 빌드하거나 pull 한 뒤 그 이미지로 컨테이너를 재생성하세요.
 
 #### 구성
 
@@ -407,18 +439,12 @@ Next.js 16 (Static Export) + React 19
 
 - [LinuxDO](https://linux.do) 커뮤니티의 지원에 감사드립니다
 
-## Coffee
-
-- Codeg가 도움이 되었다면 커피 한 잔을 후원해 주세요
-
-<img src="../images/weixin-sponsor-light.jpg#gh-light-mode-only" alt="Codeg 후원" width="240" />
-<img src="../images/weixin-sponsor-dark.jpg#gh-dark-mode-only" alt="Codeg 후원" width="240" />
-
 ## 감사의 말
 
 - [ACP](https://agentclientprotocol.com) — Agent Client Protocol(ACP)은 Codeg가 여러 에이전트에 연결할 수 있게 해주는 기반입니다
 - [Superpowers](https://github.com/obra/superpowers) — Codeg의 전문가 스킬 모듈을 지원하는 프로젝트
 - [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) — Codeg의 Office 문서 워크플로우를 지원하는 프로젝트
+- [scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills) — Codeg의 과학 연구 스킬을 지원하는 프로젝트 (MIT 라이선스 서브셋)
 
 ## 라이선스
 

@@ -49,7 +49,9 @@
       "web_service": "Web Service",
       "model_providers": "Model Providers",
       "experts": "Experts",
+      "science": "Science",
       "office_tools": "Office Tools",
+      "skill_packs": "Skill Packs",
       "quick_messages": "Quick Messages",
       "logs": "Runtime Logs"
     }
@@ -603,6 +605,7 @@
       "uninstalling": "Uninstalling...",
       "saveEnvVars": "Save environment variables",
       "saving": "Saving...",
+      "saveGrokConfig": "Save Grok Config",
       "saveCodexConfig": "Save Codex Config",
       "saveGeminiConfig": "Save Gemini Config",
       "saveOpenCodeConfig": "Save OpenCode Config",
@@ -637,6 +640,43 @@
     "preflight": {
       "count": "Preflight items: {count}",
       "notRun": "Checks have not run yet."
+    },
+    "grok": {
+      "configDescription": "Configure Grok here. The controls below — permission mode, reasoning effort, an optional custom (BYO endpoint) model, and compaction — merge into ~/.grok/config.toml, preserving your other keys and comments. Sign-in uses your XAI_API_KEY or `grok login`. Other keys stay editable under Advanced.",
+      "permissionModeLabel": "Permission mode",
+      "permissionAsk": "Ask every time",
+      "permissionAlwaysApprove": "Always approve",
+      "reasoningEffortLabel": "Reasoning effort",
+      "effortLow": "Low (faster)",
+      "effortMedium": "Medium (balanced)",
+      "effortHigh": "High",
+      "effortXhigh": "Max",
+      "optionDefault": "Use default",
+      "authTitle": "Authentication",
+      "authKeyConfigured": "XAI_API_KEY is configured.",
+      "authKeyMissing": "No XAI_API_KEY set.",
+      "authLoginHint": "Set XAI_API_KEY here, or run `grok login` for subscription sign-in (SuperGrok / X Premium+).",
+      "advancedToggle": "Advanced (raw config.toml)",
+      "configTomlNative": "config.toml (native)",
+      "configTomlHint": "Saved verbatim as the whole ~/.grok/config.toml. Invalid TOML is rejected so a typo never truncates your file.",
+      "configTomlPlaceholder": "# Keys other than the controls above, e.g.\n# [mcp_servers.*], [cli], [permission] rules.",
+      "customModelTitle": "Custom model (BYO endpoint)",
+      "customModelHint": "Point Grok at a custom or self-hosted endpoint. codeg writes a per-model `[model.*]` block and makes it the default. Leave the Model ID empty to remove it.",
+      "customModelIdLabel": "Model ID",
+      "customModelIdPlaceholder": "e.g. grok-custom",
+      "customModelIdHint": "Registered as a `[model.*]` block and sent to the API as the model name; also set as `[models].default`.",
+      "customBaseUrlLabel": "Base URL",
+      "customBaseUrlPlaceholder": "https://api.x.ai/v1 (default)",
+      "customApiBackendLabel": "API backend",
+      "backendResponses": "Responses",
+      "backendChatCompletions": "Chat Completions",
+      "backendMessages": "Messages (Anthropic)",
+      "customApiKeyLabel": "API Key",
+      "customApiKeyHint": "Stored inline in `[model.*].api_key`, scoped to this endpoint.",
+      "customContextWindowLabel": "Context window (tokens)",
+      "customContextWindowHint": "Optional. Drives auto-compact timing; leave empty for the endpoint default.",
+      "autoCompactLabel": "Auto-compact threshold (%)",
+      "autoCompactHint": "Compact the conversation when context usage reaches this percent (Grok default 85). Written to `[session]`."
     },
     "codex": {
       "configDescription": "Supports quick configuration for API URL, API Key, model name and reasoning effort, and syncs with `auth.json` / `config.toml`.",
@@ -916,6 +956,9 @@
       "saveAgentOrderFailed": "Failed to save Agent order",
       "saveAgentSwitchFailed": "Failed to save Agent switch",
       "saveEnvFailed": "Failed to save environment variables",
+      "grokSaved": "Grok config saved",
+      "saveGrokNativeFailed": "Failed to save Grok native config",
+      "saveGrokApiKeyFailed": "Settings saved, but the API key couldn't be saved",
       "codexSaved": "Codex config saved",
       "saveCodexNativeFailed": "Failed to save Codex native config",
       "geminiSaved": "Gemini config saved",
@@ -1046,7 +1089,8 @@
     }
   },
   "SettingsPages": {
-    "agentsLoading": "Loading agent settings..."
+    "agentsLoading": "Loading agent settings...",
+    "skillPacksLoading": "Loading skill packs…"
   },
   "GeneralSettings": {
     "loading": "Loading...",
@@ -2165,10 +2209,12 @@
           "spawnFailed": "Failed to start {agent}: {message}",
           "downloadFailed": "{agent} download failed: {message}",
           "sessionLoadResourceNotFound": "{agent} session failed to load. Reload to retry, or start a new conversation.",
+          "sessionLoadUnavailable": "{agent} couldn't restore this session — it may have ended or the agent stopped. Reload to retry, or start a new conversation.",
           "turnFailedRefusal": "{agent} refused to continue this turn. This often indicates a backend or gateway error — check the agent's logs.",
           "turnFailedMaxTokens": "{agent} reached the maximum token limit for this turn.",
           "turnFailedMaxTurnRequests": "{agent} reached the maximum number of allowed requests for this turn.",
           "turnFailedUnknown": "{agent} ended the turn with an unrecognized stop reason.",
+          "grokModelSwitchIncompatibleAgent": "{agent} can't switch to that model in an existing conversation. Start a new session to use it.",
           "turnFailedEmpty": "{agent} ended the turn without producing any response. Please check the agent's configuration."
         },
         "unableReadAgentConfig": "Unable to read Agent config: {message}",
@@ -2254,6 +2300,7 @@
         "restoreInput": "Restore input",
         "experts": "Experts",
         "office": "Office Work",
+        "research": "Scientific Research",
         "attachUploadTooLarge": "{names} exceeds the {limit}MB upload limit and was skipped.",
         "attachUploadFailed": "Failed to upload {names}.",
         "attachUploadNotAFile": "{names} isn't a regular file (directory or special file) and was skipped.",
@@ -2336,11 +2383,39 @@
             "morph3d": "Create a 3D Morph presentation with GLB models and camera moves:\n\n[describe your topic and 3D visual concept here]",
             "academic": "Write an academic paper in Word with the following requirements:\n\n[describe your research topic, methodology, and key findings here]",
             "financial": "Create a financial model in Excel with the following requirements:\n\n[describe your financial statements, projections, and analysis here]",
-            "dashboard": "Create a data dashboard in Excel with the following requirements:\n\n[describe your data source, KPIs, and charts here]"
+            "dashboard": "Create a data dashboard in Excel with the following requirements:\n\n[describe your data source, KPIs, and charts here]",
+            "scientific-brainstorming": "Help me brainstorm research directions — explore interdisciplinary connections, challenge assumptions, and surface promising gaps. The area I'm exploring: ",
+            "hypothesis-generation": "Help me turn these observations into testable hypotheses — with clear predictions, plausible mechanisms, and experiments to test them. My observations: ",
+            "experimental-design": "Help me design a rigorous experiment before I collect data — the design, randomization, controls, and how to avoid confounding. What I want to study: ",
+            "statistical-power": "Help me determine the sample size I need — walk me through a power analysis (effect size, alpha, power) for my design. Details: ",
+            "statistical-analysis": "Help me analyze this data properly — choose the right test, check assumptions, report effect sizes, and write it up. My data and question: ",
+            "exploratory-data-analysis": "Do an exploratory analysis of my data file — summarize its structure, quality, and notable patterns, then suggest next steps. The file is: ",
+            "scientific-visualization": "Help me make a publication-quality figure — clear layout, honest error bars, a colorblind-safe palette, and journal formatting. What I want to show: ",
+            "scientific-critical-thinking": "Help me critically appraise this study or claim — assess the evidence quality, spot biases and confounders, and weigh the conclusions. Here it is: ",
+            "paper-lookup": "Help me find relevant papers and open-access full text across scholarly databases, with citations I can reuse. I'm looking for: "
           },
+          "paper-lookup": "Paper Lookup",
+          "paper-lookupDesc": "Search 10 scholarly APIs (PubMed, arXiv, OpenAlex, Crossref…) for papers, citations, and open-access full text.",
+          "scientific-critical-thinking": "Critical Thinking",
+          "scientific-critical-thinkingDesc": "Appraise scientific claims and evidence quality — spot biases and confounders, apply GRADE and risk-of-bias frameworks.",
+          "scientific-visualization": "Scientific Visualization",
+          "scientific-visualizationDesc": "Publication-ready figures — multi-panel layouts, significance annotations, and journal-specific formatting.",
+          "exploratory-data-analysis": "Exploratory Data Analysis",
+          "exploratory-data-analysisDesc": "Automated exploration of scientific data files across 200+ formats with quality metrics and reports.",
+          "statistical-analysis": "Statistical Analysis",
+          "statistical-analysisDesc": "Guided statistical analysis — test selection, assumption checks, effect sizes, and APA-style reporting.",
+          "statistical-power": "Statistical Power",
+          "statistical-powerDesc": "Sample-size and power analysis — how many subjects you need, minimum detectable effects, and power curves.",
+          "experimental-design": "Experimental Design",
+          "experimental-designDesc": "Design rigorous studies before collecting data — randomization, blocking, controls, and factorial/DOE layouts.",
+          "hypothesis-generation": "Hypothesis Generation",
+          "hypothesis-generationDesc": "Turn observations into testable hypotheses with predictions, mechanisms, and experiments to test them.",
+          "scientific-brainstorming": "Scientific Brainstorming",
+          "scientific-brainstormingDesc": "Open-ended research ideation — explore interdisciplinary links, challenge assumptions, and surface research gaps.",
           "tabs": {
             "office": "Office Work",
-            "coding": "Code Development"
+            "coding": "Code Development",
+            "research": "Scientific Research"
           },
           "coding": {
             "brainstormingDesc": "Explore intent & requirements before building",
@@ -3280,6 +3355,40 @@
       "openFolderFailed": "Failed to open folder"
     }
   },
+  "ScienceSettings": {
+    "title": "Scientific Research Skills",
+    "description": "Enable curated scientific-research skills for your AI coding agents — hypothesis generation, experimental design, statistics, visualization, critical appraisal, and literature search. codeg manages a central copy and links each skill into the agents you choose.",
+    "loading": "Loading science skills…",
+    "emptySkills": "No science skills available. Check the application logs.",
+    "searchPlaceholder": "Search science skills by name, id, or description",
+    "categories": {
+      "ideation": "Ideation",
+      "design": "Study Design",
+      "analysis": "Analysis",
+      "visualization": "Visualization",
+      "evaluation": "Evaluation",
+      "literature": "Literature"
+    },
+    "states": {
+      "not_linked": "Not enabled",
+      "linked_to_codeg": "Enabled",
+      "linked_elsewhere": "Blocked — another link exists",
+      "blocked_by_real_directory": "Blocked — a custom skill occupies this name",
+      "broken": "Broken link"
+    },
+    "badges": {
+      "userModified": "User modified",
+      "needsKey": "Needs API key",
+      "needsSetup": "May need setup"
+    },
+    "actions": {
+      "openCentralDir": "Open central folder",
+      "refresh": "Refresh"
+    },
+    "toasts": {
+      "openFolderFailed": "Failed to open folder"
+    }
+  },
   "OfficeToolsSettings": {
     "title": "Office Tools",
     "description": "Manage OfficeCLI skills for creating Excel, Word, and PowerPoint files. Install OfficeCLI, sync skills, and enable them per agent.",
@@ -3339,6 +3448,22 @@
     },
     "autoPreviewLabel": "Auto-open preview",
     "autoPreviewHint": "When an agent creates or edits a Word, Excel, or PowerPoint file, open its live preview automatically."
+  },
+  "SkillPacksSettings": {
+    "title": "Skill Packs",
+    "description": "Curated skill bundles that codeg manages centrally and links into your AI agents — coding experts, scientific research, and office document tools. Enable them per agent below.",
+    "tabs": {
+      "experts": "Experts",
+      "science": "Science",
+      "office": "Office Tools"
+    },
+    "actions": {
+      "openCentralDir": "Open central folder",
+      "refresh": "Refresh"
+    },
+    "toasts": {
+      "openFolderFailed": "Failed to open folder"
+    }
   },
   "QuickMessagesSettings": {
     "title": "Quick Messages",

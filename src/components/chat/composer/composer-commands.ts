@@ -1,9 +1,15 @@
 import type { Editor } from "@tiptap/core"
 
+import {
+  tokenizeReferenceLinks,
+  unescapeReferenceLabel,
+} from "@/lib/reference-link"
 import type { PromptInputBlock } from "@/lib/types"
 
 import type { InputAttachment } from "../message-input-attachments"
 import { blocksToRestoredDraft } from "./from-prompt-blocks"
+import { textToInlineContent } from "./plain-text-content"
+import { parseCodegReferenceUri } from "./reference-uri"
 import type { ReferenceAttrs } from "./types"
 
 /**
@@ -50,12 +56,11 @@ export function isComposerChromeClick(target: EventTarget | null): boolean {
  * front (and serializes to `${prefix}${id}` as the first token), never at the
  * caret. `attrs` is an expert reference (refType `skill`, `meta.scope === "expert"`).
  *
- * The badge must be the FIRST inline node of the FIRST block. Inserting at
- * position 1 only achieves that when the first block is a paragraph; for a
- * heading/list/quote/code block the Markdown marker (`# `, `- `, `> `, …) would
- * serialize before it, so a fresh paragraph is prepended instead. When the first
- * block already opens with an expert badge (from a prior pick), it is replaced
- * rather than stacked — the agent only honors the first directive.
+ * The badge must be the FIRST inline node of the FIRST block. The plain-text
+ * schema has only paragraphs as blocks, so the first block is always a paragraph
+ * and position 1 (the start of its content) is always the right spot. When it
+ * already opens with an expert badge (from a prior pick), it is replaced rather
+ * than stacked — the agent only honors the first directive.
  */
 export function applyExpertReference(
   editor: Editor,
@@ -65,26 +70,14 @@ export function applyExpertReference(
     { type: "reference", attrs },
     { type: "text", text: " " },
   ]
-  const first = editor.state.doc.firstChild
 
-  // First block isn't a paragraph: prepend a fresh one so the badge is the very
-  // first inline content (cursor lands just after the badge + its space, pos 3).
-  if (!first || first.type.name !== "paragraph") {
-    editor
-      .chain()
-      .focus()
-      .insertContentAt(0, { type: "paragraph", content: badge })
-      .setTextSelection(3)
-      .run()
-    return
-  }
-
-  // Paragraph: replace an existing leading expert badge (atom at pos 1) if any,
-  // taking one following space with it so the replacement doesn't stack spaces.
+  // Replace an existing leading expert badge (atom at pos 1) if any, taking one
+  // following space with it so the replacement doesn't stack spaces.
   // `meta.scope === "expert"` is the unambiguous marker — only expert references
   // carry it (commands/skills don't), so no extra id allow-list is needed (and
   // an allow-list would false-negative on agent-linked experts → stacking).
-  const firstChild = first.firstChild
+  const first = editor.state.doc.firstChild
+  const firstChild = first?.firstChild
   const isExpertBadge =
     firstChild?.type.name === "reference" &&
     firstChild.attrs.refType === "skill" &&
@@ -92,12 +85,62 @@ export function applyExpertReference(
 
   let chain = editor.chain().focus()
   if (isExpertBadge) {
-    const afterBadge = first.maybeChild(1)
+    const afterBadge = first?.maybeChild(1)
     const trailingSpace =
       afterBadge?.isText && afterBadge.text?.startsWith(" ") ? 1 : 0
     chain = chain.deleteRange({ from: 1, to: 2 + trailingSpace })
   }
   chain.insertContentAt(1, badge).setTextSelection(3).run()
+}
+
+/**
+ * Re-stamp the invocation prefix of every agent-dependent skill / expert badge
+ * in the document to `prefix`. Codex triggers skills with `$`, every other agent
+ * with `/`, and a badge freezes its prefix in at insert time (see
+ * {@link applyExpertReference} and `skillToReference`). A badge inserted under
+ * one agent and then sent under another would carry the wrong trigger — most
+ * visibly a `/`-baked skill sent to Codex, which parses the leading `/skill` as a
+ * slash COMMAND and rejects the turn. Calling this whenever the effective agent
+ * changes keeps the leading invocation in sync with the selected agent.
+ *
+ * Only skill references carrying a `meta.scope` (skills + experts) are
+ * agent-dependent. Bare ACP slash commands (`commandToReference`, no scope) are
+ * always `/` and are left untouched. The rewrite is a single attrs-only
+ * transaction kept out of the undo history. Returns true if anything changed.
+ */
+export function restampSkillPrefixes(
+  editor: Editor,
+  prefix: "/" | "$"
+): boolean {
+  const updates: { pos: number; attrs: ReferenceAttrs }[] = []
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== "reference") return true
+    const attrs = node.attrs as ReferenceAttrs
+    if (
+      attrs.refType === "skill" &&
+      attrs.meta?.scope != null &&
+      attrs.meta.invocationPrefix !== prefix
+    ) {
+      updates.push({
+        pos,
+        attrs: {
+          ...attrs,
+          meta: { ...attrs.meta, invocationPrefix: prefix },
+        },
+      })
+    }
+    return true
+  })
+  if (updates.length === 0) return false
+  // Attrs-only `setNodeMarkup` never changes node sizes, so earlier positions
+  // stay valid as later nodes are updated in the same transaction.
+  const tr = editor.state.tr
+  for (const { pos, attrs } of updates) {
+    tr.setNodeMarkup(pos, undefined, attrs)
+  }
+  tr.setMeta("addToHistory", false)
+  editor.view.dispatch(tr)
+  return true
 }
 
 /**
@@ -115,10 +158,41 @@ export function restoreBlocksIntoEditor(
   let chain = editor.chain().clearContent()
   for (const segment of segments) {
     chain =
-      segment.kind === "markdown"
-        ? chain.insertContent(segment.text, { contentType: "markdown" })
+      segment.kind === "text"
+        ? chain.insertContent(textToInlineContent(segment.text))
         : chain.insertReference(segment.attrs)
   }
   chain.focus("end").run()
   return attachments
+}
+
+/**
+ * Replace the composer from the sent-text wire format while restoring only
+ * built-in `file:` / `codeg:` reference links as badges. All other Markdown and
+ * bare invocation tokens remain literal under the plain-text composer model.
+ */
+export function restoreSerializedReferencesIntoEditor(
+  editor: Editor,
+  text: string
+): void {
+  let chain = editor.chain().clearContent()
+  for (const token of tokenizeReferenceLinks(text)) {
+    if (token.type === "link") {
+      const trimmed = token.destination.trim()
+      const destination =
+        trimmed.startsWith("<") && trimmed.endsWith(">")
+          ? trimmed.slice(1, -1).trim()
+          : trimmed
+      const attrs = parseCodegReferenceUri(
+        destination,
+        unescapeReferenceLabel(token.label)
+      )
+      chain = attrs
+        ? chain.insertReference(attrs)
+        : chain.insertContent(textToInlineContent(token.raw))
+    } else {
+      chain = chain.insertContent(textToInlineContent(token.value))
+    }
+  }
+  chain.focus("end").run()
 }

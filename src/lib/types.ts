@@ -9,6 +9,7 @@ export type AgentType =
   | "code_buddy"
   | "kimi_code"
   | "pi"
+  | "grok"
 
 export type AppErrorCode =
   | "invalid_input"
@@ -469,6 +470,7 @@ export const AGENT_DISPLAY_ORDER: AgentType[] = [
   "code_buddy",
   "kimi_code",
   "pi",
+  "grok",
 ]
 
 const AGENT_DISPLAY_ORDER_INDEX = new Map(
@@ -492,6 +494,7 @@ export const ALL_AGENT_TYPES: AgentType[] = [
   "code_buddy",
   "kimi_code",
   "pi",
+  "grok",
 ]
 
 export const MODEL_PROVIDER_AGENT_TYPES: AgentType[] = [
@@ -782,6 +785,7 @@ export const AGENT_LABELS: Record<AgentType, string> = {
   code_buddy: "CodeBuddy",
   kimi_code: "Kimi Code",
   pi: "Pi",
+  grok: "Grok",
 }
 
 export const AGENT_COLORS: Record<AgentType, string> = {
@@ -795,6 +799,7 @@ export const AGENT_COLORS: Record<AgentType, string> = {
   code_buddy: "bg-[#0052D9]",
   kimi_code: "bg-[#1783FF]",
   pi: "bg-[#0D9488]",
+  grok: "bg-neutral-900",
 }
 
 // ACP connection status (matches Rust ConnectionStatus)
@@ -1554,7 +1559,50 @@ export interface AcpAgentInfo {
   cline_secrets_json: string | null
   /** Raw ~/.hermes/config.yaml text, for the Hermes panel's advanced editor. */
   hermes_config_yaml: string | null
+  /** Raw ~/.grok/config.toml text, for the Grok panel's config-file editor. */
+  grok_config_toml: string | null
+  /** Parsed scalar settings backing the Grok panel's structured controls. Only
+   * populated for the Grok agent; derived from grok_config_toml. */
+  grok_settings: GrokSettings | null
   model_provider_id: number | null
+}
+
+/** Parsed keys from ~/.grok/config.toml. `null` means the key is absent.
+ * Serialized snake_case to match AcpAgentInfo. The stock per-session model is
+ * NOT here — it's chosen from the composer. But a codeg-managed custom (BYO
+ * endpoint) model IS: it's the `[model.<id>]` block whose id equals
+ * [models].default, read back through the custom_* fields. */
+export interface GrokSettings {
+  default_reasoning_effort: string | null
+  permission_mode: string | null
+  /** The codeg-managed custom model id ([model.<id>] == [models].default). */
+  custom_model_id: string | null
+  /** [model.<id>].base_url — null ⇒ Grok's official xAI endpoint. */
+  custom_base_url: string | null
+  /** [model.<id>].api_key — inline key scoped to the custom endpoint. */
+  custom_api_key: string | null
+  /** [model.<id>].api_backend — chat_completions | responses | messages. */
+  custom_api_backend: string | null
+  /** [model.<id>].context_window — context size in tokens. */
+  custom_context_window: number | null
+  /** [session].auto_compact_threshold_percent — 0–100 (Grok default 85). */
+  auto_compact_threshold_percent: number | null
+}
+
+/** Structured-control values the Grok settings panel sends on save. Each
+ * non-null value sets its config.toml key; each null removes it. camelCase on
+ * the wire to match the request body. A non-empty customModelId writes (or
+ * renames to) [model.<id>] + [models].default; empty/null removes the managed
+ * block. Within an active model, an empty sub-field omits its key. */
+export interface GrokStructuredConfig {
+  defaultReasoningEffort: string | null
+  permissionMode: string | null
+  customModelId: string | null
+  customBaseUrl: string | null
+  customApiKey: string | null
+  customApiBackend: string | null
+  customContextWindow: number | null
+  autoCompactThresholdPercent: number | null
 }
 
 // Lightweight agent status returned by acp_get_agent_status
@@ -1671,6 +1719,38 @@ export interface LinkOpResult {
   /** Present on a successful enable; null for disables and failures. */
   status: ExpertInstallStatus | null
   error: string | null
+}
+
+/**
+ * Built-in scientific-research skills, curated from
+ * K-Dense-AI/scientific-agent-skills and bundled into the codeg binary. They
+ * share the central store (`~/.codeg/skills/`) and link primitives with
+ * experts; link statuses reuse `ExpertInstallStatus`/`LinkOp`/`LinkOpResult`
+ * (the `expertId` field carries the science skill id).
+ */
+export interface ScienceMetadata {
+  id: string
+  category: string
+  icon: string | null
+  sort_order: number
+  /** Surface as a card in the new-session "Scientific Research" tab. */
+  featured: boolean
+  /** Color key indexing the ACCENTS map in quick-actions.tsx (featured only). */
+  accent: string | null
+  /** Primary workflow requires an external API key. */
+  needs_key: boolean
+  /** Ships scripts that may need a Python/uv environment. */
+  needs_env: boolean
+  display_name: Record<string, string>
+  description: Record<string, string>
+  bundled_hash: string
+}
+
+export interface ScienceListItem {
+  metadata: ScienceMetadata
+  installed_centrally: boolean
+  user_modified: boolean
+  central_path: string
 }
 
 export interface OfficecliInfo {
@@ -1870,6 +1950,7 @@ export type McpAppType =
   | "hermes"
   | "code_buddy"
   | "kimi_code"
+  | "grok"
 
 export interface LocalMcpServer {
   id: string

@@ -3,6 +3,7 @@ pub mod cline;
 pub mod codebuddy;
 pub mod codex;
 pub mod gemini;
+pub mod grok;
 pub mod hermes;
 pub mod kimi_code;
 pub mod openclaw;
@@ -117,6 +118,17 @@ pub fn external_transcript_sources() -> Vec<ExternalSource> {
             root: kimi_code::resolve_kimi_code_home_dir(),
             is_file: false,
             include_top: Some(&["sessions", "session_index.jsonl"]),
+        },
+        ExternalSource {
+            // Grok keeps a directory-per-session transcript store under
+            // `~/.grok/sessions/<encoded-cwd>/<uuid>/` (relocatable via
+            // `GROK_HOME`). `resolve_grok_home_dir()` points at `~/.grok`, so
+            // scope the archive to the `sessions/` subtree — never the sibling
+            // `auth.json` / `config.toml` / `bin/` under the same home.
+            agent: "grok",
+            root: grok::resolve_grok_home_dir().join("sessions"),
+            is_file: false,
+            include_top: None,
         },
         ExternalSource {
             // pi writes one JSONL per session under `~/.pi/agent/sessions/`
@@ -528,6 +540,31 @@ pub fn infer_context_window_max_tokens(model: Option<&str>) -> Option<u64> {
     }
     if normalized.starts_with("kimi") {
         return Some(262_144);
+    }
+    if normalized.starts_with("grok") {
+        // Context windows per x.ai docs (docs.x.ai/developers/models, 2026-07).
+        // Grok's model names churn, so match the known families before the
+        // generic fallback, most-specific first:
+        //   grok-4.5              → 500K
+        //   grok-4.3 / grok-4.20  → 1M
+        //   grok-build-* / grok-code-fast-1 → 256K (coding models; the latter
+        //                           is 256K despite the "fast" in its name)
+        //   general -fast (grok-4-fast) → 2M
+        // Default any unknown grok model to the conservative 256K rather than
+        // guessing high.
+        if normalized.contains("4.5") {
+            return Some(500_000);
+        }
+        if normalized.contains("4.3") || normalized.contains("4.20") {
+            return Some(1_000_000);
+        }
+        if normalized.contains("code") || normalized.contains("build") {
+            return Some(256_000);
+        }
+        if normalized.contains("fast") {
+            return Some(2_000_000);
+        }
+        return Some(256_000);
     }
 
     match normalized.as_str() {
@@ -1215,6 +1252,38 @@ mod tests {
         assert_eq!(
             infer_context_window_max_tokens(Some("claude-sonnet-4-6 [1.5M]")),
             Some(1_500_000)
+        );
+        // Grok context windows per x.ai docs: grok-4.5 = 500K, grok-4.3 /
+        // grok-4.20 = 1M, the coding/build models = 256K (grok-code-fast-1
+        // despite "fast"), the general -fast variants = 2M, and any unknown
+        // grok model falls back to the conservative 256K.
+        assert_eq!(
+            infer_context_window_max_tokens(Some("grok-4.5")),
+            Some(500_000)
+        );
+        assert_eq!(
+            infer_context_window_max_tokens(Some("grok-4.3")),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            infer_context_window_max_tokens(Some("grok-4.20-0309-reasoning")),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            infer_context_window_max_tokens(Some("grok-build-0.1")),
+            Some(256_000)
+        );
+        assert_eq!(
+            infer_context_window_max_tokens(Some("grok-code-fast-1")),
+            Some(256_000)
+        );
+        assert_eq!(
+            infer_context_window_max_tokens(Some("grok-4-fast")),
+            Some(2_000_000)
+        );
+        assert_eq!(
+            infer_context_window_max_tokens(Some("grok-7-experimental")),
+            Some(256_000)
         );
         assert_eq!(infer_context_window_max_tokens(Some("unknown-model")), None);
     }

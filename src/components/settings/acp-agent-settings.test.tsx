@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 
 import {
   applyClaudeProviderToConfigText,
+  buildGrokSaveOptions,
+  buildGrokStructuredConfig,
   buildVersionCheck,
   configTextForClaudeSave,
   getAgentChecks,
@@ -28,6 +30,8 @@ function makeAgent(overrides: Partial<AcpAgentInfo>): AcpAgentInfo {
     codex_auth_json: null,
     cline_secrets_json: null,
     codex_config_toml: null,
+    grok_config_toml: null,
+    grok_settings: null,
     hermes_config_yaml: null,
     model_provider_id: null,
     ...overrides,
@@ -44,6 +48,177 @@ function fixDisabled(fix: unknown): boolean {
     (fix as Record<string, unknown>).disabled === true
   )
 }
+
+// A full Grok draft, custom-model + compaction fields defaulted empty. Typed
+// from the function's own parameter so it stays in sync with the panel shape.
+type GrokDraftInput = Parameters<typeof buildGrokStructuredConfig>[0]
+const grokDraft = (
+  overrides: Partial<GrokDraftInput> = {}
+): GrokDraftInput => ({
+  grokPermissionMode: "",
+  grokReasoningEffort: "",
+  grokCustomModelId: "",
+  grokCustomBaseUrl: "",
+  grokCustomApiKey: "",
+  grokCustomApiBackend: "responses",
+  grokCustomContextWindow: "",
+  grokAutoCompactThreshold: "",
+  ...overrides,
+})
+// The custom-model group when no model id is set (all removed / null).
+const emptyCustoms = {
+  customModelId: null,
+  customBaseUrl: null,
+  customApiKey: null,
+  customApiBackend: null,
+  customContextWindow: null,
+  autoCompactThresholdPercent: null,
+}
+
+describe("buildGrokStructuredConfig — Grok panel save payload", () => {
+  // A chosen dropdown value passes through. These become [ui].permission_mode /
+  // [models].default_reasoning_effort on save.
+  it("passes chosen values through", () => {
+    expect(
+      buildGrokStructuredConfig(
+        grokDraft({
+          grokPermissionMode: "always-approve",
+          grokReasoningEffort: "high",
+        })
+      )
+    ).toEqual({
+      permissionMode: "always-approve",
+      defaultReasoningEffort: "high",
+      ...emptyCustoms,
+    })
+  })
+
+  // The empty "unset / use default" choice maps to null, which the backend
+  // treats as "remove this key" — so unsetting a control clears it from
+  // config.toml rather than writing an empty string.
+  it("maps unset (empty) fields to null", () => {
+    expect(buildGrokStructuredConfig(grokDraft())).toEqual({
+      permissionMode: null,
+      defaultReasoningEffort: null,
+      ...emptyCustoms,
+    })
+  })
+
+  // A custom model id activates the whole [model.<id>] group; api_backend
+  // defaults to `responses`, numerics parse, and compaction is independent.
+  it("writes the custom model group when a model id is set", () => {
+    expect(
+      buildGrokStructuredConfig(
+        grokDraft({
+          grokCustomModelId: "  my-grok  ",
+          grokCustomBaseUrl: "https://gw/v1",
+          grokCustomApiKey: "xai-123",
+          grokCustomApiBackend: "chat_completions",
+          grokCustomContextWindow: "131072",
+          grokAutoCompactThreshold: "80",
+        })
+      )
+    ).toEqual({
+      permissionMode: null,
+      defaultReasoningEffort: null,
+      customModelId: "my-grok",
+      customBaseUrl: "https://gw/v1",
+      customApiKey: "xai-123",
+      customApiBackend: "chat_completions",
+      customContextWindow: 131072,
+      autoCompactThresholdPercent: 80,
+    })
+  })
+
+  // Model-scoped fields are dropped without a model id, but the session-global
+  // compaction threshold still parses.
+  it("drops model-scoped fields when the model id is empty", () => {
+    expect(
+      buildGrokStructuredConfig(
+        grokDraft({
+          grokCustomBaseUrl: "https://gw/v1",
+          grokCustomApiKey: "xai-123",
+          grokAutoCompactThreshold: "70",
+        })
+      )
+    ).toEqual({
+      permissionMode: null,
+      defaultReasoningEffort: null,
+      ...emptyCustoms,
+      autoCompactThresholdPercent: 70,
+    })
+  })
+
+  // Blank backend with a model set defaults to `responses`; the threshold clamps
+  // to 0–100 and a non-positive context window is omitted.
+  it("defaults the backend and clamps numeric ranges", () => {
+    expect(
+      buildGrokStructuredConfig(
+        grokDraft({
+          grokCustomModelId: "foo",
+          grokCustomApiBackend: "",
+          grokCustomContextWindow: "0",
+          grokAutoCompactThreshold: "150",
+        })
+      )
+    ).toEqual({
+      permissionMode: null,
+      defaultReasoningEffort: null,
+      customModelId: "foo",
+      customBaseUrl: null,
+      customApiKey: null,
+      customApiBackend: "responses",
+      customContextWindow: null,
+      autoCompactThresholdPercent: 100,
+    })
+  })
+})
+
+describe("buildGrokSaveOptions — one save persists both surfaces", () => {
+  const base = grokDraft({
+    grokPermissionMode: "ask",
+    grokReasoningEffort: "high",
+  })
+
+  // Advanced editor unchanged → send ONLY the structured controls; the backend
+  // merges them onto the fresh on-disk config (no stale snapshot to clobber
+  // concurrent edits).
+  it("omits raw TOML when the advanced editor matches disk", () => {
+    const opts = buildGrokSaveOptions(
+      { ...base, grokConfigTomlText: "[ui]\n" },
+      "[ui]\n"
+    )
+    expect(opts.grokConfigTomlText).toBeUndefined()
+    expect(opts.grokStructured).toEqual({
+      permissionMode: "ask",
+      defaultReasoningEffort: "high",
+      ...emptyCustoms,
+    })
+  })
+
+  // Advanced editor edited → send it as the merge base so the user's other-key
+  // edits are saved TOGETHER with the structured controls in one action (no
+  // separate save that could discard either surface).
+  it("includes raw TOML when the advanced editor was edited", () => {
+    const opts = buildGrokSaveOptions(
+      { ...base, grokConfigTomlText: "[ui]\nvim_mode = true\n" },
+      "[ui]\n"
+    )
+    expect(opts.grokConfigTomlText).toBe("[ui]\nvim_mode = true\n")
+  })
+
+  // A null on-disk value (no file yet) is treated as empty for the dirty check.
+  it("treats null on-disk config as empty", () => {
+    expect(
+      buildGrokSaveOptions({ ...base, grokConfigTomlText: "" }, null)
+        .grokConfigTomlText
+    ).toBeUndefined()
+    expect(
+      buildGrokSaveOptions({ ...base, grokConfigTomlText: "x" }, null)
+        .grokConfigTomlText
+    ).toBe("x")
+  })
+})
 
 describe("buildVersionCheck", () => {
   // uv runtime not ready: a uvx agent (Hermes) must surface a blocked

@@ -49,7 +49,9 @@
       "web_service": "خدمة الويب",
       "model_providers": "مزودو النماذج",
       "experts": "الخبراء",
+      "science": "البحث العلمي",
       "office_tools": "أدوات المكتب",
+      "skill_packs": "حزم المهارات",
       "quick_messages": "رسائل سريعة",
       "logs": "سجلات التشغيل"
     }
@@ -603,6 +605,7 @@
       "uninstalling": "جارٍ إزالة التثبيت...",
       "saveEnvVars": "حفظ متغيرات البيئة",
       "saving": "جارٍ الحفظ...",
+      "saveGrokConfig": "حفظ إعدادات Grok",
       "saveCodexConfig": "حفظ إعداد Codex",
       "saveGeminiConfig": "حفظ إعداد Gemini",
       "saveOpenCodeConfig": "حفظ إعداد OpenCode",
@@ -637,6 +640,43 @@
     "preflight": {
       "count": "عناصر الفحص المسبق: {count}",
       "notRun": "لم يتم تشغيل الفحوصات بعد."
+    },
+    "grok": {
+      "configDescription": "اضبط Grok هنا. عناصر التحكم أدناه — وضع الأذونات، وجهد الاستدلال، ونموذج مخصّص اختياري (نقطة نهاية خاصة)، والضغط — تُدمج في ~/.grok/config.toml مع الحفاظ على مفاتيحك وتعليقاتك الأخرى. يستخدم تسجيل الدخول XAI_API_KEY أو `grok login`. تبقى المفاتيح الأخرى قابلة للتحرير ضمن «متقدم».",
+      "permissionModeLabel": "وضع الأذونات",
+      "permissionAsk": "السؤال في كل مرة",
+      "permissionAlwaysApprove": "الموافقة دائمًا",
+      "reasoningEffortLabel": "جهد الاستدلال",
+      "effortLow": "منخفض (أسرع)",
+      "effortMedium": "متوسط (متوازن)",
+      "effortHigh": "مرتفع",
+      "effortXhigh": "الأقصى",
+      "optionDefault": "استخدام الافتراضي",
+      "authTitle": "المصادقة",
+      "authKeyConfigured": "XAI_API_KEY مُهيَّأ.",
+      "authKeyMissing": "لم يتم تعيين XAI_API_KEY.",
+      "authLoginHint": "عيّن XAI_API_KEY هنا، أو نفّذ `grok login` لتسجيل الدخول بالاشتراك (SuperGrok / X Premium+).",
+      "advancedToggle": "متقدم (config.toml الخام)",
+      "configTomlNative": "config.toml (أصلي)",
+      "configTomlHint": "يُحفظ حرفيًا كملف ~/.grok/config.toml بالكامل. يُرفض TOML غير الصالح حتى لا يقتطع خطأ مطبعي ملفك أبدًا.",
+      "configTomlPlaceholder": "# مفاتيح غير عناصر التحكم أعلاه، مثل\n# [mcp_servers.*] و[cli] وقواعد [permission].",
+      "customModelTitle": "نموذج مخصّص (نقطة نهاية خاصة)",
+      "customModelHint": "وجِّه Grok إلى نقطة نهاية مخصّصة أو مستضافة ذاتيًا. يكتب codeg كتلة `[model.*]` لكل نموذج ويجعلها النموذج الافتراضي. اترك معرّف النموذج فارغًا لإزالته.",
+      "customModelIdLabel": "معرّف النموذج",
+      "customModelIdPlaceholder": "مثال: grok-custom",
+      "customModelIdHint": "يُسجَّل ككتلة `[model.*]` ويُرسَل إلى الـ API كاسم للنموذج؛ ويُضبط أيضًا كـ `[models].default`.",
+      "customBaseUrlLabel": "عنوان URL الأساسي",
+      "customBaseUrlPlaceholder": "https://api.x.ai/v1 (الافتراضي)",
+      "customApiBackendLabel": "الواجهة الخلفية لـ API",
+      "backendResponses": "Responses",
+      "backendChatCompletions": "Chat Completions",
+      "backendMessages": "Messages (Anthropic)",
+      "customApiKeyLabel": "مفتاح API",
+      "customApiKeyHint": "يُخزَّن ضمن `[model.*].api_key`، مقصورًا على نقطة النهاية هذه.",
+      "customContextWindowLabel": "نافذة السياق (رموز)",
+      "customContextWindowHint": "اختياري. يحدّد توقيت الضغط التلقائي؛ اتركه فارغًا لاستخدام القيمة الافتراضية لنقطة النهاية.",
+      "autoCompactLabel": "عتبة الضغط التلقائي (%)",
+      "autoCompactHint": "يضغط المحادثة عندما يبلغ استخدام السياق هذه النسبة المئوية (الافتراضي في Grok هو 85). يُكتَب في `[session]`."
     },
     "codex": {
       "configDescription": "يدعم الإعداد السريع لعنوان API ومفتاح API واسم النموذج وجهد الاستدلال، مع المزامنة مع `auth.json` / `config.toml`.",
@@ -916,6 +956,9 @@
       "saveAgentOrderFailed": "فشل حفظ ترتيب Agent",
       "saveAgentSwitchFailed": "فشل حفظ مفتاح Agent",
       "saveEnvFailed": "فشل حفظ متغيرات البيئة",
+      "grokSaved": "تم حفظ إعدادات Grok",
+      "saveGrokNativeFailed": "فشل حفظ إعدادات Grok الأصلية",
+      "saveGrokApiKeyFailed": "تم حفظ الإعدادات، لكن تعذّر حفظ مفتاح API",
       "codexSaved": "تم حفظ إعداد Codex",
       "saveCodexNativeFailed": "فشل حفظ إعداد Codex الأصلي",
       "geminiSaved": "تم حفظ إعداد Gemini",
@@ -1046,7 +1089,8 @@
     }
   },
   "SettingsPages": {
-    "agentsLoading": "جارٍ تحميل إعدادات الوكلاء..."
+    "agentsLoading": "جارٍ تحميل إعدادات الوكلاء...",
+    "skillPacksLoading": "جارٍ تحميل حزم المهارات…"
   },
   "GeneralSettings": {
     "loading": "جارٍ التحميل...",
@@ -2165,10 +2209,12 @@
           "spawnFailed": "تعذر بدء تشغيل {agent}: {message}",
           "downloadFailed": "فشل تنزيل {agent}: {message}",
           "sessionLoadResourceNotFound": "فشل تحميل جلسة {agent}. أعد التحميل لإعادة المحاولة، أو ابدأ محادثة جديدة.",
+          "sessionLoadUnavailable": "تعذّر على {agent} استعادة هذه الجلسة، فقد تكون انتهت أو توقّف الوكيل. أعد التحميل لإعادة المحاولة، أو ابدأ محادثة جديدة.",
           "turnFailedRefusal": "رفض {agent} متابعة هذه الجولة. يدل ذلك غالبًا على خطأ في الخلفية أو البوابة. يرجى مراجعة سجلات الوكيل.",
           "turnFailedMaxTokens": "بلغ {agent} الحد الأقصى للرموز المسموح بها في هذه الجولة.",
           "turnFailedMaxTurnRequests": "بلغ {agent} الحد الأقصى لعدد الطلبات المسموح بها في هذه الجولة.",
           "turnFailedUnknown": "أنهى {agent} الجولة بسبب توقف غير معروف.",
+          "grokModelSwitchIncompatibleAgent": "لا يمكن لـ {agent} التبديل إلى هذا النموذج في محادثة قائمة. ابدأ جلسة جديدة لاستخدامه.",
           "turnFailedEmpty": "أنهى {agent} الجولة دون إنتاج أي رد. يرجى التحقق من إعدادات الوكيل."
         },
         "unableReadAgentConfig": "تعذر قراءة إعدادات الوكيل: {message}",
@@ -2252,6 +2298,7 @@
         "restoreInput": "استعادة حقل الإدخال",
         "experts": "الخبراء",
         "office": "الأعمال المكتبية",
+        "research": "البحث العلمي",
         "attachLocalUpload": "تحميل ملف محلي",
         "attachServerFile": "اختيار ملف من الخادم",
         "attachUploadTooLarge": "{names} يتجاوز حد التحميل {limit}MB وتم تخطيه.",
@@ -2336,11 +2383,39 @@
             "morph3d": "أنشئ عرض Morph ثلاثي الأبعاد بنماذج GLB وحركات كاميرا:\n\n[صف هنا موضوعك ومفهومك المرئي ثلاثي الأبعاد]",
             "academic": "اكتب ورقة أكاديمية في Word وفق المتطلبات التالية:\n\n[صف هنا موضوع بحثك ومنهجيتك وأبرز نتائجك]",
             "financial": "أنشئ نموذجًا ماليًا في Excel وفق المتطلبات التالية:\n\n[صف هنا قوائمك المالية وتوقعاتك وتحليلاتك]",
-            "dashboard": "أنشئ لوحة بيانات في Excel وفق المتطلبات التالية:\n\n[صف هنا مصدر بياناتك ومؤشراتك ومخططاتك]"
+            "dashboard": "أنشئ لوحة بيانات في Excel وفق المتطلبات التالية:\n\n[صف هنا مصدر بياناتك ومؤشراتك ومخططاتك]",
+            "scientific-brainstorming": "ساعدني في توليد أفكار بحثية: استكشف الروابط متعددة التخصصات، وتحدَّ الافتراضات، واكشف الفجوات الواعدة. المجال الذي أستكشفه: ",
+            "hypothesis-generation": "ساعدني في تحويل هذه الملاحظات إلى فرضيات قابلة للاختبار، مع تنبؤات واضحة وآليات معقولة وتجارب لاختبارها. ملاحظاتي: ",
+            "experimental-design": "ساعدني في تصميم تجربة دقيقة قبل جمع البيانات: التصميم والعشوائية والضوابط وكيفية تجنّب الالتباس. ما أريد دراسته: ",
+            "statistical-power": "ساعدني في تحديد حجم العينة المطلوب: أرشدني خلال تحليل القوة الإحصائية (حجم الأثر، ألفا، القوة) لتصميمي. التفاصيل: ",
+            "statistical-analysis": "ساعدني في تحليل هذه البيانات بشكل صحيح: اختر الاختبار المناسب، وتحقق من الافتراضات، وأبلغ عن أحجام الأثر، واكتب النتائج. بياناتي وسؤالي: ",
+            "exploratory-data-analysis": "قم بتحليل استكشافي لملف بياناتي: لخّص بنيته وجودته والأنماط اللافتة، ثم اقترح الخطوات التالية. الملف هو: ",
+            "scientific-visualization": "ساعدني في إنشاء شكل بجودة النشر: تخطيط واضح، وأشرطة خطأ صادقة، ولوحة ألوان مناسبة لعمى الألوان، وتنسيق المجلة. ما أريد عرضه: ",
+            "scientific-critical-thinking": "ساعدني في التقييم النقدي لهذه الدراسة أو الادعاء: قيّم جودة الأدلة، وارصد التحيّزات والعوامل المربكة، وزِن الاستنتاجات. إليك المحتوى: ",
+            "paper-lookup": "ساعدني في العثور على أوراق ذات صلة ونص كامل مفتوح الوصول عبر قواعد البيانات الأكاديمية، مع استشهادات يمكنني إعادة استخدامها. أبحث عن: "
           },
+          "paper-lookup": "البحث عن الأوراق البحثية",
+          "paper-lookupDesc": "البحث في 10 واجهات برمجية أكاديمية (PubMed وarXiv وOpenAlex وCrossref…) عن الأوراق والاستشهادات والنص الكامل المفتوح.",
+          "scientific-critical-thinking": "التفكير النقدي",
+          "scientific-critical-thinkingDesc": "تقييم الادعاءات العلمية وجودة الأدلة: رصد التحيّزات والعوامل المربكة وتطبيق أطر GRADE ومخاطر التحيّز.",
+          "scientific-visualization": "التصور العلمي",
+          "scientific-visualizationDesc": "أشكال جاهزة للنشر: تخطيطات متعددة اللوحات، وتعليقات الدلالة الإحصائية، وتنسيق خاص بكل مجلة.",
+          "exploratory-data-analysis": "تحليل البيانات الاستكشافي",
+          "exploratory-data-analysisDesc": "استكشاف آلي لملفات البيانات العلمية بأكثر من 200 صيغة مع مقاييس الجودة والتقارير.",
+          "statistical-analysis": "التحليل الإحصائي",
+          "statistical-analysisDesc": "تحليل إحصائي موجَّه: اختيار الاختبار، والتحقق من الافتراضات، وأحجام الأثر، والتقارير بأسلوب APA.",
+          "statistical-power": "القوة الإحصائية",
+          "statistical-powerDesc": "تحليل حجم العينة والقوة الإحصائية: عدد المشاركين اللازم، وأصغر تأثير قابل للكشف، ومنحنيات القوة.",
+          "experimental-design": "تصميم التجارب",
+          "experimental-designDesc": "تصميم دراسات دقيقة قبل جمع البيانات: العشوائية والتجميع والضوابط وتصاميم العوامل/DOE.",
+          "hypothesis-generation": "توليد الفرضيات",
+          "hypothesis-generationDesc": "تحويل الملاحظات إلى فرضيات قابلة للاختبار مع تنبؤات وآليات وتجارب لاختبارها.",
+          "scientific-brainstorming": "العصف الذهني العلمي",
+          "scientific-brainstormingDesc": "توليد أفكار بحثية مفتوحة: استكشاف الروابط متعددة التخصصات وتحدّي الافتراضات وكشف الفجوات البحثية.",
           "tabs": {
             "office": "الأعمال المكتبية",
-            "coding": "تطوير الكود"
+            "coding": "تطوير الكود",
+            "research": "البحث العلمي"
           },
           "coding": {
             "brainstormingDesc": "استكشف النية والمتطلبات قبل البناء",
@@ -3268,6 +3343,40 @@
       "openFolderFailed": "فشل فتح المجلد"
     }
   },
+  "ScienceSettings": {
+    "title": "مهارات البحث العلمي",
+    "description": "فعّل مهارات البحث العلمي المنسّقة لوكلاء البرمجة بالذكاء الاصطناعي: توليد الفرضيات، وتصميم التجارب، والإحصاء، والتصور، والتقييم النقدي، والبحث في الأدبيات. يدير codeg نسخة مركزية ويربط كل مهارة بالوكلاء الذين تختارهم.",
+    "loading": "جارٍ تحميل مهارات البحث العلمي…",
+    "emptySkills": "لا توجد مهارات بحث علمي متاحة. تحقّق من سجلات التطبيق.",
+    "searchPlaceholder": "ابحث في مهارات البحث العلمي بالاسم أو المعرّف أو الوصف",
+    "categories": {
+      "ideation": "توليد الأفكار",
+      "design": "تصميم الدراسة",
+      "analysis": "التحليل",
+      "visualization": "التصور",
+      "evaluation": "التقييم",
+      "literature": "الأدبيات"
+    },
+    "states": {
+      "not_linked": "غير مُفعَّل",
+      "linked_to_codeg": "مُفعَّل",
+      "linked_elsewhere": "محظور — يوجد رابط آخر",
+      "blocked_by_real_directory": "محظور — مهارة مخصصة تشغل هذا الاسم",
+      "broken": "رابط معطوب"
+    },
+    "badges": {
+      "userModified": "عُدِّل من قبل المستخدم",
+      "needsKey": "يتطلب مفتاحًا",
+      "needsSetup": "قد يتطلب إعدادًا"
+    },
+    "actions": {
+      "openCentralDir": "فتح المجلد المركزي",
+      "refresh": "تحديث"
+    },
+    "toasts": {
+      "openFolderFailed": "فشل فتح المجلد"
+    }
+  },
   "OfficeToolsSettings": {
     "title": "أدوات Office",
     "description": "إدارة مهارات OfficeCLI لإنشاء ملفات Excel وWord وPowerPoint. قم بتثبيت OfficeCLI ومزامنة المهارات وتفعيلها لكل وكيل.",
@@ -3327,6 +3436,22 @@
     },
     "autoPreviewLabel": "فتح المعاينة تلقائيًا",
     "autoPreviewHint": "عندما ينشئ وكيل ملف Word أو Excel أو PowerPoint أو يعدّله، افتح معاينته المباشرة تلقائيًا."
+  },
+  "SkillPacksSettings": {
+    "title": "حزم المهارات",
+    "description": "حزم مهارات منسّقة يديرها codeg مركزيًا ويربطها بوكلاء الذكاء الاصطناعي لديك — خبراء البرمجة، والبحث العلمي، وأدوات مستندات المكتب. فعّلها لكل وكيل أدناه.",
+    "tabs": {
+      "experts": "الخبراء",
+      "science": "البحث العلمي",
+      "office": "أدوات المكتب"
+    },
+    "actions": {
+      "openCentralDir": "فتح المجلد المركزي",
+      "refresh": "تحديث"
+    },
+    "toasts": {
+      "openFolderFailed": "فشل فتح المجلد"
+    }
   },
   "QuickMessagesSettings": {
     "title": "رسائل سريعة",

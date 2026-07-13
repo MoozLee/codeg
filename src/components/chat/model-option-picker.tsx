@@ -10,6 +10,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { ModelOptionList } from "@/components/chat/model-option-list"
+import { useScrollbarSafeDismiss } from "@/hooks/use-scrollbar-safe-dismiss"
 import type { ModelOptionGroup } from "@/lib/model-config-groups"
 import type { SessionConfigOptionInfo } from "@/lib/types"
 
@@ -26,8 +27,10 @@ interface ModelOptionPickerProps {
 // Replaces the Radix `DropdownMenu` (whose roving focus over hundreds of items
 // is the scroll jank) only for the model option, only when it's large — short
 // lists keep `InlineSessionConfigSelector`. Mirrors the BranchPicker layout
-// (Popover `overflow-hidden p-0`, the list is the sole nested scroller) so a
-// scrollbar click never dismisses the popover.
+// (Popover `overflow-hidden p-0`, the list is the sole nested scroller).
+// Grabbing the list's scrollbar would otherwise dismiss the popover on WebKit —
+// the grab blurs focus and WebKit bounces it to an outside element, which Radix
+// reads as a focus-outside; `useScrollbarSafeDismiss` keeps it open (see there).
 export function ModelOptionPicker({
   option,
   groups,
@@ -35,6 +38,8 @@ export function ModelOptionPicker({
 }: ModelOptionPickerProps) {
   const t = useTranslations("Folder.chat.messageInput")
   const [open, setOpen] = useState(false)
+  const { contentRef, onPointerDownOutside, onFocusOutside } =
+    useScrollbarSafeDismiss()
   const kind = option.kind.type === "select" ? option.kind : null
   const currentValue = kind?.current_value ?? ""
   const currentLabel = useMemo(() => {
@@ -65,8 +70,11 @@ export function ModelOptionPicker({
         </Button>
       </PopoverTrigger>
       <PopoverContent
+        ref={contentRef}
         side="top"
         align="start"
+        onPointerDownOutside={onPointerDownOutside}
+        onFocusOutside={onFocusOutside}
         className="w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden p-0"
       >
         <ModelOptionList

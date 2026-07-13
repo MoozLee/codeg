@@ -13,6 +13,7 @@ import {
   Cog,
   Copy,
   FileStack,
+  FlaskConical,
   FolderSearch,
   GitFork,
   Lock,
@@ -93,6 +94,7 @@ import type {
   AgentType,
   AvailableCommandInfo,
   ExpertListItem,
+  ScienceListItem,
   PromptCapabilitiesInfo,
   PromptDraft,
   PromptInputBlock,
@@ -129,8 +131,11 @@ import {
 import { DropdownRadioItemContent } from "@/components/chat/dropdown-radio-item-content"
 import { useAgentSkills } from "@/hooks/use-agent-skills"
 import { useBuiltInExperts } from "@/hooks/use-built-in-experts"
+import { useBuiltInScience } from "@/hooks/use-built-in-science"
 import { useEnabledSkillIds } from "@/hooks/use-enabled-skill-ids"
+import { useScrollbarSafeDismiss } from "@/hooks/use-scrollbar-safe-dismiss"
 import { getExpertIcon, pickLocalized } from "@/lib/expert-presentation"
+import { getScienceIcon } from "@/lib/science-presentation"
 import { OFFICE_ACTIONS, type OfficeAction } from "@/lib/office-actions"
 import {
   clearMessageInputDraftV2,
@@ -141,7 +146,11 @@ import {
   RichComposer,
   type RichComposerHandle,
 } from "@/components/chat/composer/rich-composer"
-import { docToPromptBlocks } from "@/components/chat/composer/to-prompt-blocks"
+import {
+  composerLeafText,
+  docToPromptBlocks,
+  serializeDocToDisplayText,
+} from "@/components/chat/composer/to-prompt-blocks"
 import {
   buildEmbeddedReferenceUri,
   isEmbeddedReferenceUri,
@@ -150,14 +159,15 @@ import {
   applyExpertReference,
   isComposerChromeClick,
   isComposerEmpty,
+  restampSkillPrefixes,
   restoreBlocksIntoEditor,
+  restoreSerializedReferencesIntoEditor,
 } from "@/components/chat/composer/composer-commands"
 import {
   commandToReference,
   skillToReference,
 } from "@/components/chat/composer/invocation-reference"
 import { cutSelectionToClipboard } from "@/components/chat/composer/clipboard-actions"
-import { referenceToMarkdown } from "@/components/chat/composer/reference-text"
 import type { ReferenceAttrs } from "@/components/chat/composer/types"
 import type { Editor, JSONContent } from "@tiptap/core"
 import {
@@ -542,12 +552,15 @@ export function MessageInput({
   const effectiveDraftStorageKey = draftStorageKey ?? null
   const isExternalDraftEditing = isEditingQueueItem || isRetryEditingMessage
   const resolvedPlaceholder = placeholder ?? t("askAnything")
-  // The "+" menu's expert / daily-office skill shortcuts mirror the welcome-page
-  // quick actions: localized labels (`tQa` reads the same namespace those cards
-  // use), the bundled experts, and per-agent skill-enabled gating.
+  // The "+" menu's expert / daily-office / research skill shortcuts mirror the
+  // welcome-page quick actions: localized labels, the bundled experts and
+  // science skills, and per-agent skill-enabled gating. Experts and science load
+  // their full lists from the backend (so every skill shows, not a curated
+  // subset); office is a fixed static set. `tQa` supplies office labels/prompts.
   const locale = useLocale()
   const tQa = useTranslations("Folder.chat.welcomePanel.quickActions")
   const experts = useBuiltInExperts()
+  const science = useBuiltInScience()
   const {
     enabledIds,
     ready: skillStatusReady,
@@ -572,6 +585,9 @@ export function MessageInput({
   // pick closes it explicitly — matching the prior cog menu, which also closed
   // on every selection.
   const [collapsedSelectorsOpen, setCollapsedSelectorsOpen] = useState(false)
+  // Keep the collapsed settings popover open while dragging the (virtualized)
+  // model list's native scrollbar — see `useScrollbarSafeDismiss`.
+  const collapsedSelectorsGuard = useScrollbarSafeDismiss()
   const [quickMessages, setQuickMessages] = useState<QuickMessage[]>([])
   const [quickMessagesLoading, setQuickMessagesLoading] = useState(false)
   // Whether the async Clipboard read API is usable here. It's absent in
@@ -777,15 +793,19 @@ export function MessageInput({
         ) {
           // Full fidelity: restore inline badges + images from the blocks.
           hydrateFromBlocks(editor, editingDraftBlocks)
-        } else {
-          ed.setMarkdown(editingDraftText)
+        } else if (editingDraftText != null) {
+          if (editor) {
+            restoreSerializedReferencesIntoEditor(editor, editingDraftText)
+          } else {
+            ed.setText(editingDraftText)
+          }
         }
       } else if (effectiveDraftStorageKey) {
         const loaded = loadMessageInputDraftV2(effectiveDraftStorageKey)
         if (loaded?.kind === "doc") {
           ed.setDoc(loaded.doc)
         } else if (loaded?.kind === "legacyMarkdown") {
-          ed.setMarkdown(loaded.markdown)
+          ed.setText(loaded.markdown)
         }
       }
       const editor = ed.getEditor()
@@ -815,8 +835,10 @@ export function MessageInput({
     const editor = editorRef.current?.getEditor()
     if (editingDraftBlocks && editingDraftBlocks.length > 0 && editor) {
       hydrateFromBlocks(editor, editingDraftBlocks)
+    } else if (editor) {
+      restoreSerializedReferencesIntoEditor(editor, retryDraftText)
     } else {
-      editorRef.current?.setMarkdown(retryDraftText)
+      editorRef.current?.setText(retryDraftText)
     }
     setComposerEmpty(editor ? isComposerEmpty(editor) : true)
     requestAnimationFrame(() => {
@@ -846,8 +868,10 @@ export function MessageInput({
         const editor = editorRef.current?.getEditor()
         if (editingDraftBlocks && editingDraftBlocks.length > 0 && editor) {
           hydrateFromBlocks(editor, editingDraftBlocks)
+        } else if (editingDraftText != null && editor) {
+          restoreSerializedReferencesIntoEditor(editor, editingDraftText)
         } else if (editingDraftText != null) {
-          editorRef.current?.setMarkdown(editingDraftText)
+          editorRef.current?.setText(editingDraftText)
         }
         setComposerEmpty(editor ? isComposerEmpty(editor) : true)
         editorRef.current?.focus()
@@ -878,7 +902,7 @@ export function MessageInput({
     const raf = requestAnimationFrame(() => {
       const handle = editorRef.current
       if (handle) {
-        handle.setMarkdown(payload.text)
+        handle.setText(payload.text)
         // Prepend the skill as the leading invocation badge, so the sent
         // message opens with `${prefix}${id}`.
         if (payload.skill) {
@@ -900,6 +924,25 @@ export function MessageInput({
     })
     return () => cancelAnimationFrame(raf)
   }, [injectContent, composerReady, skillPrefix, onInjectConsumed])
+
+  // A skill / expert badge freezes its invocation prefix (`$` for Codex, `/`
+  // elsewhere) at insert time. On the welcome page users routinely click a
+  // quick-skill card while the default agent is selected and only then switch to
+  // Codex via the picker below — the badge would keep its `/` and Codex would
+  // parse the leading `/skill` as a slash command and reject the turn. Re-stamp
+  // the existing skill badges whenever the effective prefix changes so the
+  // leading invocation always matches the selected agent (ACP slash commands
+  // carry no scope and stay `/`). rAF-deferred like the sibling editor-mutation
+  // effects to stay off React's commit phase — the badge NodeView re-renders via
+  // a synchronous flushSync().
+  useEffect(() => {
+    if (!composerReady) return
+    const raf = requestAnimationFrame(() => {
+      const editor = editorRef.current?.getEditor()
+      if (editor) restampSkillPrefixes(editor, skillPrefix)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [skillPrefix, composerReady])
 
   const setDragActiveIfChanged = useCallback((next: boolean) => {
     if (dragActiveRef.current === next) return
@@ -1842,7 +1885,7 @@ export function MessageInput({
     chain.insertReference(commandToReference(cmd)).insertContent(" ").run()
   }, [])
 
-  // ── "+" menu skill shortcuts (experts / daily office) ──
+  // ── "+" menu skill shortcuts (experts / daily office / research) ──
   //
   // Surface the welcome-page skill families inside an active conversation. Each
   // item drops that skill's leading invocation badge into the composer. A skill
@@ -1857,6 +1900,16 @@ export function MessageInput({
           a.metadata.id.localeCompare(b.metadata.id)
       ),
     [experts]
+  )
+
+  const scienceSorted = useMemo(
+    () =>
+      [...science].sort(
+        (a, b) =>
+          (a.metadata.sort_order ?? 0) - (b.metadata.sort_order ?? 0) ||
+          a.metadata.id.localeCompare(b.metadata.id)
+      ),
+    [science]
   )
 
   const isSkillLocked = useCallback(
@@ -1897,7 +1950,7 @@ export function MessageInput({
         const editor = handle?.getEditor()
         if (!handle || !editor) return
         if (template && isComposerEmpty(editor)) {
-          handle.setMarkdown(template)
+          handle.setText(template)
         }
         applyExpertReference(editor, {
           refType: "skill",
@@ -1940,6 +1993,21 @@ export function MessageInput({
       )
     },
     [tQa, isSkillLocked, notifySkillNotEnabled, insertSkillShortcut]
+  )
+
+  const handleScienceShortcut = useCallback(
+    (item: ScienceListItem) => {
+      const label =
+        pickLocalized(item.metadata.display_name, locale) || item.metadata.id
+      if (isSkillLocked(item.metadata.id)) {
+        notifySkillNotEnabled(label, "science")
+        return
+      }
+      // Science skills are open-ended methodologies: just the leading badge,
+      // no canned template (mirrors experts).
+      insertSkillShortcut({ id: item.metadata.id, label }, "")
+    },
+    [locale, isSkillLocked, notifySkillNotEnabled, insertSkillShortcut]
   )
 
   const handlePickFiles = useCallback(async () => {
@@ -2013,23 +2081,18 @@ export function MessageInput({
 
   const handleQuickMessageSelect = useCallback((message: QuickMessage) => {
     if (!message.content) return
-    editorRef.current?.insertMarkdownAtCursor(message.content)
+    editorRef.current?.insertTextAtCursor(message.content)
   }, [])
 
   // Plain-text rendering of the editor's current selection, for the right-click
   // Cut/Copy. Read straight from ProseMirror state (stable while the radix menu
-  // holds DOM focus); inline reference badges serialize to their Markdown form
-  // and hard breaks to newlines so a copied selection reads back as text.
+  // holds DOM focus). Uses the same leaf mapping as send serialization
+  // (`composerLeafText`: reference badges → their inline token, hard breaks →
+  // newlines) so a copied selection reads back exactly like what is sent.
   const selectionPlainText = useCallback((editor: Editor): string => {
     const { from, to } = editor.state.selection
     if (from >= to) return ""
-    return editor.state.doc.textBetween(from, to, "\n", (leaf) => {
-      if (leaf.type.name === "reference") {
-        return referenceToMarkdown(leaf.attrs as ReferenceAttrs)
-      }
-      if (leaf.type.name === "hardBreak") return "\n"
-      return ""
-    })
+    return editor.state.doc.textBetween(from, to, "\n", composerLeafText)
   }, [])
 
   // The radix menu traps focus until it closes, so the clipboard write is
@@ -2332,10 +2395,27 @@ export function MessageInput({
 
   const buildDraft = useCallback((): PromptDraft | null => {
     const editor = editorRef.current?.getEditor()
+    // Authoritative prefix normalization at the send boundary. A skill / expert
+    // badge freezes its `$`/`/` trigger at insert time and the agent can change
+    // afterward; the agent-change effect re-stamps live, but doing it here too —
+    // synchronously, before both the sent blocks and the display prose read the
+    // doc — guarantees the wire text matches the current agent regardless of any
+    // timing/ordering (Codex needs `$skill`, not the slash-command `/skill`).
+    // Cheap: one small-doc walk, and no dispatch when nothing is stale.
+    if (editor) restampSkillPrefixes(editor, skillPrefix)
     // Inline badges + prose → text/resource_link blocks (file mentions become
     // first-class ResourceLinks; agent/session/commit/skill stay inline text;
     // embedded badges are dropped here and re-added below from the payload map).
     const blocks: PromptInputBlock[] = editor ? docToPromptBlocks(editor) : []
+    // Display/queue text is the SAME serialization as the sent prose, differing
+    // only in that it KEEPS embedded-attachment badges inline (their real bytes
+    // are appended below as a separate block; the send text drops the synthetic
+    // uri, but the sender must still see the file they attached). For every other
+    // kind of content it is byte-identical to what is sent, so the queue chip /
+    // optimistic bubble can't diverge from the actual prose.
+    const displayProse = editor
+      ? serializeDocToDisplayText(editor.state.doc).trim()
+      : ""
     // Append the real bytes-bearing block for every embedded-attachment badge
     // still present in the document, looked up by its `codeg://embedded/…` uri.
     // Walking the live doc (rather than a swap pass over a stored draft) means a
@@ -2354,8 +2434,6 @@ export function MessageInput({
         return true
       })
     }
-    const displayMarkdown = editorRef.current?.getMarkdown().trim() ?? ""
-
     if (blocks.length === 0 && attachments.length === 0) return null
 
     // `attachments` holds only images now — files live inline as badges above.
@@ -2371,10 +2449,10 @@ export function MessageInput({
     }
 
     const displayText =
-      displayMarkdown ||
+      displayProse ||
       `Attached ${attachments.length} attachment${attachments.length > 1 ? "s" : ""}`
     return { blocks, displayText }
-  }, [attachments])
+  }, [attachments, skillPrefix])
 
   // Clear the editor + attachments after a send / enqueue / save.
   const resetComposer = useCallback(() => {
@@ -3073,7 +3151,7 @@ export function MessageInput({
                     <DropdownMenuContent
                       side="top"
                       align="start"
-                      className="min-w-48"
+                      className="min-w-56 w-auto"
                     >
                       {showNativePaperclip ? (
                         <DropdownMenuItem
@@ -3342,6 +3420,45 @@ export function MessageInput({
                               })}
                             </DropdownMenuSubContent>
                           </DropdownMenuSub>
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger
+                              disabled={scienceSorted.length === 0}
+                            >
+                              <FlaskConical className="size-4" />
+                              {t("research")}
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent
+                              className="min-w-44 overflow-y-auto"
+                              style={{
+                                maxWidth: "min(20rem, calc(100vw - 1rem))",
+                                maxHeight:
+                                  "min(32rem, var(--radix-dropdown-menu-content-available-height))",
+                              }}
+                            >
+                              {scienceSorted.map((item) => {
+                                const Icon = getScienceIcon(item.metadata.icon)
+                                const label =
+                                  pickLocalized(
+                                    item.metadata.display_name,
+                                    locale
+                                  ) || item.metadata.id
+                                return (
+                                  <DropdownMenuItem
+                                    key={item.metadata.id}
+                                    onClick={() => handleScienceShortcut(item)}
+                                  >
+                                    <Icon className="size-4" />
+                                    <span className="flex-1 truncate">
+                                      {label}
+                                    </span>
+                                    {isSkillLocked(item.metadata.id) && (
+                                      <Lock className="ml-auto size-3.5 shrink-0 text-muted-foreground/70" />
+                                    )}
+                                  </DropdownMenuItem>
+                                )
+                              })}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
                         </>
                       )}
                     </DropdownMenuContent>
@@ -3381,9 +3498,16 @@ export function MessageInput({
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent
+                          ref={collapsedSelectorsGuard.contentRef}
                           side="top"
                           align="start"
                           aria-label={t("agentSettings")}
+                          onPointerDownOutside={
+                            collapsedSelectorsGuard.onPointerDownOutside
+                          }
+                          onFocusOutside={
+                            collapsedSelectorsGuard.onFocusOutside
+                          }
                           className="w-[22rem] max-w-[calc(100vw-1rem)] p-1"
                         >
                           {showConfigLoading && (
