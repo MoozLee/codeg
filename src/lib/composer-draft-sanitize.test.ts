@@ -6,6 +6,11 @@ import { buildComposerExtensions } from "@/components/chat/composer/editor-confi
 
 import { sanitizeComposerDraftDoc } from "./composer-draft-sanitize"
 
+const pastedText: JSONContent = {
+  type: "pastedText",
+  attrs: { content: "one\ntwo\nthree\nfour" },
+}
+
 const fileRef: JSONContent = {
   type: "reference",
   attrs: {
@@ -85,6 +90,27 @@ describe("sanitizeComposerDraftDoc", () => {
     // Marks are gone (the text node carries no `marks`).
     const bold = clean.content?.[1]?.content?.[0]
     expect(bold).toEqual({ type: "text", text: "bold" })
+  })
+
+  it("preserves collapsed pasted text in a v2 draft", () => {
+    const doc: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "before " }, pastedText],
+        },
+      ],
+    }
+
+    expect(sanitizeComposerDraftDoc(doc)).toBe(doc)
+    const editor = new Editor({ extensions: buildComposerExtensions({}) })
+    try {
+      editor.commands.setContent(sanitizeComposerDraftDoc(doc))
+      expect(editor.getJSON()).toEqual(doc)
+    } finally {
+      editor.destroy()
+    }
   })
 
   it("preserves reference badges while flattening around them", () => {

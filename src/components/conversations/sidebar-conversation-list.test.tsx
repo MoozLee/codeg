@@ -6,7 +6,7 @@ import {
   useImperativeHandle,
   useState,
 } from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -20,6 +20,7 @@ import {
   useAppWorkspaceStore,
 } from "@/stores/app-workspace-store"
 import enMessages from "@/i18n/messages/en.json"
+import { updateFolderPinned } from "@/lib/api"
 
 // ── Probes ────────────────────────────────────────────────────────────────
 // AgentIcon renders once per card body → counts card re-renders. The Folder /
@@ -49,6 +50,7 @@ const store = vi.hoisted(() => ({
 // fields are), so the list's folder callbacks that close over them stay
 // memoized.
 const stableWorkspaceFns = vi.hoisted(() => ({
+  fetchFolders: vi.fn(() => Promise.resolve()),
   refreshConversations: async () => {},
   updateConversationLocal: () => {},
   removeFolderFromWorkspace: async () => {},
@@ -184,6 +186,7 @@ vi.mock("@/lib/api", () => ({
   updateConversationTitle: vi.fn(async () => {}),
   updateFolderColor: vi.fn(async () => {}),
   updateFolderDefaultAgent: vi.fn(async () => {}),
+  updateFolderPinned: vi.fn(async () => {}),
 }))
 
 vi.mock("@/hooks/use-open-conversation", () => ({
@@ -289,7 +292,8 @@ function conv(
 function folder(
   id: number,
   name: string,
-  parentId: number | null = null
+  parentId: number | null = null,
+  overrides: Partial<FolderDetail> = {}
 ): FolderDetail {
   return {
     id,
@@ -298,6 +302,8 @@ function folder(
     color: "blue",
     default_agent_type: null,
     parent_id: parentId,
+    is_pinned: false,
+    ...overrides,
   } as unknown as FolderDetail
 }
 
@@ -462,6 +468,68 @@ describe("SidebarConversationList — Pinned section (migration semantics)", () 
     const text = document.body.textContent ?? ""
     expect(text).not.toContain("Pinned")
     expect(text).toContain("Folders")
+  })
+})
+
+describe("SidebarConversationList — pinned folders", () => {
+  beforeEach(() => {
+    vi.mocked(updateFolderPinned).mockClear()
+    stableWorkspaceFns.fetchFolders.mockClear()
+    const folders = [
+      folder(1, "Pinned project", null, { is_pinned: true }),
+      folder(2, "Regular project"),
+    ]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      conversations: [conv(11, 1), conv(21, 2)],
+    })
+    store.activeTabId = null
+    store.tabSpec = []
+  })
+
+  it("renders pinned folders in their own section above regular folders", () => {
+    render(tree())
+    const text = document.body.textContent ?? ""
+    const section = text.indexOf("Pinned folders")
+    const pinned = text.indexOf("Pinned project")
+    const folders = text.indexOf("Folders")
+    const regular = text.indexOf("Regular project")
+
+    expect(section).toBeGreaterThanOrEqual(0)
+    expect(section).toBeLessThan(pinned)
+    expect(pinned).toBeLessThan(folders)
+    expect(folders).toBeLessThan(regular)
+  })
+
+  it("collapses and reopens the pinned-folder section", () => {
+    render(tree())
+    const toggle = screen.getByRole("button", { name: /Pinned folders/ })
+
+    fireEvent.click(toggle)
+    expect(screen.queryByText("Pinned project")).toBeNull()
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(toggle)
+    expect(screen.getByText("Pinned project")).toBeInTheDocument()
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("pins and unpins through the folder context menu", async () => {
+    render(tree())
+
+    fireEvent.contextMenu(screen.getByText("Regular project"))
+    fireEvent.click(await screen.findByText("Pin"))
+    await waitFor(() =>
+      expect(updateFolderPinned).toHaveBeenCalledWith(2, true)
+    )
+    expect(stableWorkspaceFns.fetchFolders).toHaveBeenCalled()
+
+    fireEvent.contextMenu(screen.getByText("Pinned project"))
+    fireEvent.click(await screen.findByText("Unpin"))
+    await waitFor(() =>
+      expect(updateFolderPinned).toHaveBeenCalledWith(1, false)
+    )
   })
 })
 

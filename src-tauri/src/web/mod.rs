@@ -784,7 +784,11 @@ pub(crate) async fn do_start_web_server_tauri(
             &app.path().app_data_dir().unwrap_or_default(),
         ),
         web_server_state: WebServerState::new(), // placeholder; not used by handlers
-        chat_channel_manager: crate::app_state::default_chat_channel_manager(),
+        // HTTP channel commands and topic title sync must target the active
+        // backends owned by the desktop process.
+        chat_channel_manager: app
+            .state::<crate::chat_channel::manager::ChatChannelManager>()
+            .clone_ref(),
         workspace_transfer: app
             .try_state::<Arc<crate::workspace_transfer::WorkspaceTransferManager>>()
             .map(|state| state.inner().clone())

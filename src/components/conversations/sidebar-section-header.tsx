@@ -33,9 +33,9 @@ export const SidebarSectionHeader = memo(function SidebarSectionHeader({
   onCloneRepository,
   topGap = false,
 }: {
-  section: "pinned" | "folders" | "chats"
+  section: "pinned" | "pinned-folders" | "folders" | "chats"
   expanded: boolean
-  onToggle: (section: "pinned" | "folders" | "chats") => void
+  onToggle: (section: "pinned" | "pinned-folders" | "folders" | "chats") => void
   /**
    * When provided on the "chats" section, renders a New-chat action button at
    * the row's right edge, revealed only while the row is hovered/focused (and
@@ -72,9 +72,11 @@ export const SidebarSectionHeader = memo(function SidebarSectionHeader({
   const label =
     section === "pinned"
       ? t("sectionPinned")
-      : section === "chats"
-        ? t("sectionChats")
-        : t("sectionFolders")
+      : section === "pinned-folders"
+        ? t("sectionPinnedFolders")
+        : section === "chats"
+          ? t("sectionChats")
+          : t("sectionFolders")
   const showNewChat = section === "chats" && onNewChat != null
   // The folders section mirrors the chats section's right-edge affordance, but
   // with two buttons (Open Folder / Clone Repository) — the same "add a folder"

@@ -11,6 +11,11 @@ export const REFERENCE_KINDS: readonly ReferenceKind[] = [
   "skill",
 ]
 
+/** Full text stored behind a collapsed large-paste atom. */
+export interface PastedTextAttrs {
+  content: string
+}
+
 /**
  * Type-specific render hints carried alongside a reference. All fields are
  * optional — the badge reads only what its `refType` needs. Serialization is

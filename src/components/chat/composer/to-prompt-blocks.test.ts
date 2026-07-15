@@ -59,6 +59,22 @@ describe("docToPromptBlocks", () => {
     expect(docToPromptBlocks(editor)).toEqual([])
   })
 
+  it("expands a collapsed pasted-text atom to its full original text", () => {
+    const pasted = "first line\nsecond line\nthird line\nfourth line"
+    editor
+      .chain()
+      .insertContent("before ")
+      .insertPastedText(pasted)
+      .insertContent(" after")
+      .run()
+
+    expect(JSON.stringify(editor.getJSON())).toContain('"type":"pastedText"')
+    expect(textBlock(docToPromptBlocks(editor))).toBe(`before ${pasted} after`)
+    expect(serializeDocToDisplayText(editor.state.doc)).toBe(
+      `before ${pasted} after`
+    )
+  })
+
   it("keeps an agent reference inline as text (no resource_link)", () => {
     editor
       .chain()

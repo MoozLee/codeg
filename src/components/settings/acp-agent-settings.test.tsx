@@ -7,6 +7,7 @@ import {
   buildVersionCheck,
   configTextForClaudeSave,
   getAgentChecks,
+  GROK_PERMISSION_MODES,
   patchImportantConfigText,
 } from "./acp-agent-settings"
 import type { AcpAgentInfo, AgentType, PreflightResult } from "@/lib/types"
@@ -30,6 +31,7 @@ function makeAgent(overrides: Partial<AcpAgentInfo>): AcpAgentInfo {
     codex_auth_json: null,
     cline_secrets_json: null,
     codex_config_toml: null,
+    codex_model_catalog: null,
     grok_config_toml: null,
     grok_settings: null,
     hermes_config_yaml: null,
@@ -75,6 +77,19 @@ const emptyCustoms = {
   autoCompactThresholdPercent: null,
 }
 
+describe("GROK_PERMISSION_MODES", () => {
+  it("exposes every permission mode accepted by the backend", () => {
+    expect(GROK_PERMISSION_MODES.map(([value]) => value)).toEqual([
+      "default",
+      "acceptEdits",
+      "auto",
+      "dontAsk",
+      "bypassPermissions",
+      "plan",
+    ])
+  })
+})
+
 describe("buildGrokStructuredConfig — Grok panel save payload", () => {
   // A chosen dropdown value passes through. These become [ui].permission_mode /
   // [models].default_reasoning_effort on save.
@@ -82,12 +97,12 @@ describe("buildGrokStructuredConfig — Grok panel save payload", () => {
     expect(
       buildGrokStructuredConfig(
         grokDraft({
-          grokPermissionMode: "always-approve",
+          grokPermissionMode: "bypassPermissions",
           grokReasoningEffort: "high",
         })
       )
     ).toEqual({
-      permissionMode: "always-approve",
+      permissionMode: "bypassPermissions",
       defaultReasoningEffort: "high",
       ...emptyCustoms,
     })

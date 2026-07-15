@@ -351,12 +351,46 @@ pub enum AcpEvent {
 /// `status` is the notification's `<status>` passed through verbatim
 /// (`"completed"` on success). The same task id may settle more than once —
 /// a completed sub-agent can be resumed via `SendMessage` and re-notify.
+///
+/// `tool_use_id` and `result` come from the same `<task-notification>` record's
+/// `<tool-use-id>`/`<result>` tags. They let the frontend flip the LAUNCH card
+/// (`AgentToolCallPart`) from "running in background" to its terminal state
+/// entirely in-memory — rewriting the launching tool call's own
+/// `[[codeg-background-task]]` marker — WITHOUT a `refetchDetail`. That refetch
+/// path used to be the only card-flip trigger, but it re-parses the still-open
+/// transcript mid-`#870`-hold and both double-renders the held turn and races
+/// the file's own last write.
+/// `tool_use_id` is the launching `tool_use`/`tool_result` block's id (Claude's
+/// SDK-level `toolu_…`), NOT `task_id`; `None` for a background shell (its
+/// notification carries no tool-use-id and it has no marker card to flip).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackgroundSettledInfo {
     pub task_id: String,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    /// The launching tool call's `tool_use_id` (from the notification's
+    /// `<tool-use-id>`), so the frontend can locate the exact card to flip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
+    /// The notification's `<result>` markdown (capped at
+    /// [`crate::parsers::claude::BACKGROUND_RESULT_MAX_CHARS`], matching the
+    /// cold-parse fold), so the live path renders identically to a cold detail
+    /// parse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    /// Whether this task's reply is/was rendered on the ACP wire as the tail of
+    /// a turn `#870` (claude-agent-acp v0.59.0) held open for it — i.e. the
+    /// settling task's id was still in `current_turn_launched_ids` when the
+    /// watcher read the notification. The frontend uses this to decide whether
+    /// to arm the "syncing results" hint: for a wire-visible settle the reply
+    /// is already on screen (no gap to bridge), whereas a genuinely out-of-turn
+    /// settle's reply arrives later as a separate overlay turn. Derived from the
+    /// backend set (which persists until the next turn's rising edge), NOT from
+    /// the connection's current status — so it's correct even when the watcher
+    /// reads the settlement AFTER the turn already fell back to `Connected`.
+    #[serde(default)]
+    pub wire_visible: bool,
 }
 
 /// Which settings surface drifted, so the frontend can word the
@@ -487,6 +521,23 @@ pub struct SessionConfigOptionInfo {
     pub kind: SessionConfigKindInfo,
 }
 
+/// Grok's per-model reasoning-effort capability, parsed from a session
+/// response's top-level `models.availableModels[]._meta` (only reachable via the
+/// raw JSON, since the `unstable_session_model` feature that would surface the
+/// typed `models` field is intentionally off). Drives the model-reactive
+/// composer effort selector: `supports == false` ⇒ the model shows NO effort
+/// selector. Backend-internal — NOT serialized onto the wire.
+#[derive(Debug, Clone, Default)]
+pub struct GrokEffortSpec {
+    /// Switchable efforts the model advertises: `(id, label, description)`.
+    pub options: Vec<(String, String, Option<String>)>,
+    /// The model's default/current effort. MAY fall outside `options`
+    /// (e.g. grok-4.5 defaults to `xhigh` while only listing `high/medium/low`).
+    pub default: Option<String>,
+    /// Whether the model advertises `supportsReasoningEffort`.
+    pub supports: bool,
+}
+
 /// Read-only snapshot of the modes + config_options an agent advertises
 /// when it opens a new session. Used by `ConnectionManager::probe_agent_options`
 /// to give the delegation settings UI an authoritative view of what an
@@ -562,6 +613,10 @@ pub struct AcpAgentInfo {
     pub opencode_auth_json: Option<String>,
     pub codex_auth_json: Option<String>,
     pub codex_config_toml: Option<String>,
+    /// Compact structured codex model-catalog source (the `codeg` custom-model
+    /// list) round-tripped into the settings editor. Only populated for
+    /// `AgentType::Codex`, and only in api-key mode (no bound provider).
+    pub codex_model_catalog: Option<String>,
     pub cline_secrets_json: Option<String>,
     /// Raw `~/.hermes/config.yaml` text, attached for the Hermes settings panel's
     /// advanced editor. Only populated for `AgentType::Hermes`.
@@ -591,7 +646,10 @@ pub struct AcpAgentInfo {
 pub struct GrokSettings {
     /// `[models].default_reasoning_effort` — one of low/medium/high/xhigh.
     pub default_reasoning_effort: Option<String>,
-    /// `[ui].permission_mode` — one of ask/always-approve.
+    /// `[ui].permission_mode` — grok's real enum
+    /// (default/acceptEdits/auto/dontAsk/bypassPermissions/plan). Legacy codeg
+    /// markers (`ask`/`always-approve`) are migrated to `default`/`bypassPermissions`
+    /// on read (see `migrate_grok_permission_mode`).
     pub permission_mode: Option<String>,
     /// The codeg-managed custom model id: the `[model.<id>]` block whose id
     /// equals `[models].default`. `None` when there is no such managed block.

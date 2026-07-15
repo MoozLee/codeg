@@ -123,7 +123,7 @@ import type {
   SessionConfigOptionInfo,
 } from "@/lib/types"
 
-import { MessageInput } from "./message-input"
+import { MessageInput, shouldCollapsePastedText } from "./message-input"
 
 const CAPS: PromptCapabilitiesInfo = {
   image: true,
@@ -210,6 +210,63 @@ describe("MessageInput (RichComposer integration)", () => {
       const textbox = container.querySelector('[role="textbox"]')
       expect(textbox?.textContent).toContain("rewrite the last question")
     })
+  })
+
+  it("collapses a large plain-text paste but sends the complete original text", async () => {
+    const { container } = renderInput({})
+    await waitFor(() =>
+      expect(composerHandle.current?.getEditor()).toBeTruthy()
+    )
+    const textbox = container.querySelector('[role="textbox"]') as HTMLElement
+    const pasted = "one\ntwo\nthree\nfour"
+
+    fireEvent.paste(textbox, {
+      clipboardData: {
+        files: [],
+        items: [],
+        getData: (type: string) => (type === "text/plain" ? pasted : ""),
+      },
+    })
+
+    await waitFor(() =>
+      expect(container.querySelector("[data-pasted-text-badge]")).not.toBeNull()
+    )
+    const editor = composerHandle.current?.getEditor()
+    expect(editor).toBeTruthy()
+    expect(serializeDocToText(editor!.state.doc)).toBe(pasted)
+  })
+
+  it("expands and restores the composer height", async () => {
+    const user = userEvent.setup()
+    const { container } = renderInput({})
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+
+    const expand = screen.getByRole("button", {
+      name: enMessages.Folder.chat.messageInput.expandInput,
+    })
+    const chrome = expand.closest(".codeg-composer-chrome") as HTMLElement
+    expect(chrome.style.height).toBe("")
+
+    await user.click(expand)
+    expect(chrome.style.height).toContain("70dvh")
+    const restore = screen.getByRole("button", {
+      name: enMessages.Folder.chat.messageInput.restoreInput,
+    })
+    expect(restore).toHaveAttribute("aria-pressed", "true")
+
+    await user.click(restore)
+    expect(chrome.style.height).toBe("")
+  })
+})
+
+describe("shouldCollapsePastedText", () => {
+  it("collapses long or multiline text and keeps short text inline", () => {
+    expect(shouldCollapsePastedText("x".repeat(801))).toBe(true)
+    expect(shouldCollapsePastedText("one\ntwo\nthree\nfour")).toBe(true)
+    expect(shouldCollapsePastedText("one\ntwo\nthree")).toBe(false)
+    expect(shouldCollapsePastedText("short paste")).toBe(false)
   })
 })
 

@@ -399,11 +399,13 @@ type Action =
       // accounting) plus whether this event settled tasks / carried overlay
       // turns, which drive the settle-syncing bridge state. No-op when
       // nothing it mirrors changed, so repeat events don't re-render
-      // connection consumers.
+      // connection consumers. `outOfTurnSettleCount` counts only settles whose
+      // reply arrives OUT OF TURN (a separate overlay turn) — i.e. NOT
+      // wire-visible; those are the ones the "syncing results" hint bridges.
       type: "SET_BACKGROUND_OUTSTANDING"
       contextKey: string
       outstanding: number
-      settledCount: number
+      outOfTurnSettleCount: number
       turnsCount: number
     }
   | StreamingAction
@@ -1789,9 +1791,13 @@ function connectionsReducer(
       // Race guard: the snapshot may have been generated BEFORE events
       // that have since arrived and been applied to in-memory state.
       // Mutable fields (status, sessionId, liveMessage, pendingPermission,
-      // usage) are fresher in memory than in the snapshot and must NOT be
-      // overwritten — but the latched/fill-null fields above are still
-      // applied so the once-per-lifetime bits can recover.
+      // usage, error) are fresher in memory than in the snapshot and must NOT
+      // be overwritten — but the latched/fill-null fields above are still
+      // applied so the once-per-lifetime bits can recover. `error` in
+      // particular is cleared on a new prompt (STATUS_CHANGED → prompting), so
+      // folding a stale snapshot's `lastError` back in here would resurrect an
+      // error the current turn already cleared; it is recovered on the fresh
+      // path below instead.
       if (action.patch.eventSeq <= current.lastAppliedSeq) {
         if (
           mergedSelectorsReady === current.selectorsReady &&
@@ -1864,6 +1870,7 @@ function connectionsReducer(
         // recovers the pending-background count the one-shot events won't
         // replay for it (sweep exemption + chip).
         backgroundOutstanding: action.patch.backgroundOutstanding,
+        error: action.patch.lastError,
         lastAppliedSeq: action.patch.eventSeq,
       })
       return next
@@ -1936,15 +1943,13 @@ function connectionsReducer(
     case "SET_BACKGROUND_OUTSTANDING": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
-      // Settle-syncing bridge: a settlement without visible turns means the
-      // agent's reaction turn is being generated (the task-notification always
-      // triggers one) — arm the indicator. If turns arrive in the same event,
-      // visible results are already present, so disarm instead of showing stale
-      // syncing UI.
+      // A visible reply wins when settlement metadata and turns arrive in the
+      // same watcher event. Only a genuinely out-of-turn settlement needs the
+      // temporary syncing bridge.
       const syncingSince =
         action.turnsCount > 0
           ? null
-          : action.settledCount > 0
+          : action.outOfTurnSettleCount > 0
             ? Date.now()
             : conn.backgroundSettleSyncingSince
       if (
@@ -3654,7 +3659,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             type: "SET_BACKGROUND_OUTSTANDING",
             contextKey,
             outstanding: e.outstanding,
-            settledCount: e.settled?.length ?? 0,
+            // Only settles whose reply arrives out of turn (NOT wire-visible)
+            // warrant the syncing hint; a #870-held settle's reply is already
+            // live on screen (see the reducer + BackgroundSettledInfo).
+            outOfTurnSettleCount:
+              e.settled?.filter((s) => !s.wire_visible).length ?? 0,
             turnsCount: e.turns?.length ?? 0,
           })
           // 2. overlay turns → the conversation runtime store (resolved via
@@ -3715,22 +3724,37 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                 () => {}
               )
             }
-            // 4. fold the settlement into persisted turns: a refetch flips
-            //    the launching card from "result pending" to its terminal
-            //    state (the parser joins the ack with the notification) and
-            //    retires covered overlay turns via the watermark rule. Rare
-            //    (once per task settling), so a full detail parse is fine.
-            //    preserveLive while a foreground turn is in flight so the
-            //    refetch can't clobber the streaming buffers it races.
+            // 4. flip each async sub-agent's launch card to its terminal
+            //    (completed + result) state in memory. A #870-held turn is still
+            //    open, so refetching it would double-render and race the final
+            //    transcript write. Genuinely out-of-turn settlements are safe to
+            //    refetch after the in-memory update; that folds persisted totals
+            //    and overlay turns without waiting for another foreground turn.
+            //    Entries with no `tool_use_id` (background shells) have no marker
+            //    card, but still need the out-of-turn detail refresh. The store
+            //    queues a settlement whose launch turn has not promoted yet and
+            //    applies it at COMPLETE_TURN.
             const conversationId = getConversationIdByExternalIdFromStore(
               e.session_id
             )
             if (conversationId != null) {
-              useConversationRuntimeStore
-                .getState()
-                .actions.refetchDetail(conversationId, {
+              const runtimeActions =
+                useConversationRuntimeStore.getState().actions
+              for (const settled of e.settled) {
+                if (!settled.tool_use_id) continue
+                runtimeActions.resolveBackgroundTask(conversationId, {
+                  toolUseId: settled.tool_use_id,
+                  taskId: settled.task_id,
+                  status: settled.status,
+                  summary: settled.summary ?? null,
+                  result: settled.result ?? null,
+                })
+              }
+              if (e.settled.some((settled) => !settled.wire_visible)) {
+                runtimeActions.refetchDetail(conversationId, {
                   preserveLive: nc?.status === "prompting",
                 })
+              }
             }
           }
           break

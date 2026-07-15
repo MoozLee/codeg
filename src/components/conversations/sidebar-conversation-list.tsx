@@ -29,6 +29,8 @@ import {
   Loader2,
   MoreHorizontal,
   Palette,
+  Pin,
+  PinOff,
   Rocket,
   SquarePen,
   XCircle,
@@ -49,6 +51,7 @@ import {
   updateConversationStatus,
   updateConversationPinned,
   updateFolderColor,
+  updateFolderPinned,
   updateFolderDefaultAgent,
   deleteConversation,
   listChildConversations,
@@ -149,6 +152,7 @@ const FolderHeader = memo(function FolderHeader({
   importing,
   themeColor,
   appThemeColor,
+  isPinned,
   currentDefaultAgent,
   availableAgents,
   availableAgentsFresh,
@@ -158,6 +162,7 @@ const FolderHeader = memo(function FolderHeader({
   onImport,
   onManageConversations,
   onChangeColor,
+  onTogglePin,
   onSetDefaultAgent,
   onOpenInSystemExplorer,
   onOpenInTerminal,
@@ -173,6 +178,7 @@ const FolderHeader = memo(function FolderHeader({
   importing: boolean
   themeColor: FolderThemeColor
   appThemeColor: ThemeColor
+  isPinned: boolean
   currentDefaultAgent: AgentType | null
   availableAgents: AgentType[]
   /**
@@ -190,6 +196,7 @@ const FolderHeader = memo(function FolderHeader({
   onImport: (folderId: number) => void
   onManageConversations: (folderId: number) => void
   onChangeColor: (folderId: number, color: FolderThemeColor) => void
+  onTogglePin: (folderId: number) => void
   onSetDefaultAgent: (folderId: number, agentType: AgentType | null) => void
   onOpenInSystemExplorer: (folderId: number) => void
   onOpenInTerminal: (folderId: number) => void
@@ -425,6 +432,14 @@ const FolderHeader = memo(function FolderHeader({
           <ListChecks className="h-4 w-4" />
           {t("folderHeaderMenu.manageConversations")}
         </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onTogglePin(folderId)}>
+          {isPinned ? (
+            <PinOff className="h-4 w-4" />
+          ) : (
+            <Pin className="h-4 w-4" />
+          )}
+          {isPinned ? t("folderHeaderMenu.unpin") : t("folderHeaderMenu.pin")}
+        </ContextMenuItem>
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <Bot className="h-4 w-4" />
@@ -575,6 +590,7 @@ export function SidebarConversationList({
   useZoomLevel()
   const folders = useAppWorkspaceStore((s) => s.folders)
   const allFolders = useAppWorkspaceStore((s) => s.allFolders)
+  const fetchFolders = useAppWorkspaceStore((s) => s.fetchFolders)
   const conversations = useAppWorkspaceStore((s) => s.conversations)
   const loading = useAppWorkspaceStore((s) => s.conversationsLoading)
   const error = useAppWorkspaceStore((s) => s.conversationsError)
@@ -612,6 +628,7 @@ export function SidebarConversationList({
         name: string
         path: string
         color: string
+        isPinned: boolean
         defaultAgentType: AgentType | null
       }
     >()
@@ -620,6 +637,7 @@ export function SidebarConversationList({
         name: f.name,
         path: f.path,
         color: f.color,
+        isPinned: f.is_pinned,
         defaultAgentType: f.default_agent_type,
       })
     return map
@@ -666,6 +684,7 @@ export function SidebarConversationList({
   const [sectionCollapsed, setSectionCollapsed] =
     useState<SidebarSectionCollapsed>({})
   const pinnedExpanded = !sectionCollapsed.pinned
+  const pinnedFoldersExpanded = !sectionCollapsed.pinnedFolders
   const foldersExpanded = !sectionCollapsed.folders
   const chatsExpanded = !sectionCollapsed.chats
   // ── Per-conversation delegation sub-session expansion ───────────────────
@@ -755,9 +774,10 @@ export function SidebarConversationList({
   }, [])
 
   const toggleSection = useCallback(
-    (section: "pinned" | "folders" | "chats") => {
+    (section: "pinned" | "pinned-folders" | "folders" | "chats") => {
+      const stateKey = section === "pinned-folders" ? "pinnedFolders" : section
       setSectionCollapsed((prev) => {
-        const next = { ...prev, [section]: !prev[section] }
+        const next = { ...prev, [stateKey]: !prev[stateKey] }
         saveSectionCollapsed(next)
         return next
       })
@@ -791,6 +811,26 @@ export function SidebarConversationList({
       }
     },
     [refreshFolder, t]
+  )
+
+  const handleToggleFolderPin = useCallback(
+    async (folderId: number) => {
+      const folder = folderIndex.get(folderId)
+      if (!folder) return
+      try {
+        await updateFolderPinned(folderId, !folder.isPinned)
+        // The backend rebalances sort_order for the whole target section, so
+        // refetch every folder rather than refreshing only the toggled row.
+        await fetchFolders()
+      } catch (err) {
+        toast.error(
+          t("toasts.togglePinFailed", {
+            message: toErrorMessage(err),
+          })
+        )
+      }
+    },
+    [fetchFolders, folderIndex, t]
   )
 
   const handleOpenFolderInSystemExplorer = useCallback(
@@ -921,44 +961,47 @@ export function SidebarConversationList({
     return map
   }, [conversations, childToParent])
 
-  const orderedFolderIds = useMemo(() => {
-    const folderIdSet = new Set(folders.map((f) => f.id))
-    // Worktree child folders are merged into their parent group, so they get no
-    // header row of their own. Hidden chat folders never reach this list — the
-    // backend already excludes them from the open-folder set
-    // (`folder_service::list_open_folder_details`).
-    const isHidden = (id: number) => childToParent.has(id)
-    // During drag we honour the optimistic order so sibling folders shift live
-    // as the user hovers over slots. We still filter/append against the source
-    // of truth so newly-added or -removed folders don't disappear mid-drag.
-    if (dragOrder) {
-      const seen = new Set<number>()
-      const ids: number[] = []
-      for (const id of dragOrder) {
-        if (folderIdSet.has(id) && !seen.has(id) && !isHidden(id)) {
-          seen.add(id)
-          ids.push(id)
-        }
-      }
-      for (const f of folders) {
-        if (!seen.has(f.id) && !isHidden(f.id)) {
-          seen.add(f.id)
-          ids.push(f.id)
-        }
-      }
-      return ids
-    }
+  const { pinnedFolderIds, projectFolderIds, orderedFolderIds } =
+    useMemo(() => {
+      // Worktree child folders are merged into their parent group, so they get no
+      // header row of their own. Hidden chat folders never reach this list — the
+      // backend already excludes them from the open-folder set.
+      const visible = folders.filter((folder) => !childToParent.has(folder.id))
+      const basePinned = visible
+        .filter((folder) => folder.is_pinned)
+        .map((folder) => folder.id)
+      const baseProjects = visible
+        .filter((folder) => !folder.is_pinned)
+        .map((folder) => folder.id)
 
-    const seen = new Set<number>()
-    const ids: number[] = []
-    for (const f of folders) {
-      if (!seen.has(f.id) && !isHidden(f.id)) {
-        seen.add(f.id)
-        ids.push(f.id)
+      // A drag override may contain both sections. Resolve each section against its
+      // own membership so a folder can reorder only among siblings with the same
+      // pin state; pin/unpin is an explicit menu action, never a drag side effect.
+      const resolveOrder = (baseIds: number[]) => {
+        if (!dragOrder) return baseIds
+        const baseSet = new Set(baseIds)
+        const seen = new Set<number>()
+        const ids: number[] = []
+        for (const id of dragOrder) {
+          if (baseSet.has(id) && !seen.has(id)) {
+            seen.add(id)
+            ids.push(id)
+          }
+        }
+        for (const id of baseIds) {
+          if (!seen.has(id)) ids.push(id)
+        }
+        return ids
       }
-    }
-    return ids
-  }, [folders, dragOrder, childToParent])
+
+      const pinned = resolveOrder(basePinned)
+      const projects = resolveOrder(baseProjects)
+      return {
+        pinnedFolderIds: pinned,
+        projectFolderIds: projects,
+        orderedFolderIds: [...pinned, ...projects],
+      }
+    }, [folders, dragOrder, childToParent])
 
   const darkMode = resolvedTheme === "dark"
 
@@ -972,7 +1015,9 @@ export function SidebarConversationList({
       buildRows({
         pinned,
         pinnedExpanded,
-        orderedFolderIds,
+        pinnedFolderIds,
+        pinnedFoldersExpanded,
+        orderedFolderIds: projectFolderIds,
         byFolder,
         folderExpanded,
         folderTotalCounts,
@@ -987,7 +1032,9 @@ export function SidebarConversationList({
     [
       pinned,
       pinnedExpanded,
-      orderedFolderIds,
+      pinnedFolderIds,
+      pinnedFoldersExpanded,
+      projectFolderIds,
       byFolder,
       folderExpanded,
       folderTotalCounts,
@@ -1080,22 +1127,25 @@ export function SidebarConversationList({
           return
         }
       } else {
-        // A folder conversation appears only when the Folders section AND its
-        // (display) folder are expanded.
-        if (!foldersExpanded) {
+        // A worktree conversation is rendered under its parent group, so section
+        // and expansion state follow that visible parent, not the hidden child.
+        const displayFolderId =
+          childToParent.get(conv.folder_id) ?? conv.folder_id
+        const displayFolderPinned =
+          folderIndex.get(displayFolderId)?.isPinned ?? false
+        const owningSectionExpanded = displayFolderPinned
+          ? pinnedFoldersExpanded
+          : foldersExpanded
+        if (!owningSectionExpanded) {
+          const section = displayFolderPinned ? "pinnedFolders" : "folders"
           setSectionCollapsed((prev) => {
-            const next = { ...prev, folders: false }
+            const next = { ...prev, [section]: false }
             saveSectionCollapsed(next)
             return next
           })
           pendingScrollRef.current = true
           return
         }
-        // A worktree conversation is rendered under its parent group, so the
-        // row's visibility is gated by the parent's expansion — expand the
-        // display group, not the (never-rendered) child folder id.
-        const displayFolderId =
-          childToParent.get(conv.folder_id) ?? conv.folder_id
         if (!(folderExpanded[displayFolderId] ?? true)) {
           setFolderExpanded((prev) => {
             const next = { ...prev, [displayFolderId]: true }
@@ -1129,7 +1179,9 @@ export function SidebarConversationList({
     conversations,
     folderExpanded,
     childToParent,
+    folderIndex,
     pinnedExpanded,
+    pinnedFoldersExpanded,
     foldersExpanded,
     chatsExpanded,
   ])
@@ -1628,7 +1680,7 @@ export function SidebarConversationList({
       if (!state || !surface) return
       const order = orderedFolderIdsRef.current
       // The surface's live rect already reflects scroll, so no scrollTop term.
-      const targetIndex = pointerYToTargetIndex(
+      let targetIndex = pointerYToTargetIndex(
         clientY,
         surface.getBoundingClientRect().top,
         0,
@@ -1636,10 +1688,16 @@ export function SidebarConversationList({
         order.length
       )
       const fromIndex = order.indexOf(state.folderId)
-      if (fromIndex < 0 || fromIndex === targetIndex) return
+      if (fromIndex < 0) return
+      const pinnedBoundary = pinnedFolderIds.length
+      targetIndex =
+        fromIndex < pinnedBoundary
+          ? Math.min(targetIndex, Math.max(0, pinnedBoundary - 1))
+          : Math.max(targetIndex, pinnedBoundary)
+      if (fromIndex === targetIndex) return
       handleReorder(applyReorder(order, fromIndex, targetIndex))
     },
-    [handleReorder]
+    [handleReorder, pinnedFolderIds.length]
   )
 
   // While the pointer rests near a viewport edge, scroll and keep retargeting so
@@ -1870,6 +1928,7 @@ export function SidebarConversationList({
         importing={importing}
         themeColor={folderThemeColor(folderId)}
         appThemeColor={appThemeColor}
+        isPinned={folderEntry?.isPinned ?? false}
         currentDefaultAgent={folderEntry?.defaultAgentType ?? null}
         availableAgents={availableAgents}
         availableAgentsFresh={availableAgentsFresh}
@@ -1879,6 +1938,7 @@ export function SidebarConversationList({
         onImport={handleImportForFolder}
         onManageConversations={handleManageConversations}
         onChangeColor={handleChangeFolderColor}
+        onTogglePin={handleToggleFolderPin}
         onSetDefaultAgent={handleChangeFolderDefaultAgent}
         onOpenInSystemExplorer={handleOpenFolderInSystemExplorer}
         onOpenInTerminal={handleOpenFolderInTerminal}

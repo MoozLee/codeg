@@ -22,6 +22,7 @@ import { COLLAB_AGENT_TOOL_NAME, mergeCollabOp } from "@/lib/collab-tool"
 import { collapseLiveCollabBlocks } from "@/lib/collab-collapse"
 import { kimiTodoWriteEntries } from "@/lib/plan-parse"
 import { toErrorMessage } from "@/lib/app-error"
+import { BACKGROUND_TASK_MARKER } from "@/lib/background-agent"
 
 /**
  * Conversation-runtime shared state as a Zustand store — the per-conversation
@@ -65,6 +66,22 @@ export interface ConversationTimelineTurn {
 export interface BackgroundOverlayEntry {
   turn: MessageTurn
   watermark: number
+}
+
+/**
+ * A settled async sub-agent whose launch card couldn't be flipped yet because
+ * its launching turn hasn't been promoted into `localTurns` (the dominant case:
+ * with #870 holding the turn open, the task settles seconds BEFORE the turn
+ * completes, so at settle time the launch tool call is still in `liveMessage`,
+ * un-patchable). Queued by `RESOLVE_BACKGROUND_TASK`, drained by `COMPLETE_TURN`
+ * once promotion surfaces the tool_result block. Matched by `toolUseId`.
+ */
+export interface PendingBackgroundSettlement {
+  toolUseId: string
+  taskId: string
+  status: string
+  summary: string | null
+  result: string | null
 }
 
 /**
@@ -116,6 +133,11 @@ export interface ConversationRuntimeSession {
   // catches up, so overlay and persisted copies never coexist in the timeline.
   backgroundTurns: BackgroundOverlayEntry[]
 
+  // Settled async sub-agents awaiting their launch card's in-memory flip until
+  // the launching turn promotes into `localTurns` (see
+  // `PendingBackgroundSettlement`). Drained by `COMPLETE_TURN`.
+  pendingBackgroundSettlements: PendingBackgroundSettlement[]
+
   // Temporary state
   optimisticTurns: MessageTurn[]
   liveMessage: LiveMessage | null
@@ -144,6 +166,17 @@ export interface ConversationRuntimeSession {
 
   // Session-level stats (token usage, context window, etc.)
   sessionStats: SessionStats | null
+
+  // Number of persisted assistant turns that predate this session's `localTurns`
+  // — captured at send time (first optimistic turn of a batch), when `detail`
+  // is settled history. The post-turn reparse (`syncTurnMetadata`) slices this
+  // many turns off the front of the fresh parse before aligning the rest to
+  // `localTurns`, so it never folds a historical (or later-refetched partial)
+  // turn's stats into a new reply. `null` when no user-initiated batch is in
+  // flight (e.g. the sub-agent adopt path, which has no optimistic send); the
+  // reparse then treats the whole parse as this session's, matching the
+  // pre-capture behavior. See `computeTurnMetadataPatches`.
+  historyAssistantBaseline: number | null
 
   // Cleanup
   pendingCleanup: boolean
@@ -225,6 +258,15 @@ type Action =
       conversationId: number
       turns: MessageTurn[]
       watermark: number
+    }
+  | {
+      // An async sub-agent settled: flip its launch card in-memory by rewriting
+      // the launching tool_result's `[[codeg-background-task]]` marker. If the
+      // launching turn hasn't promoted into `localTurns` yet (settle precedes
+      // turn completion under #870), queue it for `COMPLETE_TURN` to apply.
+      type: "RESOLVE_BACKGROUND_TASK"
+      conversationId: number
+      settlement: PendingBackgroundSettlement
     }
   | {
       type: "APPEND_OPTIMISTIC_TURN"
@@ -326,6 +368,7 @@ function createEmptySession(
     acpLoadError: null,
     localTurns: [],
     backgroundTurns: [],
+    pendingBackgroundSettlements: [],
     optimisticTurns: [],
     liveMessage: null,
     syncState: "idle",
@@ -333,8 +376,45 @@ function createEmptySession(
     liveOwnsActiveTurn: false,
     delegationKickoffText: null,
     sessionStats: null,
+    historyAssistantBaseline: null,
     pendingCleanup: false,
   }
+}
+
+// Snapshot how many assistant turns are HISTORY when a batch's FIRST turn enters
+// the buffers (no local/optimistic turns yet); otherwise keep the batch-start
+// value so follow-up prompts in the same batch don't move it. BOTH batch-start
+// paths route through this — the owner's own send (APPEND_OPTIMISTIC_TURN) and a
+// co-controller's echoed prompt (APPEND_VIEWER_USER_TURN, on every exit incl.
+// dedup) — so every disjoint batch that later reaches `syncTurnMetadata` carries
+// a boundary; a `null` baseline then means only the overlap paths (e.g. the
+// sub-agent adopt, which promotes via COMPLETE_TURN with no user-turn append),
+// where the whole parse is this session's.
+//
+// `promptId` is the id of the prompt starting this batch. Usually `detail` here
+// is settled history (owner send / a fresh viewer prompt not yet persisted):
+// count every assistant. The ONE exception is a viewer attaching mid-stream,
+// where `detail` already holds THIS prompt — and, for OpenCode/Gemini, a PARTIAL
+// reply after it — with the backend stamping it as `in_flight_user_turn_id`.
+// Only then (marker === promptId) do we cut off at the prompt so the partial
+// stays out of history. The marker alone is not enough: it can linger stale
+// after completion (see the APPEND_VIEWER content-dedup notes), so trusting it
+// for an owner send / distinct prompt would drop a real prior reply from history.
+function batchStartHistoryBaseline(
+  current: ConversationRuntimeSession,
+  promptId: string
+): number | null {
+  if (current.localTurns.length > 0 || current.optimisticTurns.length > 0) {
+    return current.historyAssistantBaseline
+  }
+  const turns = current.detail?.turns ?? []
+  const inFlightId = current.detail?.in_flight_user_turn_id ?? null
+  const cutoff =
+    inFlightId !== null && inFlightId === promptId
+      ? turns.findIndex((t) => t.role === "user" && t.id === inFlightId)
+      : -1
+  const history = cutoff === -1 ? turns : turns.slice(0, cutoff + 1)
+  return history.filter((t) => t.role === "assistant").length
 }
 
 interface BuiltStreamingTurns {
@@ -907,6 +987,146 @@ export function buildStreamingTurnsFromLiveMessage(
   return { turns, inProgressToolCallIds }
 }
 
+/** Metadata backfilled onto a local assistant turn by the post-turn reparse. */
+export interface TurnMetadataPatch {
+  index: number
+  usage?: TurnUsage | null
+  duration_ms?: number | null
+  model?: string | null
+  completed_at?: string | null
+}
+
+/**
+ * Align a fresh parse's assistant turns onto this session's completed local
+ * assistant turns and emit the metadata (usage / duration / model /
+ * completed_at) to backfill onto each.
+ *
+ * The subtlety is history. `localTurns` holds ONLY turns completed in the
+ * current session; persisted history lives in `detail`. The fresh parse
+ * returns history + this session's turns in order, so the local turns line up
+ * with the parse TAIL, past the `persistedAssistantCount` historical turns —
+ * hence the slice below before any offset math.
+ *
+ * That boundary is also what makes the "fold extra parser sub-turns into
+ * local[0]" step correct. When the parser splits the current reply into MORE
+ * sub-turns than the live stream did, the leading unmatched SESSION turns are
+ * genuine sub-turns of local[0] and their stats must be summed in (so the
+ * post-stream total matches a fresh reload). Folding the FULL parse instead —
+ * the original bug — summed every historical turn's duration/usage into the
+ * first reply after resuming a conversation; because {@link
+ * conversationRuntimeReducer}'s PATCH_TURN_METADATA is first-write-wins, that
+ * wrong value then stuck until a full reload cleared localTurns and rendered
+ * each parsed turn directly.
+ *
+ * A parse that hasn't caught up yet (fewer session turns than local) head-
+ * aligns the turns it does have and leaves the rest unpatched, so a later
+ * local reply never inherits an earlier one's stats and the caller's retry can
+ * pick up the complete parse rather than lock in a stale value.
+ *
+ * `persistedAssistantCount` is the caller's send-time history baseline (see the
+ * session's `historyAssistantBaseline`), so it is immune to a mid-stream detail
+ * refetch folding this session's own partial into `detail`. `0` treats the
+ * whole parse as this session's — correct when `localTurns` overlaps the parse
+ * tail (the sub-agent adopt path) and identical to the pre-slice behavior.
+ */
+export function computeTurnMetadataPatches(params: {
+  localAssistantIndices: number[]
+  parsedAssistantTurns: MessageTurn[]
+  persistedAssistantCount: number
+}): TurnMetadataPatch[] {
+  const { localAssistantIndices, parsedAssistantTurns } = params
+  // Drop the persisted history at the front of the parse; only this session's
+  // turns can align to localTurns. Clamp so a detail/parse count skew (e.g. a
+  // transient in-flight partial in `detail`) can't slice past the end.
+  const historyBoundary = Math.min(
+    Math.max(params.persistedAssistantCount, 0),
+    parsedAssistantTurns.length
+  )
+  const sessionParsedTurns = parsedAssistantTurns.slice(historyBoundary)
+
+  const offset = sessionParsedTurns.length - localAssistantIndices.length
+  const patches: TurnMetadataPatch[] = []
+
+  for (let i = 0; i < localAssistantIndices.length; i++) {
+    // Tail-align local turns to the session parse so a sub-turn split (parser
+    // emits MORE turns than the live stream did) folds its leading extras into
+    // local[0]. When the parse hasn't caught up to every local turn yet
+    // (offset < 0), `Math.max(offset, 0)` head-aligns instead: it maps the
+    // turns that ARE parsed onto the earliest locals and leaves the rest
+    // unpatched, rather than shifting a parsed turn onto a LATER local reply —
+    // which, with first-write-wins metadata, would lock a wrong value there.
+    const parsedIdx = Math.max(offset, 0) + i
+    let usageToApply: TurnUsage | null | undefined
+    let durationToApply: number | null | undefined
+    let modelToApply: string | null | undefined
+    // For the merged-sub-turn case (offset > 0), the latest completion is
+    // sessionParsedTurns[parsedIdx] (the sub-turn we matched); earlier
+    // rolled-in parsed turns precede it in time, so we don't aggregate
+    // completion timestamps.
+    let completedAtToApply: string | null | undefined
+
+    if (parsedIdx >= 0 && parsedIdx < sessionParsedTurns.length) {
+      const pt = sessionParsedTurns[parsedIdx]
+      usageToApply = pt.usage
+      durationToApply = pt.duration_ms
+      modelToApply = pt.model
+      completedAtToApply = pt.completed_at
+    }
+
+    // When the parser splits the response into more sub-turns than the live
+    // stream did (offset > 0), roll the leading unmatched SESSION turns'
+    // usage/duration into local[0] so that sum(local) equals sum(parsed) for
+    // this session. `sessionParsedTurns` already excludes history, so this
+    // never folds an older turn's stats in.
+    if (i === 0 && offset > 0) {
+      for (let j = 0; j < offset; j++) {
+        const extra = sessionParsedTurns[j]
+        if (extra.usage) {
+          if (!usageToApply) {
+            usageToApply = { ...extra.usage }
+          } else {
+            usageToApply = {
+              input_tokens:
+                usageToApply.input_tokens + extra.usage.input_tokens,
+              output_tokens:
+                usageToApply.output_tokens + extra.usage.output_tokens,
+              cache_creation_input_tokens:
+                usageToApply.cache_creation_input_tokens +
+                extra.usage.cache_creation_input_tokens,
+              cache_read_input_tokens:
+                usageToApply.cache_read_input_tokens +
+                extra.usage.cache_read_input_tokens,
+            }
+          }
+        }
+        if (typeof extra.duration_ms === "number") {
+          durationToApply = (durationToApply ?? 0) + extra.duration_ms
+        }
+        if (!modelToApply && extra.model) {
+          modelToApply = extra.model
+        }
+      }
+    }
+
+    if (
+      !usageToApply &&
+      !durationToApply &&
+      !modelToApply &&
+      !completedAtToApply
+    )
+      continue
+    patches.push({
+      index: localAssistantIndices[i],
+      usage: usageToApply,
+      duration_ms: durationToApply,
+      model: modelToApply,
+      completed_at: completedAtToApply,
+    })
+  }
+
+  return patches
+}
+
 function upsertExternalIdIndex(
   index: Map<string, number>,
   previousExternalId: string | null,
@@ -965,6 +1185,56 @@ function userTurnContentKey(turn: MessageTurn): string {
       }
     })
   )
+}
+
+/**
+ * Rewrite the launching tool call's `[[codeg-background-task]]` marker in a turn
+ * list so `AgentToolCallPart` flips from "running in background" to its
+ * completed/result form — the same marker shape the disk parser
+ * (`apply_background_lifecycle`) produces, so live and cold-open render
+ * identically. Locates the `tool_result` block by `toolUseId` (how the adapter's
+ * `buildToolResultMap` pairs the card).
+ *
+ * Returns `matched` (a block with this `toolUseId` exists here) SEPARATELY from
+ * `changed` (its `output_preview` was actually rewritten). The distinction is
+ * load-bearing: a settlement whose card is already showing exactly this result
+ * is `matched` but not `changed` — callers must treat it as handled (NOT queue
+ * it), or an idempotent re-settle would be buffered and later re-applied over a
+ * newer result. `turns` keeps its original reference when nothing changed.
+ */
+function applyBackgroundSettlementToTurns(
+  turns: MessageTurn[],
+  settlement: PendingBackgroundSettlement
+): { turns: MessageTurn[]; matched: boolean; changed: boolean } {
+  const marker =
+    BACKGROUND_TASK_MARKER +
+    JSON.stringify({
+      task_id: settlement.taskId,
+      status: settlement.status,
+      summary: settlement.summary,
+      result: settlement.result,
+    })
+  let matched = false
+  let changed = false
+  const nextTurns = turns.map((turn) => {
+    let turnChanged = false
+    const nextBlocks = turn.blocks.map((block) => {
+      if (
+        block.type === "tool_result" &&
+        block.tool_use_id === settlement.toolUseId
+      ) {
+        matched = true
+        if (block.output_preview !== marker) {
+          turnChanged = true
+          changed = true
+          return { ...block, output_preview: marker }
+        }
+      }
+      return block
+    })
+    return turnChanged ? { ...turn, blocks: nextBlocks } : turn
+  })
+  return { turns: changed ? nextTurns : turns, matched, changed }
 }
 
 function reducer(
@@ -1131,12 +1401,40 @@ function reducer(
       ]
       const promotedLastIndexById = new Map<string, number>()
       promotedRaw.forEach((turn, i) => promotedLastIndexById.set(turn.id, i))
-      const promoted =
+      const promotedDeduped =
         promotedLastIndexById.size === promotedRaw.length
           ? promotedRaw
           : promotedRaw.filter(
               (turn, i) => promotedLastIndexById.get(turn.id) === i
             )
+
+      // Drain queued async-sub-agent settlements against the just-promoted
+      // turns: a task that settled while this turn was still held open (#870)
+      // couldn't flip its launch card then (the tool call was in `liveMessage`,
+      // un-patchable); now it's in `promoted`. Apply each, keep the ones that
+      // still don't match (their launch turn belongs to a different, not-yet-
+      // promoted turn — or never will, e.g. an abandoned turn — leaving the card
+      // no worse off than before, and bounded to this small buffer).
+      let promoted = promotedDeduped
+      let remainingSettlements = current.pendingBackgroundSettlements
+      if (current.pendingBackgroundSettlements.length > 0) {
+        const stillPending: PendingBackgroundSettlement[] = []
+        for (const settlement of current.pendingBackgroundSettlements) {
+          const res = applyBackgroundSettlementToTurns(promoted, settlement)
+          // Consume on `matched` (the block surfaced), not just `changed`: if
+          // the promoted card already shows this result, the entry is still
+          // handled and must not linger to be re-applied later.
+          if (res.matched) {
+            promoted = res.turns
+          } else {
+            stillPending.push(settlement)
+          }
+        }
+        remainingSettlements =
+          stillPending.length === current.pendingBackgroundSettlements.length
+            ? current.pendingBackgroundSettlements
+            : stillPending
+      }
 
       return updateSessionInState(state, action.conversationId, () => ({
         ...current,
@@ -1145,6 +1443,7 @@ function reducer(
         liveMessage: null,
         syncState: "idle",
         activeTurnToken: null,
+        pendingBackgroundSettlements: remainingSettlements,
       }))
     }
 
@@ -1181,12 +1480,88 @@ function reducer(
       })
     }
 
+    case "RESOLVE_BACKGROUND_TASK": {
+      // Only meaningful for an open session (a closed tab renders from the
+      // disk parse, which already carries the marker). No-op otherwise — do
+      // NOT materialize a session just to queue a settlement it'll never apply.
+      const current = state.byConversationId.get(action.conversationId)
+      if (!current) return state
+
+      // The launch card can live in any of three places:
+      //  - `optimisticTurns` (a foreground launch whose turn is mid-flight),
+      //  - `localTurns` (already promoted this session), or
+      //  - `detail.turns` (cold-loaded persisted history — e.g. a resumed
+      //    sub-agent notifying after the tab was reopened, whose ORIGINAL card
+      //    sits in detail while the newly promoted turn holds only the
+      //    `SendMessage` call). We patch the in-memory `detail` copy too; the DB
+      //    is never written (a later cold parse reconciles it anyway).
+      const opt = applyBackgroundSettlementToTurns(
+        current.optimisticTurns,
+        action.settlement
+      )
+      const local = applyBackgroundSettlementToTurns(
+        current.localTurns,
+        action.settlement
+      )
+      const detailTurns = current.detail?.turns
+      const detailRes = detailTurns
+        ? applyBackgroundSettlementToTurns(detailTurns, action.settlement)
+        : null
+
+      const matched =
+        opt.matched || local.matched || (detailRes?.matched ?? false)
+
+      if (matched) {
+        // Found the card — flip it (if not already showing this result) and
+        // clear any stale queued copy of the same task. Both must be able to
+        // fire independently: an idempotent re-settle is `matched` but not
+        // `changed`, yet may still need to drop a queued entry.
+        const changed =
+          opt.changed || local.changed || (detailRes?.changed ?? false)
+        const withoutDup = current.pendingBackgroundSettlements.filter(
+          (p) => p.toolUseId !== action.settlement.toolUseId
+        )
+        const pendingChanged =
+          withoutDup.length !== current.pendingBackgroundSettlements.length
+        if (!changed && !pendingChanged) return state
+        return updateSessionInState(state, action.conversationId, (s) => ({
+          ...s,
+          optimisticTurns: opt.turns,
+          localTurns: local.turns,
+          detail:
+            detailRes && detailRes.changed && s.detail
+              ? { ...s.detail, turns: detailRes.turns }
+              : s.detail,
+          pendingBackgroundSettlements: pendingChanged
+            ? withoutDup
+            : current.pendingBackgroundSettlements,
+        }))
+      }
+
+      // Not present in any buffer yet (the #870 case: the launch tool call is
+      // still in `liveMessage`, whose blocks carry no inline tool output — see
+      // `LiveMessage`). Queue for `COMPLETE_TURN` to apply post-promotion.
+      // De-dupe by `toolUseId` so a re-settle (resumed sub-agent) replaces the
+      // queued entry instead of stacking.
+      const withoutDup = current.pendingBackgroundSettlements.filter(
+        (p) => p.toolUseId !== action.settlement.toolUseId
+      )
+      return updateSessionInState(state, action.conversationId, (s) => ({
+        ...s,
+        pendingBackgroundSettlements: [...withoutDup, action.settlement],
+      }))
+    }
+
     case "APPEND_OPTIMISTIC_TURN":
       return updateSessionInState(state, action.conversationId, (current) => ({
         ...current,
         optimisticTurns: [...current.optimisticTurns, action.turn],
         syncState: "awaiting_persist",
         activeTurnToken: action.turnToken,
+        historyAssistantBaseline: batchStartHistoryBaseline(
+          current,
+          action.turn.id
+        ),
       }))
 
     case "REMOVE_OPTIMISTIC_TURN": {
@@ -1223,6 +1598,21 @@ function reducer(
         state.byConversationId.get(action.conversationId) ??
         createEmptySession(action.conversationId)
       const id = action.turn.id
+      // The history boundary must be captured for this disjoint viewer batch
+      // even when the prompt is DEDUPED below — a viewer attaching mid-stream
+      // sees the prompt already in `detail`, so both dedup guards fire, yet the
+      // reply still promotes (COMPLETE_TURN) and syncs. Without capturing here
+      // the boundary stays `null`/stale and `syncTurnMetadata` folds history in.
+      // `batchStartHistoryBaseline` is a no-op once the batch has turns, so a
+      // dup echo mid-batch doesn't move it.
+      const nextBaseline = batchStartHistoryBaseline(current, id)
+      const captureOnly = (): ConversationRuntimeState =>
+        nextBaseline === current.historyAssistantBaseline
+          ? state
+          : updateSessionInState(state, action.conversationId, (s) => ({
+              ...s,
+              historyAssistantBaseline: nextBaseline,
+            }))
       // EXACT-id dedup (not a heuristic): the sender's OWN optimistic turn
       // shares this id — the UI threaded its optimistic turn id to the backend,
       // which echoed it as the `user_message` message_id — so the sender drops
@@ -1251,7 +1641,7 @@ function reducer(
         (current.detail?.turns.some((t) => t.id === id && t.role === "user") ??
           false)
       ) {
-        return state
+        return captureOnly()
       }
       // CONTENT dedup against persisted history. The exact-id guard above is
       // blind to the prompt once the agent has written it to its JSONL
@@ -1290,7 +1680,7 @@ function reducer(
         lastPersisted?.role === "user" &&
         userTurnContentKey(lastPersisted) === userTurnContentKey(action.turn)
       ) {
-        return state
+        return captureOnly()
       }
       // Append as an optimistic turn so it flows through the EXISTING promotion
       // (COMPLETE_TURN → localTurns) and reset-on-fetch machinery, identical to
@@ -1301,6 +1691,7 @@ function reducer(
       return updateSessionInState(state, action.conversationId, (s) => ({
         ...s,
         optimisticTurns: [...s.optimisticTurns, action.turn],
+        historyAssistantBaseline: nextBaseline,
       }))
     }
 
@@ -1407,6 +1798,10 @@ function reducer(
         liveOwnsActiveTurn: to.liveOwnsActiveTurn || from.liveOwnsActiveTurn,
         delegationKickoffText:
           to.delegationKickoffText ?? from.delegationKickoffText,
+        // `from` (the draft) leads `localTurns`, so keep its send-time
+        // baseline; fall back to the target's if the draft never captured one.
+        historyAssistantBaseline:
+          from.historyAssistantBaseline ?? to.historyAssistantBaseline,
       }
 
       const nextByConversationId = new Map(state.byConversationId)
@@ -1563,6 +1958,10 @@ export interface RuntimeActions {
     conversationId: number,
     turns: MessageTurn[],
     watermark: number
+  ) => void
+  resolveBackgroundTask: (
+    conversationId: number,
+    settlement: PendingBackgroundSettlement
   ) => void
   setLiveMessage: (
     conversationId: number,
@@ -2025,89 +2424,20 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
             const parsedAssistantTurns = parsed.turns.filter(
               (t) => t.role === "assistant"
             )
-
-            const offset =
-              parsedAssistantTurns.length - localAssistantIndices.length
-            const patches: Array<{
-              index: number
-              usage?: TurnUsage | null
-              duration_ms?: number | null
-              model?: string | null
-              completed_at?: string | null
-            }> = []
-
-            for (let i = 0; i < localAssistantIndices.length; i++) {
-              const parsedIdx = offset + i
-              let usageToApply: TurnUsage | null | undefined
-              let durationToApply: number | null | undefined
-              let modelToApply: string | null | undefined
-              // For the merged-sub-turn case (offset > 0), the latest
-              // completion is parsed[offset + i] (the sub-turn we matched);
-              // earlier rolled-in parsed turns precede it in time, so we
-              // don't aggregate completion timestamps.
-              let completedAtToApply: string | null | undefined
-
-              if (parsedIdx >= 0 && parsedIdx < parsedAssistantTurns.length) {
-                const pt = parsedAssistantTurns[parsedIdx]
-                usageToApply = pt.usage
-                durationToApply = pt.duration_ms
-                modelToApply = pt.model
-                completedAtToApply = pt.completed_at
-              }
-
-              // When the parser splits the response into more sub-turns
-              // than the live stream did (offset > 0), roll the leading
-              // unmatched parsed turns' usage/duration into local[0] so
-              // that sum(local) equals sum(parsed). Without this, the
-              // mid-stream stats row under-reports tokens vs. a fresh
-              // historical reload, which clears localTurns and shows
-              // every parsed turn directly.
-              if (i === 0 && offset > 0) {
-                for (let j = 0; j < offset; j++) {
-                  const extra = parsedAssistantTurns[j]
-                  if (extra.usage) {
-                    if (!usageToApply) {
-                      usageToApply = { ...extra.usage }
-                    } else {
-                      usageToApply = {
-                        input_tokens:
-                          usageToApply.input_tokens + extra.usage.input_tokens,
-                        output_tokens:
-                          usageToApply.output_tokens +
-                          extra.usage.output_tokens,
-                        cache_creation_input_tokens:
-                          usageToApply.cache_creation_input_tokens +
-                          extra.usage.cache_creation_input_tokens,
-                        cache_read_input_tokens:
-                          usageToApply.cache_read_input_tokens +
-                          extra.usage.cache_read_input_tokens,
-                      }
-                    }
-                  }
-                  if (typeof extra.duration_ms === "number") {
-                    durationToApply = (durationToApply ?? 0) + extra.duration_ms
-                  }
-                  if (!modelToApply && extra.model) {
-                    modelToApply = extra.model
-                  }
-                }
-              }
-
-              if (
-                !usageToApply &&
-                !durationToApply &&
-                !modelToApply &&
-                !completedAtToApply
-              )
-                continue
-              patches.push({
-                index: localAssistantIndices[i],
-                usage: usageToApply,
-                duration_ms: durationToApply,
-                model: modelToApply,
-                completed_at: completedAtToApply,
-              })
-            }
+            // Persisted history lives in `detail`, not `localTurns`; the fresh
+            // parse returns history + this session's turns. The boundary,
+            // captured at send time, tells the alignment how many leading
+            // parsed turns are history so it never folds one into the first
+            // resumed reply. `null` (no optimistic-initiated batch, e.g. the
+            // sub-agent adopt path) means treat the whole parse as this
+            // session's — the pre-capture behavior, correct when `localTurns`
+            // overlaps the parse tail.
+            const persistedAssistantCount = cur.historyAssistantBaseline ?? 0
+            const patches = computeTurnMetadataPatches({
+              localAssistantIndices,
+              parsedAssistantTurns,
+              persistedAssistantCount,
+            })
 
             if (patches.length > 0 || parsed.session_stats) {
               dispatch({
@@ -2118,8 +2448,22 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
               })
             }
 
-            const latestPatch = patches[patches.length - 1]
-            if (!latestPatch?.usage && attempt < 1) {
+            // Retry once if the MOST RECENT local assistant turn still lacks
+            // usage — its transcript may not have flushed yet. Keying on the
+            // last EMITTED patch is wrong when the latest local turn is the
+            // unflushed one: an earlier reply's patch (with usage) would
+            // suppress the retry the latest turn needs.
+            const lastLocalAssistantIndex =
+              localAssistantIndices[localAssistantIndices.length - 1]
+            const latestCoverage =
+              lastLocalAssistantIndex === undefined
+                ? undefined
+                : patches.find((p) => p.index === lastLocalAssistantIndex)
+            if (
+              lastLocalAssistantIndex !== undefined &&
+              !latestCoverage?.usage &&
+              attempt < 1
+            ) {
               trySync(attempt + 1)
             }
           })
@@ -2141,8 +2485,31 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     fetchDetail,
     refetchDetail,
     syncTurnMetadata,
-    completeTurn: (conversationId, liveMessage) =>
-      dispatch({ type: "COMPLETE_TURN", conversationId, liveMessage }),
+    completeTurn: (conversationId, liveMessage) => {
+      // Deliberately NO refetchDetail here (tried and reverted — see git
+      // history). It used to exist
+      // to fold a held-open turn's (claude-agent-acp v0.59.0's #870) content
+      // into the persisted view, since the backend transcript watcher had no
+      // visibility into what the wire already rendered. That's no longer
+      // needed: `background_watch.rs` suppresses the overlay turn for a held
+      // turn's own launched tasks, and the async sub-agent launch card is now
+      // flipped in-memory from the `settled` event (RESOLVE_BACKGROUND_TASK /
+      // the COMPLETE_TURN drain below) — so there's nothing left for a
+      // post-completion refetch to reconcile. Worse, the refetch actively lost
+      // content: it races the transcript file's own last write against this
+      // very `TurnComplete` event — real hardware evidence showed the final
+      // assistant record's timestamp only 8ms before turn_complete fired, well
+      // inside the file-flush's own margin — and `preserveLive: false`
+      // unconditionally discarded the already-correct `localTurns`/`liveMessage`
+      // in favor of whatever that (sometimes-incomplete) fresh read returned,
+      // visibly dropping the turn's trailing content. The dispatch below already
+      // promotes `liveMessage`/`optimisticTurns` into `localTurns`
+      // synchronously, with no read from disk and therefore no race — that IS
+      // the complete, correct render; a later cold detail fetch (opening the tab
+      // again, etc.) reconciles it against the DB whenever that naturally
+      // happens.
+      dispatch({ type: "COMPLETE_TURN", conversationId, liveMessage })
+    },
     appendOptimisticTurn: (conversationId, turn, turnToken) =>
       dispatch({
         type: "APPEND_OPTIMISTIC_TURN",
@@ -2166,6 +2533,12 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
         conversationId,
         turns,
         watermark,
+      }),
+    resolveBackgroundTask: (conversationId, settlement) =>
+      dispatch({
+        type: "RESOLVE_BACKGROUND_TASK",
+        conversationId,
+        settlement,
       }),
     setLiveMessage: (conversationId, liveMessage, isLive) =>
       dispatch({

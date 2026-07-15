@@ -17,8 +17,10 @@ import {
   FolderSearch,
   GitFork,
   Lock,
+  Maximize2,
   MessageSquarePlus,
   MessageSquareText,
+  Minimize2,
   Paperclip,
   Plus,
   Scissors,
@@ -374,6 +376,15 @@ const TEXT_LIKE_MIME_PREFIXES = [
   "application/typescript",
 ]
 const DRAG_DROP_IMAGE_MAX_BYTES = 20_000_000
+const PASTED_TEXT_COLLAPSE_LENGTH_THRESHOLD = 800
+const PASTED_TEXT_COLLAPSE_NEWLINE_THRESHOLD = 2
+
+export function shouldCollapsePastedText(value: string): boolean {
+  if (value.length > PASTED_TEXT_COLLAPSE_LENGTH_THRESHOLD) return true
+  return (
+    (value.match(/\n/g) ?? []).length > PASTED_TEXT_COLLAPSE_NEWLINE_THRESHOLD
+  )
+}
 
 function isTextLikeFile(file: File): boolean {
   const mime = file.type.toLowerCase()
@@ -579,6 +590,7 @@ export function MessageInput({
   // is reconciled into the outgoing blocks by `buildDraft`.
   const [attachments, setAttachments] = useState<InputAttachment[]>([])
   const embeddedPayloadsRef = useRef<Map<string, PromptInputBlock>>(new Map())
+  const [inputExpanded, setInputExpanded] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
   // Collapsed (narrow) selectors live in a controlled Popover holding a
   // master–detail panel (`SessionSelectorsPanel`). It's controlled so a value
@@ -1744,17 +1756,15 @@ export function MessageInput({
     [appendFilesAsResources, appendImageAttachments, canAttachImages]
   )
 
-  // Routed from RichComposer's `onPasteFiles`. Returns true when the paste was
-  // consumed as an attachment (so the editor doesn't also insert it as text).
+  // Routed from RichComposer's paste hook. Files become attachments; a large
+  // plain-text paste becomes one collapsed atom whose send value is still the
+  // complete original text. Returning true prevents ProseMirror from inserting
+  // the same clipboard payload a second time.
   const handlePasteFiles = useCallback(
     (event: ClipboardEvent): boolean => {
       if (disabled) return false
-      // The context-menu "Paste" drives text through `view.pasteText`, which
-      // runs this handler with a synthetic `new ClipboardEvent("paste")` whose
-      // `clipboardData` is null. There's nothing to attach from it (and the
-      // image fallback below would otherwise fire a stray async clipboard read),
-      // so let the editor's own text paste proceed. Real pastes always carry a
-      // (non-null) DataTransfer, so this never short-circuits a genuine paste.
+      // The context-menu path handles text before calling `view.pasteText`, whose
+      // synthetic paste event has no DataTransfer. Let that synthetic event pass.
       if (!event.clipboardData) return false
       const files = filesFromClipboard(event.clipboardData)
       if (files.length > 0) {
@@ -1764,13 +1774,16 @@ export function MessageInput({
         return true
       }
 
+      const pastedText = event.clipboardData.getData("text/plain")
+      if (pastedText && shouldCollapsePastedText(pastedText)) {
+        editorRef.current?.insertPastedText(pastedText)
+        return true
+      }
+
       // Linux/Tauri (WebKitGTK) fallback: screenshot tools (e.g. WeChat) write
       // the image to the clipboard in a form the synchronous DataTransfer API
       // can't read, so retry through the async Clipboard API. Only for a pure-
-      // image clipboard — when text is present we let the default paste run
-      // (mirroring `filesFromClipboard`) so copying a spreadsheet cell or rich
-      // web content isn't hijacked into an image attachment. Kept synchronous
-      // so `imageFilesFromClipboardApi` runs inside the paste user gesture.
+      // image clipboard — when text is present we let the default paste run.
       if (clipboardHasText(event.clipboardData)) return false
       void imageFilesFromClipboardApi()
         .then((imageFiles) => {
@@ -2178,10 +2191,14 @@ export function MessageInput({
       text = ""
     }
     if (text) {
-      // Route through ProseMirror's own text paste so newlines, marks and the
-      // editor's paste pipeline behave exactly like a keyboard paste.
-      editor.view.focus()
-      editor.view.pasteText(text)
+      if (shouldCollapsePastedText(text)) {
+        editorRef.current?.insertPastedText(text)
+      } else {
+        // Route through ProseMirror's own text paste so newlines and the editor's
+        // paste pipeline behave exactly like a keyboard paste.
+        editor.view.focus()
+        editor.view.pasteText(text)
+      }
       return
     }
     // No text — try a pasted image (screenshot), mirroring `handlePasteFiles`.
@@ -2459,6 +2476,7 @@ export function MessageInput({
     editorRef.current?.clear()
     setComposerEmpty(true)
     setAttachments([])
+    setInputExpanded(false)
     embeddedPayloadsRef.current.clear()
     closeSlashMenu()
   }, [closeSlashMenu])
@@ -3073,6 +3091,14 @@ export function MessageInput({
                   "ring-1 ring-primary/40",
                 className
               )}
+              style={
+                inputExpanded
+                  ? {
+                      height: "min(70dvh, 720px)",
+                      maxHeight: "min(70dvh, 720px)",
+                    }
+                  : undefined
+              }
             >
               <ConversationContextBar
                 hasExtraContent={hasImageAttachments}
@@ -3135,6 +3161,24 @@ export function MessageInput({
               />
               <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">
                 <div className="flex min-w-0 items-end gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="shrink-0 text-muted-foreground"
+                    title={inputExpanded ? t("restoreInput") : t("expandInput")}
+                    aria-label={
+                      inputExpanded ? t("restoreInput") : t("expandInput")
+                    }
+                    aria-pressed={inputExpanded}
+                    onClick={() => setInputExpanded((expanded) => !expanded)}
+                  >
+                    {inputExpanded ? (
+                      <Minimize2 className="size-4" />
+                    ) : (
+                      <Maximize2 className="size-4" />
+                    )}
+                  </Button>
                   <DropdownMenu onOpenChange={handleAddMenuOpenChange}>
                     <DropdownMenuTrigger asChild>
                       <Button

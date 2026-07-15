@@ -1704,15 +1704,18 @@
   pointer-events: none;
 }
 
-/* Inline reference badges (atom node view). */
-.codeg-composer .codeg-reference {
+/* Inline atom badges (references and collapsed large pastes). */
+.codeg-composer :is(.codeg-reference, .codeg-pasted-text) {
   cursor: default;
   user-select: none;
   white-space: normal;
 }
 .codeg-composer
   .codeg-reference.ProseMirror-selectednode
-  [data-reference-badge] {
+  [data-reference-badge],
+.codeg-composer
+  .codeg-pasted-text.ProseMirror-selectednode
+  [data-pasted-text-badge] {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }

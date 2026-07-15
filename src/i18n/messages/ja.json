@@ -644,8 +644,12 @@
     "grok": {
       "configDescription": "ここで Grok を設定します。以下のコントロール（権限モード、推論の強さ、任意のカスタム（独自エンドポイント）モデル、圧縮）は ~/.grok/config.toml にマージされ、他のキーやコメントは保持されます。サインインは XAI_API_KEY または `grok login` を使用します。その他のキーは「詳細」で編集できます。",
       "permissionModeLabel": "権限モード",
-      "permissionAsk": "毎回確認",
+      "permissionDefault": "毎回確認",
+      "permissionAcceptEdits": "編集を自動承認",
+      "permissionAuto": "スマート自動承認",
+      "permissionDontAsk": "確認しない",
       "permissionAlwaysApprove": "常に許可",
+      "permissionPlan": "計画のみ",
       "reasoningEffortLabel": "推論レベル",
       "effortLow": "低（高速）",
       "effortMedium": "中（バランス）",
@@ -663,7 +667,7 @@
       "customModelTitle": "カスタムモデル（独自エンドポイント）",
       "customModelHint": "Grok をカスタムまたは自己ホストのエンドポイントに向けます。codeg はモデルごとの `[model.*]` ブロックを書き込み、既定モデルに設定します。モデル ID を空にすると削除されます。",
       "customModelIdLabel": "モデル ID",
-      "customModelIdPlaceholder": "例: grok-custom",
+      "customModelIdPlaceholder": "grok-4.5",
       "customModelIdHint": "`[model.*]` ブロックとして登録され、モデル名として API に送信されます。`[models].default` にも設定されます。",
       "customBaseUrlLabel": "Base URL",
       "customBaseUrlPlaceholder": "https://api.x.ai/v1（既定）",
@@ -1296,6 +1300,7 @@
         "toastOpFailed": "操作に失敗しました: {message}"
       },
       "sectionPinned": "ピン留め",
+      "sectionPinnedFolders": "ピン留めしたフォルダ",
       "sectionFolders": "フォルダ",
       "sectionChats": "チャット",
       "noChats": "チャットがありません",
@@ -2296,6 +2301,9 @@
         "booleanOff": "オフ",
         "expandInput": "入力欄を拡大",
         "restoreInput": "入力欄を元に戻す",
+        "pastedText": "貼り付けたテキスト",
+        "pastedTextLines": "{count} 行",
+        "pastedTextCharacters": "{count} 文字",
         "experts": "エキスパート",
         "office": "日常業務",
         "research": "科学研究",
@@ -2996,6 +3004,8 @@
     "nameRequired": "チャンネル名を入力してください。",
     "tokenRequired": "トークンを入力してください。",
     "chatIdRequired": "Chat ID を入力してください。",
+    "topicMode": "トピックグループモード",
+    "topicModeHint": "Telegram forum topics を個別の Codeg セッションとしてルーティングします。Bot は forum supergroup に参加し、topics を管理できる必要があります。",
     "loadFailed": "チャンネルの読み込みに失敗しました。",
     "saveFailed": "保存に失敗しました。",
     "connectSuccess": "チャンネルに接続しました。",
@@ -3443,7 +3453,8 @@
     "tabs": {
       "experts": "エキスパート",
       "science": "科学研究",
-      "office": "Officeツール"
+      "office": "Officeツール",
+      "custom": "カスタム"
     },
     "actions": {
       "openCentralDir": "中央フォルダを開く",
@@ -3973,5 +3984,122 @@
     "branchRemote": "リモート",
     "branchSearchPlaceholder": "ブランチを検索…",
     "branchNone": "ブランチがありません"
+  },
+  "CustomSkillsSettings": {
+    "loading": "カスタムスキルを読み込み中…",
+    "category": "カスタム",
+    "searchPlaceholder": "名前・ID・説明でカスタムスキルを検索",
+    "states": {
+      "not_linked": "未有効",
+      "linked_to_codeg": "有効",
+      "linked_elsewhere": "別の場所にリンク",
+      "blocked_by_real_directory": "実在フォルダにより占有",
+      "broken": "リンク切れ"
+    },
+    "actions": {
+      "new": "新規",
+      "import": "インポート",
+      "importFromAgent": "エージェントから取り込む",
+      "cancel": "キャンセル",
+      "save": "保存"
+    },
+    "rowMenu": {
+      "edit": "編集",
+      "duplicate": "複製",
+      "delete": "削除"
+    },
+    "bulk": {
+      "delete": "選択項目を削除"
+    },
+    "editor": {
+      "createTitle": "カスタムスキルを新規作成",
+      "editTitle": "カスタムスキルを編集",
+      "description": "カスタムスキルは共有ストア（~/.codeg/skills）に保存され、任意のエージェントで有効化できます。",
+      "idLabel": "スキル ID",
+      "idPlaceholder": "例: my-workflow",
+      "contentLabel": "SKILL.md",
+      "contentPlaceholder": "ここにスキルの SKILL.md を記述…",
+      "preview": "プレビュー",
+      "edit": "編集",
+      "emptyBody": "まだ内容がありません。"
+    },
+    "duplicate": {
+      "title": "スキルを複製",
+      "description": "「{id}」を元に、新しい ID でコピーを作成します。",
+      "newIdPlaceholder": "新しいスキル ID",
+      "confirm": "複製"
+    },
+    "import": {
+      "title": "インポートするスキルフォルダを選択"
+    },
+    "importFromAgent": {
+      "title": "エージェントからスキルを取り込む",
+      "description": "エージェント独自のスキルを共有ストアにコピーすると、どのエージェントでも有効化できます。",
+      "agentLabel": "エージェント",
+      "agentPlaceholder": "エージェントを選択",
+      "selectAll": "すべて選択（{count}）",
+      "loading": "エージェントのスキルを読み込み中…",
+      "unsupported": "このエージェントはスキルディレクトリを提供していません。",
+      "empty": "このエージェントに取り込めるスキルはありません。",
+      "alreadyInLibrary": "ライブラリ済み",
+      "confirm": "選択を取り込む（{count}）"
+    },
+    "delete": {
+      "title": "カスタムスキルを削除しますか？",
+      "body": "{count} 個のカスタムスキルを中央ストアから削除し、すべてのエージェントからリンクを解除します。この操作は取り消せません。",
+      "confirm": "削除"
+    },
+    "toasts": {
+      "loadFailed": "スキルの読み込みに失敗しました",
+      "idRequired": "スキル ID を入力してください",
+      "created": "カスタムスキルを作成しました",
+      "updated": "カスタムスキルを更新しました",
+      "saveFailed": "スキルの保存に失敗しました",
+      "imported": "スキルをインポートしました",
+      "importFailed": "スキルのインポートに失敗しました",
+      "duplicated": "スキルを複製しました",
+      "duplicateFailed": "スキルの複製に失敗しました",
+      "deleted": "{count} 個のスキルを削除しました",
+      "deletedPartial": "{ok} 個を削除、{failed} 個が失敗",
+      "deleteFailed": "スキルの削除に失敗しました",
+      "importedFromAgent": "{count} 件のスキルを取り込みました",
+      "importedFromAgentPartial": "{ok} 件を取り込み、{failed} 件が失敗しました",
+      "importFromAgentAllSkipped": "取り込み対象なし — {count} 件はすでにライブラリにあります",
+      "importFromAgentFailed": "エージェントからの取り込みに失敗しました"
+    }
+  },
+  "CodexModelEditor": {
+    "customizedNotice": "モデル一覧をカスタマイズしたため、codeg が codex のモデル表全体を管理します。codex が今後追加する公式モデルは自動では表示されません。下の更新をクリックして保存し直すと同期できます。カスタマイズをすべて削除すると codex の自動更新に戻ります。",
+    "officialsTitle": "公式モデル",
+    "officialsHint": "起動する codex の公式モデルを自動的に含めます。不要なものは削除できます。",
+    "officialsEmpty": "利用可能な公式モデルがありません。",
+    "refresh": "codex から更新",
+    "readdOfficial": "公式を再追加",
+    "customsTitle": "カスタムモデル",
+    "customsEmpty": "カスタムモデルはまだありません。",
+    "addCustom": "カスタム追加",
+    "slugPlaceholder": "モデル ID（slug）",
+    "displayNamePlaceholder": "表示名",
+    "contextWindow": "コンテキスト",
+    "makeDefault": "デフォルトに設定",
+    "defaultHint": "デフォルトモデル",
+    "remove": "削除",
+    "advanced": "詳細",
+    "baseTemplate": "ベーステンプレート",
+    "baseTemplateHint": "必須フィールド（システムプロンプト、ツール、制限）を複製する公式モデル。",
+    "groupBehavior": "動作と機能",
+    "fieldReasoningLevel": "既定の推論レベル",
+    "fieldReasoningSummary": "推論サマリー",
+    "fieldVerbosity": "詳細度",
+    "fieldShellType": "シェルタイプ",
+    "fieldApplyPatch": "パッチ適用ツール",
+    "fieldReasoningSummaries": "推論サマリー対応",
+    "fieldSupportVerbosity": "詳細度の制御",
+    "fieldParallelToolCalls": "並列ツール呼び出し",
+    "fieldSearchTool": "Web 検索ツール",
+    "optNone": "なし",
+    "groupInstructions": "説明とシステムプロンプト",
+    "fieldDescription": "説明",
+    "baseInstructions": "システムプロンプト（base_instructions）"
   }
 }

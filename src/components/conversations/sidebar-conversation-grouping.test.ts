@@ -335,6 +335,84 @@ describe("buildRows", () => {
     ])
   })
 
+  it("renders pinned folders in a separate collapsible section", () => {
+    const byFolder = new Map([
+      [10, [conv(1, 10)]],
+      [20, [conv(2, 20)]],
+    ])
+    const rows = buildRows({
+      pinned: [],
+      pinnedExpanded: true,
+      pinnedFolderIds: [10],
+      pinnedFoldersExpanded: true,
+      orderedFolderIds: [20],
+      byFolder,
+      folderExpanded: { 10: false, 20: false },
+      folderTotalCounts: new Map([
+        [10, 1],
+        [20, 1],
+      ]),
+      foldersExpanded: true,
+      chatConversations: [],
+      chatsExpanded: false,
+    })
+
+    expect(rows.slice(0, 4)).toEqual([
+      {
+        kind: "section",
+        section: "pinned-folders",
+        expanded: true,
+        count: 1,
+      },
+      { kind: "folder", folderId: 10 },
+      {
+        kind: "section",
+        section: "folders",
+        expanded: true,
+        count: 1,
+      },
+      { kind: "folder", folderId: 20 },
+    ])
+  })
+
+  it("keeps an empty Folders section when every folder is pinned", () => {
+    const rows = buildRows({
+      pinned: [],
+      pinnedExpanded: true,
+      pinnedFolderIds: [10],
+      pinnedFoldersExpanded: true,
+      orderedFolderIds: [],
+      byFolder: new Map([[10, [conv(1, 10)]]]),
+      folderExpanded: { 10: false },
+      folderTotalCounts: new Map([[10, 1]]),
+      foldersExpanded: true,
+      chatConversations: [],
+      chatsExpanded: false,
+    })
+
+    expect(rows).toEqual([
+      {
+        kind: "section",
+        section: "pinned-folders",
+        expanded: true,
+        count: 1,
+      },
+      { kind: "folder", folderId: 10 },
+      {
+        kind: "section",
+        section: "folders",
+        expanded: true,
+        count: 0,
+      },
+      {
+        kind: "section",
+        section: "chats",
+        expanded: false,
+        count: 0,
+      },
+    ])
+  })
+
   it("returns an empty array when there are no folders and nothing pinned", () => {
     expect(folderRows([], new Map(), {}, new Map())).toEqual([])
   })
@@ -898,6 +976,18 @@ describe("sticky overlay helpers", () => {
 
     it("returns an empty array for no rows", () => {
       expect(Array.from(buildOwnerHeaderIndex([]))).toEqual([])
+    })
+
+    it("resets folder ownership at the next top-level section", () => {
+      const withFollowingSection: SidebarRow[] = [
+        { kind: "folder", folderId: 10 },
+        { kind: "conversation", conversation: conv(1, 10), depth: 0 },
+        { kind: "section", section: "chats", expanded: true, count: 1 },
+        { kind: "conversation", conversation: conv(2, 20), depth: 0 },
+      ]
+      expect(Array.from(buildOwnerHeaderIndex(withFollowingSection))).toEqual([
+        0, 0, -1, -1,
+      ])
     })
 
     it("treats section headers and pre-folder pinned rows as ownerless (-1)", () => {

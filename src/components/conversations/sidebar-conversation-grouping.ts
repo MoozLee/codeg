@@ -318,7 +318,7 @@ export interface ChatsEmptyRow {
  */
 export interface SectionHeaderRow {
   kind: "section"
-  section: "pinned" | "folders" | "chats"
+  section: "pinned" | "pinned-folders" | "folders" | "chats"
   expanded: boolean
   /** Pinned count, folder count, or chat-conversation count — shown beside the title. */
   count: number
@@ -462,6 +462,10 @@ function pushConversationRow(
 export function buildRows(args: {
   pinned: readonly DbConversationSummary[]
   pinnedExpanded: boolean
+  /** Pinned project folders rendered in their own collapsible section. */
+  pinnedFolderIds?: readonly number[]
+  pinnedFoldersExpanded?: boolean
+  /** Unpinned project folders rendered in the regular Folders section. */
   orderedFolderIds: readonly number[]
   byFolder: Map<number, DbConversationSummary[]>
   folderExpanded: Record<number, boolean>
@@ -490,6 +494,8 @@ export function buildRows(args: {
   const {
     pinned,
     pinnedExpanded,
+    pinnedFolderIds = [],
+    pinnedFoldersExpanded = true,
     orderedFolderIds,
     byFolder,
     folderExpanded,
@@ -530,40 +536,55 @@ export function buildRows(args: {
   // the order they emit into `rows` is a one-line swap below — the conditional
   // logic inside each (folders gated on count, chats header always present)
   // stays intact regardless of position.
+  const pushFolderRows = (folderIds: readonly number[]) => {
+    for (const folderId of folderIds) {
+      rows.push({ kind: "folder", folderId })
+      const expanded = folderExpanded[folderId] ?? true
+      if (!expanded) continue
+      const convs = byFolder.get(folderId)
+      if (!convs || convs.length === 0) {
+        rows.push({
+          kind: "empty",
+          folderId,
+          totalConversationCount: folderTotalCounts.get(folderId) ?? 0,
+        })
+        continue
+      }
+      for (const conv of convs) {
+        pushConversationRow(
+          rows,
+          conv,
+          0,
+          conversationExpanded,
+          childrenByParent,
+          childrenLoading
+        )
+      }
+    }
+  }
+
+  const pushPinnedFolders = () => {
+    if (pinnedFolderIds.length === 0) return
+    rows.push({
+      kind: "section",
+      section: "pinned-folders",
+      expanded: pinnedFoldersExpanded,
+      count: pinnedFolderIds.length,
+    })
+    if (pinnedFoldersExpanded) pushFolderRows(pinnedFolderIds)
+  }
+
   const pushFolders = () => {
-    if (orderedFolderIds.length === 0) return
+    // Keep the section header (and its Open/Clone actions) when every folder is
+    // pinned. Hide it only when the workspace truly has no project folders.
+    if (orderedFolderIds.length === 0 && pinnedFolderIds.length === 0) return
     rows.push({
       kind: "section",
       section: "folders",
       expanded: foldersExpanded,
       count: orderedFolderIds.length,
     })
-    if (foldersExpanded) {
-      for (const folderId of orderedFolderIds) {
-        rows.push({ kind: "folder", folderId })
-        const expanded = folderExpanded[folderId] ?? true
-        if (!expanded) continue
-        const convs = byFolder.get(folderId)
-        if (!convs || convs.length === 0) {
-          rows.push({
-            kind: "empty",
-            folderId,
-            totalConversationCount: folderTotalCounts.get(folderId) ?? 0,
-          })
-          continue
-        }
-        for (const conv of convs) {
-          pushConversationRow(
-            rows,
-            conv,
-            0,
-            conversationExpanded,
-            childrenByParent,
-            childrenLoading
-          )
-        }
-      }
-    }
+    if (foldersExpanded) pushFolderRows(orderedFolderIds)
   }
 
   const pushChats = () => {
@@ -592,6 +613,8 @@ export function buildRows(args: {
       }
     }
   }
+
+  pushPinnedFolders()
 
   if (sectionOrder === "chats-first") {
     pushChats()
@@ -692,6 +715,7 @@ export function buildOwnerHeaderIndex(rows: readonly SidebarRow[]): Int32Array {
   const out = new Int32Array(rows.length)
   let current = -1
   for (let i = 0; i < rows.length; i++) {
+    if (rows[i].kind === "section") current = -1
     if (rows[i].kind === "folder") current = i
     out[i] = current
   }

@@ -5,7 +5,7 @@ import type { PromptInputBlock } from "@/lib/types"
 
 import { referenceToMarkdown } from "./reference-text"
 import { isEmbeddedReferenceUri } from "./reference-uri"
-import type { ReferenceAttrs } from "./types"
+import type { PastedTextAttrs, ReferenceAttrs } from "./types"
 
 /**
  * Send serialization: turn the (plain-text) composer document into the prose
@@ -68,6 +68,9 @@ export function composerLeafText(
       return ""
     }
     return referenceToMarkdown(attrs)
+  }
+  if (leaf.type.name === "pastedText") {
+    return (leaf.attrs as PastedTextAttrs).content
   }
   if (leaf.type.name === "hardBreak") return "\n"
   return ""

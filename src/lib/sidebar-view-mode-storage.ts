@@ -18,6 +18,7 @@ export type SidebarSectionOrder = "folders-first" | "chats-first"
  *  (the default), so a fresh user sees both sections open. */
 export interface SidebarSectionCollapsed {
   pinned?: boolean
+  pinnedFolders?: boolean
   folders?: boolean
   chats?: boolean
 }
@@ -151,6 +152,9 @@ export function loadSectionCollapsed(): SidebarSectionCollapsed {
     const obj = parsed as Record<string, unknown>
     const result: SidebarSectionCollapsed = {}
     if (typeof obj.pinned === "boolean") result.pinned = obj.pinned
+    if (typeof obj.pinnedFolders === "boolean") {
+      result.pinnedFolders = obj.pinnedFolders
+    }
     if (typeof obj.folders === "boolean") result.folders = obj.folders
     if (typeof obj.chats === "boolean") result.chats = obj.chats
     return result

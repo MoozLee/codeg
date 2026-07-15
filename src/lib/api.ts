@@ -33,6 +33,7 @@ import type {
   AcpAgentInfo,
   AcpAgentStatus,
   GrokStructuredConfig,
+  CodexModelInfo,
   AgentSkillScope,
   AgentSkillLayout,
   AgentSkillItem,
@@ -43,6 +44,9 @@ import type {
   LinkOp,
   LinkOpResult,
   ScienceListItem,
+  CustomSkillItem,
+  CustomDeleteResult,
+  CustomImportResult,
   FolderHistoryEntry,
   FolderDetail,
   CreateChatConversationResult,
@@ -451,6 +455,10 @@ export async function acpUpdateAgentConfig(
     opencode_auth_json?: string | null
     codex_auth_json?: string | null
     codex_config_toml?: string | null
+    /** Compact structured codex model list; backend regenerates the
+     * `model_catalog_json` catalog files from it (config.toml keys are patched
+     * into `codex_config_toml` text by the caller). */
+    codex_model_catalog?: string | null
     grok_config_toml?: string | null
     /** Grok structured controls (mode / reasoning effort); merged onto the
      * on-disk config.toml server-side. */
@@ -463,6 +471,7 @@ export async function acpUpdateAgentConfig(
     opencodeAuthJson: params.opencode_auth_json ?? null,
     codexAuthJson: params.codex_auth_json ?? null,
     codexConfigToml: params.codex_config_toml ?? null,
+    codexModelCatalog: params.codex_model_catalog ?? null,
     grokConfigToml: params.grok_config_toml ?? null,
     grokStructured: params.grok_structured ?? null,
   })
@@ -685,6 +694,18 @@ export async function opencodeProviderCatalog(
   })
 }
 
+/** The official codex model catalog (full ModelInfo entries), sourced at runtime
+ *  from the codex codeg actually launches (cache + bundled fallback). Used for
+ *  the official list, "quick-add official", and as the clone template for custom
+ *  entries. Pass `forceRefresh` to bypass the cache and re-run codex. */
+export async function codexBundledCatalog(
+  forceRefresh?: boolean
+): Promise<CodexModelInfo[]> {
+  return getTransport().call("codex_bundled_catalog", {
+    forceRefresh: forceRefresh ?? null,
+  })
+}
+
 export async function opencodeInstallPlugins(
   taskId: string,
   names?: string[] | null
@@ -879,6 +900,93 @@ export async function scienceReadContent(skillId: string): Promise<string> {
 
 export async function scienceOpenCentralDir(): Promise<string> {
   return getTransport().call("science_open_central_dir")
+}
+
+// ─── Custom (user-authored) skills ──────────────────────────────────────
+// The fourth skill pack: user-created skills in the same central store, told
+// apart from the built-in packs by exclusion. Link statuses reuse the Expert*
+// DTOs (`expertId` carries the custom skill id).
+
+export async function customList(): Promise<CustomSkillItem[]> {
+  return getTransport().call("custom_list")
+}
+
+/** One round-trip snapshot of every (custom skill, agent) link state. */
+export async function customListAllInstallStatuses(): Promise<
+  ExpertInstallStatus[]
+> {
+  return getTransport().call("custom_list_all_install_statuses")
+}
+
+/** Apply a batch of enable/disable ops; returns one result per op. */
+export async function customApplyLinks(ops: LinkOp[]): Promise<LinkOpResult[]> {
+  return getTransport().call("custom_apply_links", { ops })
+}
+
+export async function customReadSkill(id: string): Promise<string> {
+  return getTransport().call("custom_read_skill", { id })
+}
+
+export async function customCreateSkill(params: {
+  id: string
+  content: string
+}): Promise<CustomSkillItem> {
+  return getTransport().call("custom_create_skill", {
+    id: params.id,
+    content: params.content,
+  })
+}
+
+export async function customSaveSkill(params: {
+  id: string
+  content: string
+}): Promise<CustomSkillItem> {
+  return getTransport().call("custom_save_skill", {
+    id: params.id,
+    content: params.content,
+  })
+}
+
+export async function customDuplicateSkill(params: {
+  sourceId: string
+  newId: string
+}): Promise<CustomSkillItem> {
+  return getTransport().call("custom_duplicate_skill", {
+    sourceId: params.sourceId,
+    newId: params.newId,
+  })
+}
+
+export async function customImportSkill(params: {
+  sourcePath: string
+  id?: string | null
+}): Promise<CustomSkillItem> {
+  return getTransport().call("custom_import_skill", {
+    sourcePath: params.sourcePath,
+    id: params.id ?? null,
+  })
+}
+
+/**
+ * Import an agent's own (global-scope) skills into the shared central store so
+ * they can be re-enabled for any agent. Returns one result per id; skills
+ * already in the store are reported as `skipped`, not errors.
+ */
+export async function customImportFromAgent(params: {
+  agentType: AgentType
+  ids: string[]
+}): Promise<CustomImportResult[]> {
+  return getTransport().call("custom_import_from_agent", {
+    agentType: params.agentType,
+    ids: params.ids,
+  })
+}
+
+/** Batch-delete custom skills (cleans up their agent links first). */
+export async function customDeleteSkills(
+  ids: string[]
+): Promise<CustomDeleteResult[]> {
+  return getTransport().call("custom_delete_skills", { ids })
 }
 
 // ─── Office tools ───

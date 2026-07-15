@@ -71,6 +71,8 @@ export interface RichComposerHandle {
   getJSON: () => JSONContent
   /** Insert plain text at the current selection (quick messages, appended text). */
   insertTextAtCursor: (text: string) => void
+  /** Insert a collapsed large-paste atom at the current selection. */
+  insertPastedText: (text: string) => void
   /** Insert an inline reference badge at the current selection. */
   insertReference: (attrs: ReferenceAttrs) => void
   /** Escape hatch to the underlying editor (null until initialized). */
@@ -420,6 +422,9 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
           // the plain-text schema. No Markdown parsing (and thus no schema-
           // rejection throw) is possible, so no recovery path is needed.
           editor?.chain().focus().insertContent(textToInlineContent(text)).run()
+        },
+        insertPastedText: (text) => {
+          editor?.chain().focus().insertPastedText(text).run()
         },
         insertReference: (attrs) => {
           editor?.chain().focus().insertReference(attrs).run()

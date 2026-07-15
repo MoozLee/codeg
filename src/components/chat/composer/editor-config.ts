@@ -3,6 +3,7 @@ import { Placeholder } from "@tiptap/extension-placeholder"
 import StarterKit from "@tiptap/starter-kit"
 
 import { InactiveSelectionHighlight } from "./inactive-selection"
+import { PastedText } from "./nodes/pasted-text-node"
 import { Reference } from "./nodes/reference-node"
 import {
   MentionSuggestion,
@@ -76,6 +77,7 @@ export function buildComposerExtensions(
       showOnlyWhenEditable: true,
     }),
     Reference,
+    PastedText,
     // Keeps the selection visible when focus moves to the right-click menu.
     InactiveSelectionHighlight,
   ]

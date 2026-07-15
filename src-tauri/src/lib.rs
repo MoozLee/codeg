@@ -48,9 +48,9 @@ mod tauri_app {
     use crate::commands::{
         acp as acp_commands, app_update as app_update_commands, automation as automation_commands,
         backup, chat_channel as chat_channel_commands, conversations,
-        delegation as delegation_commands, experts as experts_commands,
-        feedback as feedback_commands, file_io, folder_commands, folders,
-        logging as logging_commands, mcp as mcp_commands,
+        custom_skills as custom_skills_commands, delegation as delegation_commands,
+        experts as experts_commands, feedback as feedback_commands, file_io, folder_commands,
+        folders, logging as logging_commands, mcp as mcp_commands,
         model_provider as model_provider_commands, notification,
         office_tools as office_tools_commands, pet as pet_commands, project_boot,
         provider_usage as provider_usage_commands, question as question_commands,
@@ -449,6 +449,7 @@ mod tauri_app {
                     let broadcaster =
                         app.state::<std::sync::Arc<web::event_bridge::WebEventBroadcaster>>();
                     let db_conn = app.state::<db::AppDatabase>().conn.clone();
+                    let data_dir = effective_data_dir.clone();
                     let ccm_ref = ccm.clone_ref();
                     let br = broadcaster.inner().clone();
                     let bus = app
@@ -458,7 +459,9 @@ mod tauri_app {
                     let cm = app.state::<ConnectionManager>().clone_ref();
                     let emitter = web::event_bridge::EventEmitter::Tauri(app.handle().clone());
                     tauri::async_runtime::spawn(async move {
-                        ccm_ref.start_background(br, bus, db_conn, cm, emitter).await;
+                        ccm_ref
+                            .start_background(br, bus, db_conn, data_dir, cm, emitter)
+                            .await;
                     });
                 }
 
@@ -1196,6 +1199,7 @@ mod tauri_app {
                 acp_commands::acp_delete_agent_skill,
                 acp_commands::opencode_list_plugins,
                 acp_commands::opencode_provider_catalog,
+                acp_commands::codex_bundled_catalog,
                 acp_commands::opencode_install_plugins,
                 acp_commands::opencode_uninstall_plugin,
                 acp_commands::codex_request_device_code,
@@ -1216,6 +1220,16 @@ mod tauri_app {
                 science_commands::science_apply_links,
                 science_commands::science_read_content,
                 science_commands::science_open_central_dir,
+                custom_skills_commands::custom_list,
+                custom_skills_commands::custom_list_all_install_statuses,
+                custom_skills_commands::custom_apply_links,
+                custom_skills_commands::custom_read_skill,
+                custom_skills_commands::custom_create_skill,
+                custom_skills_commands::custom_save_skill,
+                custom_skills_commands::custom_duplicate_skill,
+                custom_skills_commands::custom_import_skill,
+                custom_skills_commands::custom_import_from_agent,
+                custom_skills_commands::custom_delete_skills,
                 office_tools_commands::officecli_detect,
                 office_tools_commands::officecli_install,
                 office_tools_commands::officecli_uninstall,

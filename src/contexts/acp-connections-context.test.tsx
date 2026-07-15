@@ -91,9 +91,9 @@ vi.mock("@/lib/api", () => ({
   acpRespondPermission: vi.fn(),
   acpTouchConnection: vi.fn(),
   // Imported by the conversation runtime store (a real dependency of the
-  // provider via the background-activity bridge). The settled path fires a
-  // refetchDetail; reject it so the store's error path absorbs it (these
-  // tests assert the refetch was ISSUED, not its payload).
+  // provider via the background-activity bridge). Out-of-turn settlements
+  // refetch persisted totals; held settlements only flip the card in memory.
+  // Reject the call because these tests assert dispatch, not the payload.
   getFolderConversation: vi.fn(async () => {
     throw new Error("detail not seeded in this suite")
   }),
@@ -136,6 +136,22 @@ beforeEach(() => {
   h.denormalizeSnapshot.mockReset()
   h.denormalizeSnapshot.mockReturnValue({
     connectionId: "owner-conn",
+    status: "connected",
+    sessionId: null,
+    modes: null,
+    configOptions: null,
+    availableCommands: null,
+    usage: null,
+    liveMessage: null,
+    pendingPermission: null,
+    pendingAskQuestion: null,
+    pendingUserMessage: null,
+    promptCapabilities: null,
+    selectorsReady: false,
+    supportsFork: false,
+    configStale: false,
+    configStaleKind: null,
+    lastError: null,
     eventSeq: 0,
     activeDelegations: [],
   })
@@ -498,6 +514,7 @@ describe("AcpConnectionsProvider permission request details", () => {
       supportsFork: false,
       configStale: false,
       configStaleKind: null,
+      lastError: null,
       eventSeq: 5,
       activeDelegations: [],
     })
@@ -857,6 +874,8 @@ describe("out-of-turn wire guard + background activity", () => {
     const { sendSystemNotification } = await import("@/lib/notification")
     const notify = vi.mocked(sendSystemNotification)
     notify.mockClear()
+    const { getFolderConversation } = await import("@/lib/api")
+    vi.mocked(getFolderConversation).mockClear()
     resetConversationRuntimeStore()
     // Bind the agent session id to a runtime conversation so the overlay
     // bridge can resolve it. Model the draft-started shape (the common QA
@@ -892,6 +911,8 @@ describe("out-of-turn wire guard + background activity", () => {
           task_id: "agent1",
           status: "completed",
           summary: 'Agent "Run pnpm build" finished',
+          tool_use_id: "toolu_01",
+          result: "Build succeeded (exit code 0).",
         },
       ],
       watermark: 4096,
@@ -918,11 +939,20 @@ describe("out-of-turn wire guard + background activity", () => {
     expect(notify).toHaveBeenCalledTimes(1)
     expect(notify.mock.calls[0][1]).toContain('Agent "Run pnpm build" finished')
 
-    // 4. a settlement folds into persisted turns via a detail refetch (the
-    //    parser joins ack + notification into the card's terminal state).
-    //    The fetch must go out with the DB row id, not the runtime key.
-    const { getFolderConversation } = await import("@/lib/api")
+    // 4. the settlement flips the launch card in memory and, because it is
+    //    genuinely out of turn, refetches persisted totals with the DB row id.
+    //    With no promoted card yet, the settlement is also queued under the
+    //    runtime key by `tool_use_id` for COMPLETE_TURN to apply.
     expect(vi.mocked(getFolderConversation)).toHaveBeenCalledWith(42)
+    expect(session?.pendingBackgroundSettlements).toEqual([
+      {
+        toolUseId: "toolu_01",
+        taskId: "agent1",
+        status: "completed",
+        summary: 'Agent "Run pnpm build" finished',
+        result: "Build succeeded (exit code 0).",
+      },
+    ])
 
     // Accounting-only follow-up (work settles to zero): mirror updates, no
     // duplicate overlay entries, no extra notification.
@@ -983,6 +1013,45 @@ describe("out-of-turn wire guard + background activity", () => {
       watermark: 4400,
     })
     expect(h.store!.getConnection(TAB)?.backgroundSettleSyncingSince).toBeNull()
+
+    resetConversationRuntimeStore()
+  })
+
+  it("does NOT arm the syncing-results hint for a wire-visible (#870-held) settle", async () => {
+    const { resetConversationRuntimeStore } =
+      await import("@/stores/conversation-runtime-store")
+    const { getFolderConversation } = await import("@/lib/api")
+    vi.mocked(getFolderConversation).mockClear()
+    resetConversationRuntimeStore()
+    const handlers = await mountOwnerConnection()
+
+    // #870: the launching turn is held OPEN and the sub-agent's reply streams
+    // live as the tail of that held turn — the backend marks the settle
+    // `wire_visible: true`. There is no "results not yet visible" gap, so the
+    // hint must stay hidden (not strand on "Syncing background results…" until
+    // the 30s cap). Gated on the backend flag, NOT the connection status, so it
+    // holds even if this event is delivered after the turn returns to connected.
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "background_activity",
+      session_id: "sess-1",
+      outstanding: 0,
+      settled: [
+        {
+          task_id: "agent1",
+          status: "completed",
+          tool_use_id: "toolu_01",
+          result: "done",
+          wire_visible: true,
+        },
+      ],
+      watermark: 100,
+    })
+
+    expect(h.store!.getConnection(TAB)?.backgroundOutstanding).toBe(0)
+    expect(h.store!.getConnection(TAB)?.backgroundSettleSyncingSince).toBeNull()
+    expect(vi.mocked(getFolderConversation)).not.toHaveBeenCalled()
 
     resetConversationRuntimeStore()
   })
@@ -1078,5 +1147,100 @@ describe("AcpConnectionsProvider Grok cross-agent-type model switch", () => {
     // The attempted model stays the saved preference (no revert of the persisted
     // choice), so a fresh session lands on Composer where the switch succeeds.
     expect(saveConfigPreference).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("HYDRATE_FROM_SNAPSHOT last_error recovery", () => {
+  // Full SnapshotPatch fixture; per-test overrides set connectionId / eventSeq /
+  // lastError. `denormalizeSnapshot` is mocked, so onSnapshot dispatches exactly
+  // this object as `action.patch`.
+  function snapshotPatch(overrides: {
+    eventSeq: number
+    lastError: string | null
+    connectionId?: string
+  }) {
+    return {
+      connectionId: "spawned-conn",
+      status: "connected",
+      sessionId: null,
+      modes: null,
+      configOptions: null,
+      availableCommands: null,
+      usage: null,
+      liveMessage: null,
+      pendingPermission: null,
+      pendingAskQuestion: null,
+      pendingUserMessage: null,
+      promptCapabilities: null,
+      selectorsReady: false,
+      supportsFork: false,
+      configStale: false,
+      configStaleKind: null,
+      backgroundOutstanding: 0,
+      activeDelegations: [],
+      ...overrides,
+    }
+  }
+
+  async function connectOwner(): Promise<AttachHandlers> {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    h.acpGetAgentStatus.mockResolvedValue({
+      agent_type: "claude_code",
+      enabled: true,
+      available: true,
+      installed_version: "1.0.0",
+    })
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    return latestAttachHandlers()
+  }
+
+  it("recovers last_error from a FRESH snapshot (client missed the live error)", async () => {
+    const handlers = await connectOwner()
+    // A freshly reconnected client (lastAppliedSeq=0) receives a snapshot ahead
+    // of its cursor carrying an error whose live event it never saw. The fresh
+    // path recovers it.
+    h.denormalizeSnapshot.mockReturnValue(
+      snapshotPatch({ eventSeq: 5, lastError: "boom from snapshot" })
+    )
+    hydrateSnapshot(handlers, {
+      event_seq: 5,
+    } as unknown as LiveSessionSnapshot)
+    expect(h.store!.getConnection(TAB)!.error).toBe("boom from snapshot")
+  })
+
+  it("does NOT resurrect a cleared error from a STALE snapshot", async () => {
+    const handlers = await connectOwner()
+    // Live: an error lands, then a new prompt starts and clears it. This also
+    // advances lastAppliedSeq to 2.
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "error",
+      message: "boom",
+      agent_type: "claude_code",
+      code: "runtime_failure",
+    })
+    expect(h.store!.getConnection(TAB)!.error).toBe("boom")
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+    expect(h.store!.getConnection(TAB)!.error).toBeNull()
+
+    // A snapshot generated BEFORE the prompt (eventSeq=1 <= lastAppliedSeq=2)
+    // still carries the old error. Folding it back in would resurrect an error
+    // the current turn already cleared — the stale path must leave error alone.
+    h.denormalizeSnapshot.mockReturnValue(
+      snapshotPatch({ eventSeq: 1, lastError: "boom" })
+    )
+    hydrateSnapshot(handlers, {
+      event_seq: 1,
+    } as unknown as LiveSessionSnapshot)
+    expect(h.store!.getConnection(TAB)!.error).toBeNull()
   })
 })

@@ -13,7 +13,8 @@ use crate::acp::feedback::{FeedbackItem, FeedbackStatus};
 use crate::acp::question::PendingQuestionState;
 use crate::acp::types::{
     AcpEvent, AvailableCommandInfo, ConfigStaleKind, ConnectionStatus, EventEnvelope,
-    PromptCapabilitiesInfo, SessionConfigOptionInfo, SessionModeStateInfo, ToolCallImageInfo,
+    GrokEffortSpec, PromptCapabilitiesInfo, SessionConfigOptionInfo, SessionModeStateInfo,
+    ToolCallImageInfo,
 };
 use crate::models::agent::AgentType;
 use crate::models::message::MessageRole;
@@ -277,6 +278,14 @@ pub struct SessionState {
     pub modes: Option<SessionModeStateInfo>,
     pub current_mode: Option<String>,
     pub config_options: Option<Vec<SessionConfigOptionInfo>>,
+    /// Grok only: per-model reasoning-effort specs, parsed from the top-level
+    /// `models` of the session-establishment response (guaranteed on
+    /// `session/new`; opportunistic on resume/fork). Grok never re-sends this on
+    /// `set_model`, so it is cached here to rebuild the composer's effort
+    /// selector for the target model on a mid-session model switch. `None` for
+    /// non-Grok agents and when the response carried no `models` (flat fallback).
+    /// Backend-internal — not serialized.
+    pub grok_effort_specs: Option<std::collections::HashMap<String, GrokEffortSpec>>,
     pub prompt_capabilities: Option<PromptCapabilitiesInfo>,
     pub fork_supported: bool,
     pub available_commands: Vec<AvailableCommandInfo>,
@@ -287,15 +296,15 @@ pub struct SessionState {
     /// "init complete" without waiting for an event that already fired.
     pub selectors_ready: bool,
 
-    /// Most recent `AcpEvent::Error` payload, or `None` if no error has
-    /// landed since the connection started. The probe path reads this
-    /// after `wait_for_session_options` errors so it can fold the
-    /// agent's own error message into the returned `AcpError` instead
-    /// of surfacing a generic "connection not found" once the
-    /// connection task has cleaned up its map entry.
+    /// Most recent unresolved `AcpEvent::Error` payload. Cleared when a new
+    /// prompt starts, matching the frontend reducer's live-event behavior. The
+    /// probe path reads this after `wait_for_session_options` errors so it can
+    /// fold the agent's own error message into the returned `AcpError` instead
+    /// of surfacing a generic "connection not found" once the connection task
+    /// has cleaned up its map entry.
     ///
-    /// Not exposed on `to_snapshot()` today — chat-side error UX already
-    /// flows through the live `AcpEvent::Error` channel.
+    /// Exposed on `to_snapshot()` so clients that reconnect after missing the
+    /// live `AcpEvent::Error` can still surface the latest agent failure.
     pub last_error: Option<SessionLastError>,
 
     /// Single-fire signal that fires when `SessionStarted` applies (i.e.
@@ -378,6 +387,20 @@ pub struct SessionState {
     /// not part of the client-visible snapshot.
     pub turn_in_flight: bool,
 
+    /// Whether the most recently completed turn ended via a stop reason other
+    /// than `"end_turn"` (cancelled, refusal, max_tokens, max_turn_requests,
+    /// empty, unknown — the same "abnormal ending" bucket `connection.rs`
+    /// already treats uniformly for cascade-cancelling child delegations). Set
+    /// by `AcpEvent::TurnComplete`, alongside `pending_user_message`/
+    /// `turn_in_flight` clearing. The transcript watcher reads this at the
+    /// Prompting→Connected falling edge: an abnormal ending means the turn's
+    /// content never reached the wire (the ACP call was torn down before a
+    /// held sub-agent's real completion), so `current_turn_launched_ids`
+    /// must release immediately instead of waiting for the next turn — that
+    /// content has nowhere else to render. Not serialized: backend-internal,
+    /// like `turn_in_flight`.
+    pub last_turn_ended_abnormally: bool,
+
     /// True when the agent's effective settings changed after this connection
     /// was spawned — the running process is still on its launch-time config and
     /// needs a restart to pick up the change. Set/cleared by
@@ -421,6 +444,7 @@ impl SessionState {
             modes: None,
             current_mode: None,
             config_options: None,
+            grok_effort_specs: None,
             prompt_capabilities: None,
             fork_supported: false,
             available_commands: Vec::new(),
@@ -438,6 +462,7 @@ impl SessionState {
             pending_user_message: None,
             pending_user_message_started_at: None,
             turn_in_flight: false,
+            last_turn_ended_abnormally: false,
             config_stale: false,
             config_stale_kind: None,
         }
@@ -510,6 +535,24 @@ impl SessionState {
                 }
             }
             AcpEvent::StatusChanged { status } => {
+                // Diagnostic only (no behavior change): StatusChanged was
+                // never logged anywhere, so there was no way to confirm from
+                // the log alone whether a held-open turn (claude-agent-acp
+                // v0.59.0's #870) actually stayed `Prompting` through an async
+                // sub-agent's full lifecycle, or settled earlier than assumed.
+                // The suppression filter reads live `Prompting` status and is
+                // only correct if the hold behaves as documented.
+                tracing::info!(
+                    "[ACP] status_changed session={:?} {:?} -> {status:?}",
+                    self.external_id,
+                    self.status
+                );
+                if matches!(status, ConnectionStatus::Prompting) {
+                    // Match the live frontend reducer: a new prompt starts a
+                    // new error scope, so stale recoverable errors must not be
+                    // resurrected by a later snapshot attach.
+                    self.last_error = None;
+                }
                 self.status = status.clone();
             }
             AcpEvent::SessionModes { modes } => {
@@ -684,7 +727,25 @@ impl SessionState {
                     self.pending_question = None;
                 }
             }
-            AcpEvent::TurnComplete { .. } => {
+            AcpEvent::TurnComplete { stop_reason, .. } => {
+                // Diagnostic only (no behavior change): pairs with the
+                // StatusChanged log above. This is the ACTUAL point the turn
+                // settles (`self.status` flips to `Connected` right below,
+                // bypassing StatusChanged entirely) — needed to tell whether
+                // claude-agent-acp v0.59.0's #870 held the turn open through
+                // an async sub-agent's full lifecycle, or settled earlier.
+                // `background_outstanding` at this instant shows whether a
+                // sub-agent/shell the watcher still considers live was
+                // outstanding when the ORIGINAL turn settled.
+                tracing::info!(
+                    "[ACP] turn_complete session={:?} stop_reason={stop_reason} background_outstanding={}",
+                    self.external_id,
+                    self.background_outstanding
+                );
+                // See `last_turn_ended_abnormally`'s doc comment: any reason
+                // other than a normal end-of-turn means this turn's content
+                // may never have reached the wire.
+                self.last_turn_ended_abnormally = stop_reason != "end_turn";
                 // Snapshot the just-finished turn's FINAL assistant text — what
                 // `get_delegation_status` returns as the child result. We take
                 // the Text blocks that follow the LAST tool call (the agent's
@@ -1171,6 +1232,7 @@ impl SessionState {
             selectors_ready: self.selectors_ready,
             config_stale: self.config_stale,
             config_stale_kind: self.config_stale_kind,
+            last_error: self.last_error.clone(),
             event_seq: self.event_seq,
         }
     }
@@ -1262,6 +1324,10 @@ pub struct LiveSessionSnapshot {
     /// byte-identical with the pre-feature wire shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_stale_kind: Option<ConfigStaleKind>,
+    /// Most recent agent/runtime error for this live connection. Omitted when
+    /// no error has occurred so older clients and common snapshots stay small.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<SessionLastError>,
     pub event_seq: u64,
 }
 
@@ -1515,6 +1581,44 @@ mod tests {
         assert!(
             !empty_json.contains("pending_user_message"),
             "no-pending snapshot must omit the field"
+        );
+    }
+
+    #[test]
+    fn snapshot_carries_last_error_and_clears_on_next_prompt() {
+        let mut s = fresh_state();
+        s.apply_event(&AcpEvent::Error {
+            message: "ACP protocol error: forbidden".into(),
+            agent_type: "claude_code".into(),
+            code: Some("forbidden".into()),
+            terminal: true,
+        });
+
+        let snap = s.to_snapshot();
+        assert_eq!(
+            snap.last_error,
+            Some(SessionLastError {
+                message: "ACP protocol error: forbidden".into(),
+                code: Some("forbidden".into()),
+            })
+        );
+
+        let json = serde_json::to_string(&snap).expect("serialize");
+        let back: LiveSessionSnapshot = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.last_error, snap.last_error);
+
+        let empty_json = serde_json::to_string(&fresh_state().to_snapshot()).expect("serialize");
+        assert!(
+            !empty_json.contains("last_error"),
+            "no-error snapshot must omit last_error"
+        );
+
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        });
+        assert!(
+            s.to_snapshot().last_error.is_none(),
+            "new prompts clear stale snapshot-recoverable errors"
         );
     }
 
