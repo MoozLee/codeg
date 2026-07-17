@@ -3524,7 +3524,7 @@
       "deleteConfirm": "Pet „{name}\" löschen? Auch von der Festplatte entfernt.",
       "summon": "Pet-Fenster aufrufen",
       "openCodexHelp": "Codex-Pets müssen in ~/.codex/pets/ liegen. Nichts gefunden.",
-      "specRequirement": "Sprite-Sheet muss 1536x1872 PNG oder WebP mit Transparenz sein.",
+      "specRequirement": "Sprite-Sheet muss 1536px breit sein, mit einer Höhe als Vielfaches von 208px (z. B. 1872 oder 2288), als PNG oder WebP mit Transparenz.",
       "form": {
         "id": "Pet-ID",
         "idHelp": "Kleinbuchstaben, Ziffern, '-' und '_'. Max 64 Zeichen.",

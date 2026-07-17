@@ -3524,7 +3524,7 @@
       "deleteConfirm": "Excluir o pet \"{name}\"? Será removido do disco.",
       "summon": "Invocar janela do pet",
       "openCodexHelp": "Pets do Codex precisam estar em ~/.codex/pets/. Nenhum encontrado.",
-      "specRequirement": "O sprite precisa ser PNG ou WebP 1536x1872 com transparência.",
+      "specRequirement": "O sprite precisa ter 1536px de largura e altura múltipla de 208px (ex.: 1872 ou 2288), em PNG ou WebP com transparência.",
       "form": {
         "id": "ID do pet",
         "idHelp": "Minúsculas, dígitos, '-' e '_'. Máx 64 caracteres.",

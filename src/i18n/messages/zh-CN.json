@@ -3536,7 +3536,7 @@
       "deleteConfirm": "确认删除宠物 \"{name}\" 吗？会从磁盘上一并移除。",
       "summon": "召唤宠物窗口",
       "openCodexHelp": "Codex 宠物需位于 ~/.codex/pets/ 目录下,但未找到。",
-      "specRequirement": "精灵图必须是 1536x1872 像素的带透明通道 PNG 或 WebP。",
+      "specRequirement": "精灵图宽度必须为 1536 像素，高度需为 208 像素的整数倍（如 1872 或 2288），并为带透明通道的 PNG 或 WebP。",
       "form": {
         "id": "宠物 ID",
         "idHelp": "仅允许小写字母、数字、'-' 和 '_',最多 64 字符。",

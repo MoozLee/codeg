@@ -3524,7 +3524,7 @@
       "deleteConfirm": "¿Eliminar la mascota «{name}»? Se borrará del disco.",
       "summon": "Invocar ventana de la mascota",
       "openCodexHelp": "Las mascotas de Codex deben estar en ~/.codex/pets/. No se encontraron.",
-      "specRequirement": "El sprite debe ser PNG o WebP de 1536x1872 con transparencia.",
+      "specRequirement": "El sprite debe tener 1536px de ancho y una altura múltiplo de 208px (p. ej. 1872 o 2288), en PNG o WebP con transparencia.",
       "form": {
         "id": "ID de mascota",
         "idHelp": "Letras minúsculas, dígitos, '-' y '_'. Máx 64 chars.",

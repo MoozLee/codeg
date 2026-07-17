@@ -99,8 +99,9 @@ function isInsideRange(index: number, ranges: Range[]): boolean {
 
 /**
  * Split a plain-prose run into literal text and bare `/slug`·`$slug` skill
- * badges. Probable `$...$` / `$$...$$` math ranges remain literal so the first
- * render cannot mistake formula content for a skill invocation.
+ * badges (same {@link INVOCATION_TOKEN_RE} the composer's triggers use). Probable
+ * `$...$` / `$$...$$` math ranges remain literal, while recognized invocation
+ * badges drop the prefix to match the composer's inline badge.
  */
 function pushProseSegments(value: string, out: UserMessageSegment[]): void {
   INVOCATION_TOKEN_RE.lastIndex = 0
@@ -115,8 +116,9 @@ function pushProseSegments(value: string, out: UserMessageSegment[]): void {
       out.push({ kind: "text", text: value.slice(lastIndex, tokenStart) })
     }
     const slug = token.slice(1)
-    // Resolve through the same parser the transcript uses for `codeg://skill/…`
-    // so the badge label keeps the literal token (`/build`, `$deploy`).
+    // Resolve through the shared reference parser, which strips the leading
+    // `/`·`$` so the badge label is the bare slug (`build`, `deploy`) — matching
+    // the composer's inline command/skill badge.
     const attrs = parseCodegReferenceUri(
       `codeg://skill/${encodeURIComponent(slug)}`,
       token

@@ -3524,7 +3524,7 @@
       "deleteConfirm": "Supprimer la mascotte « {name} » ? Elle sera retirée du disque.",
       "summon": "Invoquer la fenêtre de la mascotte",
       "openCodexHelp": "Les mascottes Codex doivent être dans ~/.codex/pets/. Aucune trouvée.",
-      "specRequirement": "Le sprite doit être un PNG/WebP 1536x1872 avec transparence.",
+      "specRequirement": "Le sprite doit faire 1536px de large avec une hauteur multiple de 208px (par ex. 1872 ou 2288), en PNG/WebP avec transparence.",
       "form": {
         "id": "ID mascotte",
         "idHelp": "Lettres minuscules, chiffres, '-' et '_'. Max 64 caractères.",

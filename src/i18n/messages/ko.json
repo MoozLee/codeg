@@ -3524,7 +3524,7 @@
       "deleteConfirm": "펫 \"{name}\"을(를) 삭제할까요? 디스크에서도 함께 제거됩니다.",
       "summon": "펫 창 호출",
       "openCodexHelp": "Codex 펫은 ~/.codex/pets/ 아래에 설치되어야 합니다. 찾을 수 없습니다.",
-      "specRequirement": "스프라이트 시트는 1536x1872 PNG 또는 WebP(투명) 이어야 합니다.",
+      "specRequirement": "스프라이트 시트는 너비 1536px, 높이는 208px의 배수(예: 1872 또는 2288)인 투명 PNG 또는 WebP여야 합니다.",
       "form": {
         "id": "펫 ID",
         "idHelp": "소문자/숫자/'-'/'_' 만 가능. 최대 64자.",

@@ -3524,7 +3524,7 @@
       "deleteConfirm": "確認刪除寵物「{name}」嗎？會從磁碟上一併移除。",
       "summon": "召喚寵物視窗",
       "openCodexHelp": "Codex 寵物需位於 ~/.codex/pets/ 目錄下,但未找到。",
-      "specRequirement": "精靈圖必須是 1536x1872 像素帶透明通道的 PNG 或 WebP。",
+      "specRequirement": "精靈圖寬度必須為 1536 像素，高度需為 208 像素的整數倍（如 1872 或 2288），並為帶透明通道的 PNG 或 WebP。",
       "form": {
         "id": "寵物 ID",
         "idHelp": "僅允許小寫字母、數字、'-' 和 '_',最多 64 字元。",

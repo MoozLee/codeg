@@ -3536,7 +3536,7 @@
       "deleteConfirm": "Delete pet \"{name}\"? It will be removed from disk.",
       "summon": "Summon pet window",
       "openCodexHelp": "Codex pets must be installed under ~/.codex/pets/. None found.",
-      "specRequirement": "Spritesheet must be 1536x1872 PNG or WebP with transparency.",
+      "specRequirement": "Spritesheet must be 1536px wide with a height in 208px rows (e.g. 1872 or 2288), PNG or WebP with transparency.",
       "form": {
         "id": "Pet ID",
         "idHelp": "Lowercase letters, digits, '-' and '_'. Max 64 chars.",
