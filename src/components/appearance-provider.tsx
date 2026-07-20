@@ -49,10 +49,34 @@ import {
   STORAGE_KEY_TERMINAL_FONT_CUSTOM,
   STORAGE_KEY_TERMINAL_FONT_SIZE,
   STORAGE_KEY_TERMINAL_LIGATURES,
+  STORAGE_KEY_WORKSPACE_BG_ENABLED,
+  STORAGE_KEY_WORKSPACE_BG_MASK,
+  STORAGE_KEY_WORKSPACE_BG_BLUR,
+  STORAGE_KEY_WORKSPACE_BG_FILL,
+  STORAGE_KEY_WORKSPACE_BG_PANEL_OPACITY,
+  STORAGE_KEY_WORKSPACE_BG_IMAGE_VERSION,
 } from "@/lib/appearance-script"
 import type { SystemFontFamilyList } from "@/lib/types"
 
 const FONT_PERSIST_DELAY_MS = 200
+
+import {
+  DEFAULT_WORKSPACE_BG_ENABLED,
+  DEFAULT_WORKSPACE_BG_MASK_OPACITY,
+  DEFAULT_WORKSPACE_BG_IMAGE_BLUR,
+  DEFAULT_WORKSPACE_BG_PANEL_OPACITY,
+  DEFAULT_WORKSPACE_BG_FILL_MODE,
+  clampMaskOpacity,
+  clampImageBlur,
+  clampPanelOpacity,
+  isValidFillMode,
+  createBackgroundObjectUrl,
+  revokeBackgroundObjectUrl,
+  readWorkspaceBackground,
+  setWorkspaceBackground,
+  clearWorkspaceBackground,
+  type WorkspaceBgFillMode,
+} from "@/lib/workspace-background"
 
 function syncTrafficLightPosition(zoom: number) {
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
@@ -106,6 +130,27 @@ type AppearanceContextValue = {
   fontList: SystemFontFamilyList
   fontListLoaded: boolean
   fontListError: string | null
+  /** Workspace 背景图片总开关。关闭时不加载图片、不触发任何表面半透明。 */
+  workspaceBgEnabled: boolean
+  setWorkspaceBgEnabled: (on: boolean) => void
+  /** 暗化遮罩不透明度（朝 --background 的面纱，明暗自适配），0–0.9。 */
+  workspaceBgMaskOpacity: number
+  setWorkspaceBgMaskOpacity: (v: number) => void
+  /** 背景图片模糊半径（px），0–24。 */
+  workspaceBgImageBlur: number
+  setWorkspaceBgImageBlur: (v: number) => void
+  /** 结构性面板（侧栏/面板/标签条）不透明度，驱动 --ws-surface-alpha，0.3–1。 */
+  workspaceBgPanelOpacity: number
+  setWorkspaceBgPanelOpacity: (v: number) => void
+  /** 背景图片填充模式（cover/contain/center/tile）。 */
+  workspaceBgFillMode: WorkspaceBgFillMode
+  setWorkspaceBgFillMode: (mode: WorkspaceBgFillMode) => void
+  /** 已解析的背景图片 blob URL（异步从磁盘加载），无图为 null。 */
+  workspaceBgImageUrl: string | null
+  /** 上传并设置背景图片（base64）。写盘后重新读回并建 blob URL。 */
+  setWorkspaceBackgroundImage: (imageBase64: string) => Promise<void>
+  /** 移除背景图片（删盘 + revoke blob URL）。 */
+  removeWorkspaceBackground: () => Promise<void>
 }
 
 export const AppearanceContext = createContext<AppearanceContextValue | null>(
@@ -186,6 +231,32 @@ function readBool(key: string, def: boolean): boolean {
     return v === null ? def : v === "1"
   } catch {
     return def
+  }
+}
+
+function readNumber(
+  key: string,
+  def: number,
+  clampFn: (v: number) => number
+): number {
+  if (typeof document === "undefined") return def
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw === null) return def
+    const n = parseFloat(raw)
+    return Number.isNaN(n) ? def : clampFn(n)
+  } catch {
+    return def
+  }
+}
+
+function readWorkspaceBgFillMode(): WorkspaceBgFillMode {
+  if (typeof document === "undefined") return DEFAULT_WORKSPACE_BG_FILL_MODE
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_WORKSPACE_BG_FILL)
+    return isValidFillMode(raw) ? raw : DEFAULT_WORKSPACE_BG_FILL_MODE
+  } catch {
+    return DEFAULT_WORKSPACE_BG_FILL_MODE
   }
 }
 
@@ -292,6 +363,41 @@ export function AppearanceProvider({
       }).catch(() => {})
     }, FONT_PERSIST_DELAY_MS)
   }, [])
+
+  // Workspace 背景图片配置（图片 URL 异步加载，初始 null）。
+  const [workspaceBgEnabled, setWorkspaceBgEnabledState] = useState<boolean>(
+    () =>
+      readBool(STORAGE_KEY_WORKSPACE_BG_ENABLED, DEFAULT_WORKSPACE_BG_ENABLED)
+  )
+  const [workspaceBgMaskOpacity, setWorkspaceBgMaskOpacityState] =
+    useState<number>(() =>
+      readNumber(
+        STORAGE_KEY_WORKSPACE_BG_MASK,
+        DEFAULT_WORKSPACE_BG_MASK_OPACITY,
+        clampMaskOpacity
+      )
+    )
+  const [workspaceBgImageBlur, setWorkspaceBgImageBlurState] = useState<number>(
+    () =>
+      readNumber(
+        STORAGE_KEY_WORKSPACE_BG_BLUR,
+        DEFAULT_WORKSPACE_BG_IMAGE_BLUR,
+        clampImageBlur
+      )
+  )
+  const [workspaceBgPanelOpacity, setWorkspaceBgPanelOpacityState] =
+    useState<number>(() =>
+      readNumber(
+        STORAGE_KEY_WORKSPACE_BG_PANEL_OPACITY,
+        DEFAULT_WORKSPACE_BG_PANEL_OPACITY,
+        clampPanelOpacity
+      )
+    )
+  const [workspaceBgFillMode, setWorkspaceBgFillModeState] =
+    useState<WorkspaceBgFillMode>(() => readWorkspaceBgFillMode())
+  const [workspaceBgImageUrl, setWorkspaceBgImageUrlState] = useState<
+    string | null
+  >(null)
 
   const setThemeColor = useCallback((color: ThemeColor) => {
     setThemeColorState(color)
@@ -423,15 +529,11 @@ export function AppearanceProvider({
         readStored(STORAGE_KEY_CODE_FONT_FAMILY) ?? settings?.code_font_family
       )
 
-      if (!hasNewUiFont && legacyUiFont) {
-        setUiFont(CUSTOM_FONT_ID, legacyUiFont)
-      }
-      if (!hasNewEditorFont && legacyCodeFont) {
+      if (!hasNewUiFont && legacyUiFont) setUiFont(CUSTOM_FONT_ID, legacyUiFont)
+      if (!hasNewEditorFont && legacyCodeFont)
         setEditorFont(CUSTOM_FONT_ID, legacyCodeFont)
-      }
-      if (!hasNewTerminalFont && legacyCodeFont) {
+      if (!hasNewTerminalFont && legacyCodeFont)
         setTerminalFont(CUSTOM_FONT_ID, legacyCodeFont)
-      }
     })()
 
     return () => {
@@ -439,6 +541,70 @@ export function AppearanceProvider({
     }
   }, [setEditorFont, setTerminalFont, setUiFont])
 
+  // enabled 与 panelOpacity 的 DOM 应用（data-workspace-bg 属性 + --ws-surface-alpha）
+  // 统一交给下方一个 effect，覆盖 mount、重启后 re-enable、跨标签所有路径。setter 只
+  // 更新 state + 持久化，避免 --ws-surface-alpha 与 state 失同步。
+  const setWorkspaceBgEnabled = useCallback((on: boolean) => {
+    setWorkspaceBgEnabledState(on)
+    persist(STORAGE_KEY_WORKSPACE_BG_ENABLED, on ? "1" : "0")
+  }, [])
+
+  const setWorkspaceBgMaskOpacity = useCallback((v: number) => {
+    const clamped = clampMaskOpacity(v)
+    setWorkspaceBgMaskOpacityState(clamped)
+    persist(STORAGE_KEY_WORKSPACE_BG_MASK, String(clamped))
+  }, [])
+
+  const setWorkspaceBgImageBlur = useCallback((v: number) => {
+    const clamped = clampImageBlur(v)
+    setWorkspaceBgImageBlurState(clamped)
+    persist(STORAGE_KEY_WORKSPACE_BG_BLUR, String(clamped))
+  }, [])
+
+  const setWorkspaceBgPanelOpacity = useCallback((v: number) => {
+    const clamped = clampPanelOpacity(v)
+    setWorkspaceBgPanelOpacityState(clamped)
+    persist(STORAGE_KEY_WORKSPACE_BG_PANEL_OPACITY, String(clamped))
+  }, [])
+
+  const setWorkspaceBgFillMode = useCallback((mode: WorkspaceBgFillMode) => {
+    setWorkspaceBgFillModeState(mode)
+    persist(STORAGE_KEY_WORKSPACE_BG_FILL, mode)
+  }, [])
+
+  const reloadGenRef = useRef(0)
+  const reloadWorkspaceBackgroundImage = useCallback(async () => {
+    const gen = ++reloadGenRef.current
+    try {
+      const asset = await readWorkspaceBackground()
+      if (gen !== reloadGenRef.current) return
+      setWorkspaceBgImageUrlState((prev) => {
+        revokeBackgroundObjectUrl(prev)
+        return asset ? createBackgroundObjectUrl(asset) : null
+      })
+    } catch {
+      // 读盘失败静默（无背景即可）。
+    }
+  }, [])
+
+  const setWorkspaceBackgroundImage = useCallback(
+    async (imageBase64: string) => {
+      await setWorkspaceBackground(imageBase64)
+      persist(STORAGE_KEY_WORKSPACE_BG_IMAGE_VERSION, String(Date.now()))
+      await reloadWorkspaceBackgroundImage()
+    },
+    [reloadWorkspaceBackgroundImage]
+  )
+
+  const removeWorkspaceBackground = useCallback(async () => {
+    await clearWorkspaceBackground()
+    reloadGenRef.current += 1
+    persist(STORAGE_KEY_WORKSPACE_BG_IMAGE_VERSION, String(Date.now()))
+    setWorkspaceBgImageUrlState((prev) => {
+      revokeBackgroundObjectUrl(prev)
+      return null
+    })
+  }, [])
   useEffect(() => {
     syncTrafficLightPosition(zoomLevel)
     try {
@@ -462,6 +628,26 @@ export function AppearanceProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // enabled + panelOpacity 的 DOM 单一同步点：属性驱动 globals.css 的半透明规则，
+  // CSS 变量驱动面板不透明度。覆盖 mount / 重启后 re-enable / setter / 跨标签，确保
+  // DOM 始终与 state 一致。
+  useEffect(() => {
+    document.documentElement.setAttribute(
+      "data-workspace-bg",
+      workspaceBgEnabled ? "on" : "off"
+    )
+    if (workspaceBgEnabled) {
+      document.documentElement.style.setProperty(
+        "--ws-surface-alpha",
+        String(workspaceBgPanelOpacity)
+      )
+    }
+  }, [workspaceBgEnabled, workspaceBgPanelOpacity])
+
+  useEffect(() => {
+    if (!workspaceBgEnabled) return
+    void reloadWorkspaceBackgroundImage()
+  }, [workspaceBgEnabled, reloadWorkspaceBackgroundImage])
   useEffect(() => {
     const FONT_KEYS = new Set<string>([
       STORAGE_KEY_UI_FONT,
@@ -543,7 +729,47 @@ export function AppearanceProvider({
       if (event.key && FONT_KEYS.has(event.key)) {
         rehydrateFonts()
       }
-
+      if (event.key === STORAGE_KEY_WORKSPACE_BG_ENABLED) {
+        setWorkspaceBgEnabledState(
+          readBool(
+            STORAGE_KEY_WORKSPACE_BG_ENABLED,
+            DEFAULT_WORKSPACE_BG_ENABLED
+          )
+        )
+      }
+      if (event.key === STORAGE_KEY_WORKSPACE_BG_PANEL_OPACITY) {
+        setWorkspaceBgPanelOpacityState(
+          readNumber(
+            STORAGE_KEY_WORKSPACE_BG_PANEL_OPACITY,
+            DEFAULT_WORKSPACE_BG_PANEL_OPACITY,
+            clampPanelOpacity
+          )
+        )
+      }
+      if (event.key === STORAGE_KEY_WORKSPACE_BG_MASK) {
+        setWorkspaceBgMaskOpacityState(
+          readNumber(
+            STORAGE_KEY_WORKSPACE_BG_MASK,
+            DEFAULT_WORKSPACE_BG_MASK_OPACITY,
+            clampMaskOpacity
+          )
+        )
+      }
+      if (event.key === STORAGE_KEY_WORKSPACE_BG_BLUR) {
+        setWorkspaceBgImageBlurState(
+          readNumber(
+            STORAGE_KEY_WORKSPACE_BG_BLUR,
+            DEFAULT_WORKSPACE_BG_IMAGE_BLUR,
+            clampImageBlur
+          )
+        )
+      }
+      if (event.key === STORAGE_KEY_WORKSPACE_BG_FILL) {
+        setWorkspaceBgFillModeState(readWorkspaceBgFillMode())
+      }
+      if (event.key === STORAGE_KEY_WORKSPACE_BG_IMAGE_VERSION) {
+        void reloadWorkspaceBackgroundImage()
+      }
       if (event.key === "theme") {
         syncAppearanceMode(event.newValue ?? "system")
       }
@@ -551,7 +777,7 @@ export function AppearanceProvider({
 
     window.addEventListener("storage", onStorage)
     return () => window.removeEventListener("storage", onStorage)
-  }, [])
+  }, [reloadWorkspaceBackgroundImage])
 
   useEffect(() => {
     return () => {
@@ -590,6 +816,19 @@ export function AppearanceProvider({
         fontList,
         fontListLoaded,
         fontListError,
+        workspaceBgEnabled,
+        setWorkspaceBgEnabled,
+        workspaceBgMaskOpacity,
+        setWorkspaceBgMaskOpacity,
+        workspaceBgImageBlur,
+        setWorkspaceBgImageBlur,
+        workspaceBgPanelOpacity,
+        setWorkspaceBgPanelOpacity,
+        workspaceBgFillMode,
+        setWorkspaceBgFillMode,
+        workspaceBgImageUrl,
+        setWorkspaceBackgroundImage,
+        removeWorkspaceBackground,
       }}
     >
       {children}

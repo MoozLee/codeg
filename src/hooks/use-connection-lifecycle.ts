@@ -42,6 +42,8 @@ export interface UseConnectionLifecycleReturn {
        * draft instead of treating it as an error.
        */
       onTurnInProgress?: () => void
+      /** Called only after the backend accepts the prompt. */
+      onAccepted?: () => void
     }
   ) => void
   handleSetConfigOption: (configId: string, value: string | boolean) => void
@@ -385,10 +387,11 @@ export function useConnectionLifecycle({
         conversationId?: number | null
         clientMessageId?: string | null
         onTurnInProgress?: () => void
+        onAccepted?: () => void
       }
     ) => {
       touchActivity(contextKey)
-      const onTurnInProgress = opts?.onTurnInProgress
+      const { onTurnInProgress, onAccepted, ...sendOpts } = opts ?? {}
       void (async () => {
         const currentModeId = modeIdRef.current
         if (modeId && modeId !== currentModeId) {
@@ -397,7 +400,8 @@ export function useConnectionLifecycle({
           // calls before CurrentModeUpdate arrives from the agent.
           modeIdRef.current = modeId
         }
-        await sendPrompt(draft.blocks, opts)
+        await sendPrompt(draft.blocks, sendOpts)
+        onAccepted?.()
       })().catch((e: unknown) => {
         if (e instanceof TurnBusyError) {
           // A turn was already in flight on the connection (another

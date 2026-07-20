@@ -141,6 +141,13 @@ describe("parseUserMessageSegments", () => {
         segments.filter((segment) => segment.kind === "reference")
       ).toHaveLength(2)
     })
+
+    it("does not treat two short adjacent skill tokens as dollar math", () => {
+      const segments = parseUserMessageSegments("$run $fix")
+      expect(
+        segments.filter((segment) => segment.kind === "reference")
+      ).toHaveLength(2)
+    })
   })
 
   // Guardrail: the render tokenizer must invert referenceToMarkdown (the wire

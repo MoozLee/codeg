@@ -129,6 +129,29 @@
       "sectionTitle": "モード選択エリア",
       "sectionDescription": "新しい会話ページで入力欄の上に表示される「コード開発 / 日常業務」のショートカットカードです。",
       "showQuickActions": "新しい会話ページに表示する"
+    },
+    "workspaceBackground": {
+      "sectionTitle": "ワークスペースの背景",
+      "sectionDescription": "ワークスペース全体の背後に画像を表示します。サイドバーやパネルは半透明のすりガラスになり画像が透けて見えます。マスクで文字の可読性を保ちます。",
+      "enable": "背景画像を有効にする",
+      "image": "画像",
+      "chooseImage": "画像を選択",
+      "replaceImage": "画像を変更",
+      "removeImage": "削除",
+      "fillMode": "表示方法",
+      "fillModes": {
+        "cover": "全体を覆う",
+        "contain": "全体を表示",
+        "center": "中央",
+        "tile": "タイル"
+      },
+      "maskOpacity": "マスクの不透明度",
+      "maskOpacityHint": "値を大きくすると画像がテーマの背景色に近づき、文字のコントラストが上がります。",
+      "imageBlur": "画像のぼかし",
+      "panelOpacity": "パネルの不透明度",
+      "panelOpacityHint": "サイドバー・パネル・タブバーの不透明度です。低いほど画像が透けて見えます。",
+      "errorTooLarge": "画像が大きすぎます（最大 16 MB）。",
+      "errorUploadFailed": "背景画像の設定に失敗しました。"
     }
   },
   "SystemSettings": {
@@ -1003,7 +1026,9 @@
       "piBinaryInstallFailed": "pi のインストールに失敗しました",
       "piBinaryUninstalled": "pi をアンインストールしました",
       "piBinaryUninstallFailed": "pi のアンインストールに失敗しました",
-      "savePiTrustFailed": "ワークスペースの信頼設定の保存に失敗しました"
+      "savePiTrustFailed": "ワークスペースの信頼設定の保存に失敗しました",
+      "cursorSaved": "Cursor の設定を保存しました",
+      "saveCursorConfigFailed": "Cursor の設定の保存に失敗しました"
     },
     "version": {
       "statusLabel": "バージョン状態",
@@ -1090,6 +1115,49 @@
       "trustDescription": "codeg が pi をフォルダーに接続する際、そのフォルダーを信頼済みとして登録し、別途の確認なしにプロジェクトのローカル設定とスキルを読み込めるようにします。",
       "trustHint": "信頼されるのはここで開いたフォルダーのみで、マシン全体ではありません。また影響するのは設定の読み込みだけで、pi が実行できる内容には影響しません。",
       "configDirSkillsNote": "カスタム設定ディレクトリを指定すると、設定画面で管理するスキル・エキスパート・オフィスツールはこの pi に適用されません。スキルはそのフォルダー内で直接管理してください。"
+    },
+    "cursor": {
+      "configDescription": "ここで Cursor を設定します。まず認証方式を選択し——公式サブスクリプション（ブラウザログイン）またはヘッドレス/サーバー用の Cursor API キー——次にモデルを選び、CLI の権限ルールとサンドボックスを編集します。codeg はこれらを ~/.cursor/cli-config.json に書き込み、cursor-agent CLI と共有します。",
+      "authTitle": "認証",
+      "authChecking": "確認中…",
+      "authNotInstalled": "cursor-agent が未インストールです",
+      "authLoggedIn": "ログイン済み",
+      "authNotLoggedIn": "未ログイン",
+      "loginHint": "ターミナルで次のコマンドを実行して Cursor アカウントにログイン（ブラウザが開きます）し、完了後に更新を押してください：",
+      "apiKeyLabel": "Cursor API キー",
+      "apiKeyPlaceholder": "cursor.com/dashboard で取得",
+      "apiKeyHint": "CURSOR_API_KEY —— Cursor ダッシュボードのアカウントキー。ヘッドレス/サーバー環境でブラウザログインの代わりに使用します。サードパーティや OpenAI のキーではありません。",
+      "modelTitle": "デフォルトモデル",
+      "loadModels": "モデル一覧を取得",
+      "modelsUnavailable": "モデル一覧を取得できません",
+      "modelHint": "セッション開始時に --model として CLI に渡されます。既定のままなら Cursor が選択します。",
+      "permissionsTitle": "権限とサンドボックス",
+      "permissionsDescription": "CLI の権限ルール（cli-config.json）のビジュアルエディタ。許可ルールは確認なしで実行、拒否ルールは常にブロックされます。",
+      "permissionModeLabel": "権限モード",
+      "permissionModeDefault": "実行前に確認（デフォルト）",
+      "permissionModeForce": "Run Everything（--force）",
+      "permissionModeHint": "Run Everything は --force でセッションを起動します：deny ルール以外のツール呼び出しはすべて確認なしで自動許可されます（組織ポリシーにより allow ルール一致のみに制限される場合があります）。新しいセッションから有効です。",
+      "optionDefault": "既定（未設定）",
+      "sandboxLabel": "サンドボックス",
+      "sandboxEnabled": "有効",
+      "sandboxDisabled": "無効",
+      "allowRulesLabel": "許可ルール",
+      "denyRulesLabel": "拒否ルール",
+      "addRule": "ルールを追加",
+      "rulesSyntaxHint": "ルール構文：Shell(コマンド)、Read(パス/グロブ)、Write(パス/グロブ)、WebFetch(ドメイン)、Mcp(サーバー:ツール)——deny ルールが常に優先されます。",
+      "saveConfig": "設定を保存",
+      "advancedToggle": "詳細：cli-config.json（生ファイル）",
+      "advancedHint": "~/.cursor/cli-config.json の全文です。ここでの保存はそのまま書き込み、上の構造化コントロールはマージして書き込みます。",
+      "saveRawConfig": "ファイルを保存",
+      "authMode": "認証方式",
+      "subscriptionHint": "Cursor アカウントでサインインし、Cursor のモデルを使用します。",
+      "customApiKeyRequired": "Cursor API キーが必要です。",
+      "authModeApiKey": "Cursor API キー（ヘッドレス/サーバー）",
+      "authModeApiKeyHint": "Cursor ダッシュボードで発行したアカウント API キーで認証します（ヘッドレス/サーバー環境向け）。これは Cursor アカウントのキーであり、サードパーティ/OpenAI エンドポイントではありません——cursor-agent は Cursor 自身のバックエンドにのみ接続します。codex/OpenAI 互換エンドポイントを使うには、代わりに Codex エージェントを使用してください。",
+      "modelPickerPlaceholder": "モデルを検索…",
+      "modelNoMatch": "一致するモデルがありません",
+      "modelsNeedAuth": "サインインするとモデル一覧を読み込みます。",
+      "modelDefaultBadge": "既定"
     }
   },
   "SettingsPages": {
@@ -1239,7 +1307,8 @@
         "togglePinFailed": "ピン留めの切り替えに失敗しました: {message}",
         "changeFolderDefaultAgentFailed": "デフォルトエージェントの設定に失敗しました: {message}",
         "importedAndUpdated": "{imported, plural, one {# 件のセッション} other {# 件のセッション}} をインポートし、{updated, plural, one {# 件のタイトル} other {# 件のタイトル}} を更新し、{skipped} 件をスキップしました",
-        "updatedTitles": "{updated, plural, one {# 件のタイトル} other {# 件のタイトル}} を更新し、{skipped} 件をスキップしました"
+        "updatedTitles": "{updated, plural, one {# 件のタイトル} other {# 件のタイトル}} を更新し、{skipped} 件をスキップしました",
+        "setFolderAliasFailed": "エイリアスの設定に失敗しました: {message}"
       },
       "statsLabel": "{folders} フォルダ · {convos} 会話",
       "reorderHandle": "ドラッグして並べ替え",
@@ -1272,7 +1341,12 @@
         "setDefaultAgent": "デフォルトエージェントを設定",
         "defaultAgentNone": "設定なし（グローバルを使用）",
         "agentUnavailableSuffix": "（利用不可）",
-        "loadingAgents": "エージェントを読み込み中…"
+        "loadingAgents": "エージェントを読み込み中…",
+        "setAlias": "エイリアスを設定…",
+        "setAliasTitle": "フォルダーのエイリアスを設定",
+        "setAliasPlaceholder": "エイリアスを入力（空欄でクリア）",
+        "setAliasSave": "保存",
+        "setAliasCancel": "キャンセル"
       },
       "sections": {
         "pinned": "ピン留め",
@@ -1349,7 +1423,8 @@
         "system": "システム",
         "toolResult": "結果",
         "toolError": "エラー"
-      }
+      },
+      "moreActions": "その他の操作"
     },
     "sessionDetails": {
       "menuLabel": "セッション詳細",
@@ -1380,7 +1455,8 @@
       "updatedAt": "更新日時",
       "none": "—",
       "copyField": "{field}をコピー",
-      "copiedField": "{field}をコピーしました"
+      "copiedField": "{field}をコピーしました",
+      "noActiveSession": "アクティブなセッションがありません"
     },
     "conversationCard": {
       "untitledConversation": "無題の会話",
@@ -1583,7 +1659,8 @@
       "openInEditorFailed": "エディターで開けませんでした: {message}",
       "openInBrowserFailed": "ブラウザーで開けませんでした: {message}",
       "maximize": "最大化",
-      "restore": "元に戻す"
+      "restore": "元に戻す",
+      "emptyDirectory": "空のフォルダー"
     },
     "terminal": {
       "rename": "名前を変更",
@@ -2051,7 +2128,8 @@
         "downloadFailed": "{name} のダウンロードに失敗しました",
         "downloadSaved": "{name} をダウンロードしました",
         "pathCopied": "パスをコピーしました",
-        "copyPathFailed": "パスのコピーに失敗しました"
+        "copyPathFailed": "パスのコピーに失敗しました",
+        "moveFailed": "移動に失敗しました"
       },
       "createDialog": {
         "newFile": "新規ファイル",
@@ -2340,7 +2418,8 @@
         "enableAgentFirstPlaceholder": "セッション開始前に少なくとも1つのエージェントを有効化してください...",
         "prepareSessionFailed": "チャットセッションを準備できませんでした。もう一度お試しください。",
         "createConversationFailed": "会話を作成できませんでした。もう一度お試しください。",
-        "askAnythingPlaceholder": "何でも質問してください..."
+        "askAnythingPlaceholder": "何でも質問してください...",
+        "agentNotInstalled": "{agent} はインストールされていません · クリックして Agents 設定でインストール"
       },
       "welcomePanel": {
         "greeting": "今日は<highlight>何を</highlight>しましょうか？",
@@ -2440,7 +2519,8 @@
       },
       "agentSelector": {
         "noEnabledAgents": "有効なエージェントがありません",
-        "openAgentsSettings": "エージェント設定を開く"
+        "openAgentsSettings": "エージェント設定を開く",
+        "notInstalled": "未インストール"
       },
       "agentPlanOverlay": {
         "title": "エージェントプラン",

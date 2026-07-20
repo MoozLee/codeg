@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use crate::acp::manager::ConnectionManager;
 use crate::acp::types::AcpEvent;
+use crate::models::AgentType;
 use crate::web::event_bridge::emit_with_state;
 
 /// Top-level key under which delegation state lives on a tool call's
@@ -46,6 +47,22 @@ pub trait DelegationMetaWriter: Send + Sync {
         parent_tool_use_id: &str,
         meta: serde_json::Value,
     );
+
+    /// Restore a tool call's lost identity: rewrite its `title` and
+    /// `raw_input` on the live `ToolCallState`. Used for calls the host
+    /// announced identity-less (Cursor's `"MCP: tool"` with an empty input —
+    /// the wire never re-sends title/arguments), once the companion
+    /// round-trip reveals which codeg-mcp tool the call actually is and with
+    /// what arguments. Default no-op so `NoopMetaWriter` and mocks that don't
+    /// observe identity writes stay unchanged.
+    async fn write_tool_call_identity(
+        &self,
+        _parent_connection_id: &str,
+        _tool_call_id: &str,
+        _title: &str,
+        _raw_input: serde_json::Value,
+    ) {
+    }
 }
 
 /// Default writer used when the broker is constructed via the
@@ -109,6 +126,44 @@ impl DelegationMetaWriter for ConnectionManagerMetaWriter {
         )
         .await;
     }
+
+    async fn write_tool_call_identity(
+        &self,
+        parent_connection_id: &str,
+        tool_call_id: &str,
+        title: &str,
+        raw_input: serde_json::Value,
+    ) {
+        let Some((state_arc, emitter)) = self
+            .manager
+            .get_state_and_emitter(parent_connection_id)
+            .await
+        else {
+            return;
+        };
+        // `raw_input` rides as serialized JSON text: `upsert_tool_call` pushes
+        // it as the latest chunk and re-parses it, so the full arguments
+        // replace the announcement's empty `{}` on the live state (and on the
+        // frontend, whose adapter applies the same latest-parseable-chunk
+        // rule).
+        emit_with_state(
+            &state_arc,
+            &emitter,
+            AcpEvent::ToolCallUpdate {
+                tool_call_id: tool_call_id.to_string(),
+                title: Some(title.to_string()),
+                status: None,
+                content: None,
+                raw_input: Some(raw_input.to_string()),
+                raw_output: None,
+                raw_output_append: None,
+                locations: None,
+                meta: None,
+                images: None,
+            },
+        )
+        .await;
+    }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -123,6 +178,7 @@ pub mod mock {
     #[derive(Default)]
     pub struct MockMetaWriter {
         pub calls: Mutex<Vec<MetaWriteCall>>,
+        pub identity_calls: Mutex<Vec<IdentityWriteCall>>,
     }
 
     #[derive(Debug, Clone)]
@@ -132,6 +188,14 @@ pub mod mock {
         pub meta: serde_json::Value,
     }
 
+    #[derive(Debug, Clone)]
+    pub struct IdentityWriteCall {
+        pub parent_connection_id: String,
+        pub tool_call_id: String,
+        pub title: String,
+        pub raw_input: serde_json::Value,
+    }
+
     impl MockMetaWriter {
         pub fn new() -> Self {
             Self::default()
@@ -139,6 +203,10 @@ pub mod mock {
 
         pub async fn snapshot(&self) -> Vec<MetaWriteCall> {
             self.calls.lock().await.clone()
+        }
+
+        pub async fn identity_snapshot(&self) -> Vec<IdentityWriteCall> {
+            self.identity_calls.lock().await.clone()
         }
     }
 
@@ -156,12 +224,28 @@ pub mod mock {
                 meta,
             });
         }
+
+        async fn write_tool_call_identity(
+            &self,
+            parent_connection_id: &str,
+            tool_call_id: &str,
+            title: &str,
+            raw_input: serde_json::Value,
+        ) {
+            self.identity_calls.lock().await.push(IdentityWriteCall {
+                parent_connection_id: parent_connection_id.to_string(),
+                tool_call_id: tool_call_id.to_string(),
+                title: title.to_string(),
+                raw_input,
+            });
+        }
     }
 }
 
 /// Helper to construct the canonical `meta["codeg.delegation"]` value.
 /// Keeps the schema in one place so the writer impls and the broker
 /// callsites can't drift apart on field naming.
+#[allow(clippy::too_many_arguments)]
 pub fn build_delegation_meta(
     status: &str,
     child_connection_id: Option<&str>,
@@ -169,6 +253,9 @@ pub fn build_delegation_meta(
     error_code: Option<&str>,
     text_preview: Option<&str>,
     duration_ms: Option<u64>,
+    task_preview: Option<&str>,
+    task_id: Option<&str>,
+    agent_type: Option<AgentType>,
 ) -> serde_json::Value {
     let mut inner = serde_json::Map::new();
     inner.insert(
@@ -216,6 +303,30 @@ pub fn build_delegation_meta(
             serde_json::Value::Number(serde_json::Number::from(ms)),
         );
     }
+    // Task text preview + broker task id. The frontend card falls back to
+    // these when the tool call's `raw_input` never carried the arguments
+    // (Cursor's identity-less MCP announcements) and the live binding is gone
+    // (page refresh, persisted transcript). Carried on EVERY write — meta is
+    // replace-wholesale on the ToolCallState (`upsert_tool_call`), so a
+    // terminal write that omitted them would erase what the running write
+    // supplied.
+    if let Some(task) = task_preview {
+        inner.insert(
+            "task_preview".to_string(),
+            serde_json::Value::String(task.to_string()),
+        );
+    }
+    if let Some(id) = task_id {
+        inner.insert(
+            "task_id".to_string(),
+            serde_json::Value::String(id.to_string()),
+        );
+    }
+    if let Some(agent_type) = agent_type {
+        if let Ok(value) = serde_json::to_value(agent_type) {
+            inner.insert("agent_type".to_string(), value);
+        }
+    }
     let mut outer = serde_json::Map::new();
     outer.insert(
         DELEGATION_META_KEY.to_string(),
@@ -238,7 +349,17 @@ mod tests {
 
     #[test]
     fn build_meta_includes_provided_fields() {
-        let v = build_delegation_meta("running", Some("conn-1"), Some(42), None, None, None);
+        let v = build_delegation_meta(
+            "running",
+            Some("conn-1"),
+            Some(42),
+            None,
+            None,
+            None,
+            Some("run the tests"),
+            Some("task-abc"),
+            Some(AgentType::Cursor),
+        );
         let inner = v.get(DELEGATION_META_KEY).unwrap().as_object().unwrap();
         assert_eq!(inner.get("status").unwrap().as_str().unwrap(), "running");
         assert_eq!(
@@ -256,11 +377,27 @@ mod tests {
         assert!(inner.get("error_code").is_none());
         // No duration on the running write.
         assert!(inner.get("duration_ms").is_none());
+        assert_eq!(
+            inner.get("task_preview").unwrap().as_str().unwrap(),
+            "run the tests"
+        );
+        assert_eq!(inner.get("task_id").unwrap().as_str().unwrap(), "task-abc");
+        assert_eq!(inner.get("agent_type").unwrap(), "cursor");
     }
 
     #[test]
     fn build_meta_with_error_code() {
-        let v = build_delegation_meta("failed", None, Some(7), Some("timeout"), None, None);
+        let v = build_delegation_meta(
+            "failed",
+            None,
+            Some(7),
+            Some("timeout"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         let inner = v.get(DELEGATION_META_KEY).unwrap().as_object().unwrap();
         assert_eq!(inner.get("status").unwrap().as_str().unwrap(), "failed");
         assert_eq!(
@@ -268,6 +405,8 @@ mod tests {
             "timeout"
         );
         assert!(inner.get("child_connection_id").is_none());
+        assert!(inner.get("task_preview").is_none());
+        assert!(inner.get("task_id").is_none());
     }
 
     #[test]
@@ -279,6 +418,9 @@ mod tests {
             None,
             None,
             Some(1234),
+            None,
+            None,
+            None,
         );
         let inner = v.get(DELEGATION_META_KEY).unwrap().as_object().unwrap();
         assert_eq!(inner.get("duration_ms").unwrap().as_u64().unwrap(), 1234);

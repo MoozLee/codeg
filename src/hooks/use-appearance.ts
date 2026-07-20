@@ -119,3 +119,37 @@ export function useAppearanceFontList() {
   const { fontList, fontListLoaded, fontListError } = useAppearance()
   return { fontList, fontListLoaded, fontListError }
 }
+
+/** Workspace 背景图片配置和已解析的 blob URL。 */
+export function useWorkspaceBackground() {
+  const {
+    workspaceBgEnabled,
+    setWorkspaceBgEnabled,
+    workspaceBgMaskOpacity,
+    setWorkspaceBgMaskOpacity,
+    workspaceBgImageBlur,
+    setWorkspaceBgImageBlur,
+    workspaceBgPanelOpacity,
+    setWorkspaceBgPanelOpacity,
+    workspaceBgFillMode,
+    setWorkspaceBgFillMode,
+    workspaceBgImageUrl,
+    setWorkspaceBackgroundImage,
+    removeWorkspaceBackground,
+  } = useAppearance()
+  return {
+    workspaceBgEnabled,
+    setWorkspaceBgEnabled,
+    workspaceBgMaskOpacity,
+    setWorkspaceBgMaskOpacity,
+    workspaceBgImageBlur,
+    setWorkspaceBgImageBlur,
+    workspaceBgPanelOpacity,
+    setWorkspaceBgPanelOpacity,
+    workspaceBgFillMode,
+    setWorkspaceBgFillMode,
+    workspaceBgImageUrl,
+    setWorkspaceBackgroundImage,
+    removeWorkspaceBackground,
+  }
+}

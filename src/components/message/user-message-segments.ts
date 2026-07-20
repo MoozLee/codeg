@@ -85,6 +85,15 @@ function collectDollarMathRanges(value: string): Range[] {
     )
     if (closing === -1) continue
     const content = value.slice(i + delimiterLength, closing)
+    // `$run $fix` is two adjacent invocation tokens, not inline math whose
+    // closing delimiter happens to open the next token. A closing single `$`
+    // immediately followed by a slug character is therefore left to the shared
+    // invocation tokenizer when the enclosed text is itself a valid slug.
+    const overlapsNextInvocation =
+      delimiterLength === 1 &&
+      /^[A-Za-z0-9_-]+\s*$/.test(content) &&
+      /[A-Za-z0-9_-]/.test(value[closing + 1] ?? "")
+    if (overlapsNextInvocation) continue
     if (!isProbablyMathContent(content, delimiterLength)) continue
 
     ranges.push([i, closing + delimiterLength])

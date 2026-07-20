@@ -129,6 +129,29 @@
       "sectionTitle": "منطقة اختيار الوضع",
       "sectionDescription": "بطاقات الاختصار «تطوير الكود / الأعمال المكتبية» التي تظهر أعلى مربع الإدخال في صفحة المحادثة الجديدة.",
       "showQuickActions": "العرض في صفحة المحادثة الجديدة"
+    },
+    "workspaceBackground": {
+      "sectionTitle": "خلفية مساحة العمل",
+      "sectionDescription": "عرض صورة خلف مساحة العمل بالكامل. يصبح الشريط الجانبي واللوحات شبه شفافة ومصنفرة لتظهر الصورة من خلالها، ويحافظ القناع على وضوح النص.",
+      "enable": "تفعيل صورة الخلفية",
+      "image": "الصورة",
+      "chooseImage": "اختيار صورة",
+      "replaceImage": "استبدال الصورة",
+      "removeImage": "إزالة",
+      "fillMode": "وضع الملء",
+      "fillModes": {
+        "cover": "تغطية",
+        "contain": "احتواء",
+        "center": "توسيط",
+        "tile": "تكرار"
+      },
+      "maskOpacity": "عتامة القناع",
+      "maskOpacityHint": "القيم الأعلى تمزج الصورة نحو لون خلفية السمة، مما يحسّن تباين النص.",
+      "imageBlur": "تمويه الصورة",
+      "panelOpacity": "عتامة اللوحات",
+      "panelOpacityHint": "مدى عتامة الشريط الجانبي واللوحات وأشرطة التبويب. الأقل يُظهر المزيد من الصورة.",
+      "errorTooLarge": "الصورة كبيرة جدًا (16 ميجابايت كحد أقصى).",
+      "errorUploadFailed": "فشل تعيين صورة الخلفية."
     }
   },
   "SystemSettings": {
@@ -1003,7 +1026,9 @@
       "piBinaryInstallFailed": "فشل تثبيت pi",
       "piBinaryUninstalled": "تم إلغاء تثبيت pi",
       "piBinaryUninstallFailed": "فشل إلغاء تثبيت pi",
-      "savePiTrustFailed": "فشل حفظ الثقة بمساحة العمل"
+      "savePiTrustFailed": "فشل حفظ الثقة بمساحة العمل",
+      "cursorSaved": "تم حفظ إعدادات Cursor",
+      "saveCursorConfigFailed": "فشل حفظ إعدادات Cursor"
     },
     "version": {
       "statusLabel": "حالة الإصدار",
@@ -1090,6 +1115,49 @@
       "trustDescription": "عندما يربط codeg أداة pi بمجلد، يضع علامة موثوق على ذلك المجلد ليحمّل pi إعدادات المشروع المحلية ومهاراته دون تأكيد منفصل.",
       "trustHint": "يُوثَق فقط بالمجلدات التي تفتحها هنا، وليس جهازك بالكامل، كما أن ذلك يؤثر على تحميل الإعدادات فقط، لا على ما يُسمح لـ pi بتشغيله.",
       "configDirSkillsNote": "عند تحديد دليل إعدادات مخصص، لن تنطبق المهارات والخبراء وأدوات المكتب المُدارة في الإعدادات على pi هذا — أدِر مهاراته مباشرةً في ذلك المجلد."
+    },
+    "cursor": {
+      "configDescription": "اضبط Cursor هنا. اختر طريقة مصادقة — اشتراك رسمي (تسجيل دخول عبر المتصفح) أو مفتاح Cursor API للأجهزة بدون واجهة أو الخوادم — ثم اختر نموذجًا وحرّر قواعد أذونات CLI وبيئة الحماية. يكتبها codeg في ~/.cursor/cli-config.json، بالمشاركة مع أداة cursor-agent.",
+      "authTitle": "المصادقة",
+      "authChecking": "جارٍ التحقق…",
+      "authNotInstalled": "cursor-agent غير مثبّت",
+      "authLoggedIn": "تم تسجيل الدخول",
+      "authNotLoggedIn": "غير مسجّل الدخول",
+      "loginHint": "شغّل هذا الأمر في الطرفية لتسجيل الدخول إلى حساب Cursor (سيفتح المتصفح)، ثم اضغط تحديث:",
+      "apiKeyLabel": "مفتاح Cursor API",
+      "apiKeyPlaceholder": "المفتاح من cursor.com/dashboard",
+      "apiKeyHint": "CURSOR_API_KEY — مفتاح حساب من لوحة تحكم Cursor، بديل لتسجيل الدخول عبر المتصفح للأجهزة بدون واجهة أو الخوادم. ليس مفتاحًا خارجيًا أو من OpenAI.",
+      "modelTitle": "النموذج الافتراضي",
+      "loadModels": "جلب النماذج",
+      "modelsUnavailable": "قائمة النماذج غير متاحة",
+      "modelHint": "يُمرَّر إلى CLI عبر ‎--model عند بدء الجلسة. اتركه افتراضيًا ليختار Cursor بنفسه.",
+      "permissionsTitle": "الأذونات ووضع الحماية",
+      "permissionsDescription": "محرّر بصري لقواعد أذونات CLI‏ (cli-config.json). القواعد المسموحة تُنفَّذ دون تأكيد؛ والمرفوضة تُحظر دائمًا.",
+      "permissionModeLabel": "وضع الأذونات",
+      "permissionModeDefault": "السؤال قبل التنفيذ (افتراضي)",
+      "permissionModeForce": "تشغيل كل شيء (--force)",
+      "permissionModeHint": "يبدأ وضع Run Everything الجلسات بـ --force: يُسمح تلقائيًا بجميع استدعاءات الأدوات باستثناء قواعد الرفض دون طلب تأكيد (قد تقيّده سياسة المؤسسة بقواعد السماح فقط). يسري على الجلسات الجديدة.",
+      "optionDefault": "افتراضي (غير محدد)",
+      "sandboxLabel": "وضع الحماية",
+      "sandboxEnabled": "مفعّل",
+      "sandboxDisabled": "معطّل",
+      "allowRulesLabel": "قواعد السماح",
+      "denyRulesLabel": "قواعد الرفض",
+      "addRule": "إضافة قاعدة",
+      "rulesSyntaxHint": "صيغة القواعد: Shell(أمر)، Read(مسار/نمط)، Write(مسار/نمط)، WebFetch(نطاق)، Mcp(خادم:أداة) — قواعد الرفض لها الأولوية دائمًا.",
+      "saveConfig": "حفظ الإعدادات",
+      "advancedToggle": "متقدم: cli-config.json الخام",
+      "advancedHint": "ملف ‎~/.cursor/cli-config.json كاملًا. الحفظ هنا يكتب الملف كما هو؛ أما عناصر التحكم أعلاه فتُدمج فيه.",
+      "saveRawConfig": "حفظ الملف",
+      "authMode": "طريقة المصادقة",
+      "subscriptionHint": "سجّل الدخول بحساب Cursor واستخدم نماذج Cursor.",
+      "customApiKeyRequired": "مفتاح Cursor API مطلوب.",
+      "authModeApiKey": "مفتاح Cursor API (بدون واجهة/خادم)",
+      "authModeApiKeyHint": "المصادقة باستخدام مفتاح API لحساب Cursor من لوحة تحكم Cursor (للأجهزة بدون واجهة أو الخوادم). هذا مفتاح حساب Cursor وليس نقطة نهاية خارجية/OpenAI — إذ يتصل cursor-agent بخادم Cursor الخاص فقط. لاستخدام نقطة نهاية متوافقة مع codex/OpenAI، استخدم وكيل Codex بدلاً من ذلك.",
+      "modelPickerPlaceholder": "ابحث عن النماذج…",
+      "modelNoMatch": "لا يوجد نموذج مطابق",
+      "modelsNeedAuth": "سجّل الدخول لتحميل قائمة النماذج.",
+      "modelDefaultBadge": "افتراضي"
     }
   },
   "SettingsPages": {
@@ -1239,7 +1307,8 @@
         "togglePinFailed": "فشل تبديل التثبيت: {message}",
         "changeFolderDefaultAgentFailed": "فشل تعيين الوكيل الافتراضي: {message}",
         "importedAndUpdated": "تم استيراد {imported, plural, one {# جلسة} other {# جلسات}}، وتم تحديث {updated, plural, one {# عنوان} other {# عناوين}}، وتم تخطي {skipped}",
-        "updatedTitles": "تم تحديث {updated, plural, one {# عنوان} other {# عناوين}}، وتم تخطي {skipped}"
+        "updatedTitles": "تم تحديث {updated, plural, one {# عنوان} other {# عناوين}}، وتم تخطي {skipped}",
+        "setFolderAliasFailed": "فشل تعيين الاسم المستعار: {message}"
       },
       "statsLabel": "{folders} مجلدات · {convos} محادثة",
       "reorderHandle": "اسحب لإعادة الترتيب",
@@ -1272,7 +1341,12 @@
         "setDefaultAgent": "تعيين الوكيل الافتراضي",
         "defaultAgentNone": "بدون افتراضي (استخدام العام)",
         "agentUnavailableSuffix": "(غير متاح)",
-        "loadingAgents": "جارٍ تحميل الوكلاء…"
+        "loadingAgents": "جارٍ تحميل الوكلاء…",
+        "setAlias": "تعيين اسم مستعار…",
+        "setAliasTitle": "تعيين اسم مستعار للمجلد",
+        "setAliasPlaceholder": "أدخل اسمًا مستعارًا (اتركه فارغًا للمسح)",
+        "setAliasSave": "حفظ",
+        "setAliasCancel": "إلغاء"
       },
       "sections": {
         "pinned": "مثبت",
@@ -1349,7 +1423,8 @@
         "system": "النظام",
         "toolResult": "النتيجة",
         "toolError": "خطأ"
-      }
+      },
+      "moreActions": "إجراءات إضافية"
     },
     "sessionDetails": {
       "menuLabel": "تفاصيل الجلسة",
@@ -1380,7 +1455,8 @@
       "updatedAt": "تاريخ التحديث",
       "none": "—",
       "copyField": "نسخ {field}",
-      "copiedField": "تم نسخ {field}"
+      "copiedField": "تم نسخ {field}",
+      "noActiveSession": "لا توجد جلسة نشطة"
     },
     "conversationCard": {
       "untitledConversation": "محادثة بدون عنوان",
@@ -1583,7 +1659,8 @@
       "openInEditorFailed": "فشل الفتح في المحرر: {message}",
       "openInBrowserFailed": "فشل الفتح في المتصفح: {message}",
       "maximize": "تكبير",
-      "restore": "استعادة"
+      "restore": "استعادة",
+      "emptyDirectory": "مجلد فارغ"
     },
     "terminal": {
       "rename": "إعادة تسمية",
@@ -2051,7 +2128,8 @@
         "downloadFailed": "فشل تنزيل {name}",
         "downloadSaved": "تم تنزيل {name}",
         "pathCopied": "تم نسخ المسار",
-        "copyPathFailed": "فشل نسخ المسار"
+        "copyPathFailed": "فشل نسخ المسار",
+        "moveFailed": "فشل النقل"
       },
       "createDialog": {
         "newFile": "ملف جديد",
@@ -2340,7 +2418,8 @@
         "enableAgentFirstPlaceholder": "فعّل وكيلًا واحدًا على الأقل قبل بدء جلسة...",
         "prepareSessionFailed": "تعذّر تحضير جلسة الدردشة. يرجى المحاولة مرة أخرى.",
         "createConversationFailed": "تعذّر إنشاء المحادثة. يرجى المحاولة مرة أخرى.",
-        "askAnythingPlaceholder": "اسأل أي شيء..."
+        "askAnythingPlaceholder": "اسأل أي شيء...",
+        "agentNotInstalled": "{agent} غير مثبّت · افتح إعدادات Agents لتثبيته"
       },
       "welcomePanel": {
         "greeting": "ماذا تودّ أن <highlight>تفعل اليوم</highlight>؟",
@@ -2440,7 +2519,8 @@
       },
       "agentSelector": {
         "noEnabledAgents": "لا يوجد وكلاء مفعّلون",
-        "openAgentsSettings": "فتح إعدادات الوكلاء"
+        "openAgentsSettings": "فتح إعدادات الوكلاء",
+        "notInstalled": "غير مثبّت"
       },
       "agentPlanOverlay": {
         "title": "خطة الوكيل",

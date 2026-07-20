@@ -18,6 +18,7 @@ function mkFolder(p: Partial<FolderDetail> & { id: number }): FolderDetail {
     is_pinned: false,
     parent_id: null,
     kind: "regular",
+    alias: null,
     ...p,
   }
 }

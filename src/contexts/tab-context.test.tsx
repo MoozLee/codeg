@@ -99,6 +99,7 @@ const defaultFoldersMock: FolderDetail[] = [
     is_pinned: false,
     parent_id: null,
     kind: "regular",
+    alias: null,
   },
   {
     id: 2,
@@ -112,6 +113,7 @@ const defaultFoldersMock: FolderDetail[] = [
     is_pinned: false,
     parent_id: null,
     kind: "regular",
+    alias: null,
   },
 ]
 
@@ -419,6 +421,7 @@ describe("TabProvider tab state transitions", () => {
       parent_id: null,
       kind: "chat",
       is_pinned: false,
+      alias: null,
     }
     act(() => {
       useAppWorkspaceStore.setState({
@@ -453,6 +456,7 @@ describe("TabProvider tab state transitions", () => {
       parent_id: null,
       kind: "chat",
       is_pinned: false,
+      alias: null,
     }
     act(() => {
       useAppWorkspaceStore.setState({

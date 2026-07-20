@@ -129,6 +129,29 @@
       "sectionTitle": "Modusauswahlbereich",
       "sectionDescription": "Die Shortcut-Karten „Code-Entwicklung / Büroarbeit“ über dem Eingabefeld auf der Seite für eine neue Konversation.",
       "showQuickActions": "Auf der Seite für neue Konversationen anzeigen"
+    },
+    "workspaceBackground": {
+      "sectionTitle": "Arbeitsbereich-Hintergrund",
+      "sectionDescription": "Zeigt ein Bild hinter dem gesamten Arbeitsbereich. Seitenleiste und Panels werden durchscheinend und mattiert, sodass das Bild durchscheint, und eine Maske sorgt für lesbaren Text.",
+      "enable": "Hintergrundbild aktivieren",
+      "image": "Bild",
+      "chooseImage": "Bild auswählen",
+      "replaceImage": "Bild ersetzen",
+      "removeImage": "Entfernen",
+      "fillMode": "Füllmodus",
+      "fillModes": {
+        "cover": "Füllen",
+        "contain": "Einpassen",
+        "center": "Zentrieren",
+        "tile": "Kacheln"
+      },
+      "maskOpacity": "Maskendeckkraft",
+      "maskOpacityHint": "Höhere Werte blenden das Bild zur Hintergrundfarbe des Themes aus und verbessern den Textkontrast.",
+      "imageBlur": "Bildunschärfe",
+      "panelOpacity": "Panel-Deckkraft",
+      "panelOpacityHint": "Wie deckend Seitenleiste, Panels und Tab-Leisten sind. Niedriger lässt mehr vom Bild durchscheinen.",
+      "errorTooLarge": "Bild ist zu groß (max. 16 MB).",
+      "errorUploadFailed": "Hintergrundbild konnte nicht festgelegt werden."
     }
   },
   "SystemSettings": {
@@ -1003,7 +1026,9 @@
       "piBinaryInstallFailed": "pi-Installation fehlgeschlagen",
       "piBinaryUninstalled": "pi deinstalliert",
       "piBinaryUninstallFailed": "pi-Deinstallation fehlgeschlagen",
-      "savePiTrustFailed": "Speichern des Arbeitsbereich-Vertrauens fehlgeschlagen"
+      "savePiTrustFailed": "Speichern des Arbeitsbereich-Vertrauens fehlgeschlagen",
+      "cursorSaved": "Cursor-Konfiguration gespeichert",
+      "saveCursorConfigFailed": "Cursor-Konfiguration konnte nicht gespeichert werden"
     },
     "version": {
       "statusLabel": "Versionsstatus",
@@ -1090,6 +1115,49 @@
       "trustDescription": "Wenn codeg pi mit einem Ordner verbindet, wird dieser Ordner als vertrauenswürdig markiert, sodass pi die lokale Konfiguration und Skills des Projekts ohne separate Abfrage lädt.",
       "trustHint": "Nur hier geöffnete Ordner werden als vertrauenswürdig eingestuft, niemals der gesamte Rechner – und dies betrifft nur das Laden der Konfiguration, nicht das, was pi ausführen darf.",
       "configDirSkillsNote": "Mit einem benutzerdefinierten Konfigurationsverzeichnis gelten die in den Einstellungen verwalteten Skills, Experten und Office-Tools nicht für dieses pi — verwalte seine Skills direkt in diesem Ordner."
+    },
+    "cursor": {
+      "configDescription": "Konfiguriere Cursor hier. Wähle eine Authentifizierungsmethode – offizielles Abo (Browser-Anmeldung) oder einen Cursor-API-Schlüssel für Headless-/Servermaschinen – wähle dann ein Modell und bearbeite die Berechtigungsregeln und die Sandbox des CLI. codeg schreibt sie in ~/.cursor/cli-config.json, gemeinsam mit dem cursor-agent-CLI.",
+      "authTitle": "Authentifizierung",
+      "authChecking": "Prüfe…",
+      "authNotInstalled": "cursor-agent ist nicht installiert",
+      "authLoggedIn": "Angemeldet",
+      "authNotLoggedIn": "Nicht angemeldet",
+      "loginHint": "Führe dies im Terminal aus, um dich mit deinem Cursor-Konto anzumelden (ein Browserfenster öffnet sich), und klicke danach auf Aktualisieren:",
+      "apiKeyLabel": "Cursor-API-Schlüssel",
+      "apiKeyPlaceholder": "Schlüssel von cursor.com/dashboard",
+      "apiKeyHint": "CURSOR_API_KEY – ein Cursor-Dashboard-Kontoschlüssel, Alternative zur Browser-Anmeldung für Headless-/Servermaschinen. Kein Drittanbieter- oder OpenAI-Schlüssel.",
+      "modelTitle": "Standardmodell",
+      "loadModels": "Modelle laden",
+      "modelsUnavailable": "Modellliste nicht verfügbar",
+      "modelHint": "Wird der CLI beim Sitzungsstart als --model übergeben. Auf Standard lassen, damit Cursor wählt.",
+      "permissionsTitle": "Berechtigungen & Sandbox",
+      "permissionsDescription": "Visueller Editor für die Berechtigungsregeln der CLI (cli-config.json). Erlaubte Regeln laufen ohne Rückfrage; verweigerte werden immer blockiert.",
+      "permissionModeLabel": "Berechtigungsmodus",
+      "permissionModeDefault": "Vor der Ausführung fragen (Standard)",
+      "permissionModeForce": "Run Everything (--force)",
+      "permissionModeHint": "Run Everything startet Sitzungen mit --force: Alle Tool-Aufrufe werden ohne Rückfrage automatisch erlaubt, außer Deny-Regeln (eine Organisationsrichtlinie kann dies auf Allow-Regeln beschränken). Gilt für neue Sitzungen.",
+      "optionDefault": "Standard (nicht gesetzt)",
+      "sandboxLabel": "Sandbox",
+      "sandboxEnabled": "Aktiviert",
+      "sandboxDisabled": "Deaktiviert",
+      "allowRulesLabel": "Erlauben-Regeln",
+      "denyRulesLabel": "Verweigern-Regeln",
+      "addRule": "Regel hinzufügen",
+      "rulesSyntaxHint": "Regelsyntax: Shell(Befehl), Read(Pfad/Glob), Write(Pfad/Glob), WebFetch(Domain), Mcp(Server:Tool) — Deny-Regeln haben immer Vorrang.",
+      "saveConfig": "Konfiguration speichern",
+      "advancedToggle": "Erweitert: rohe cli-config.json",
+      "advancedHint": "Die komplette ~/.cursor/cli-config.json. Speichern schreibt die Datei unverändert; die strukturierten Steuerelemente oben werden stattdessen zusammengeführt.",
+      "saveRawConfig": "Datei speichern",
+      "authMode": "Authentifizierungsmethode",
+      "subscriptionHint": "Mit deinem Cursor-Konto anmelden und Cursors Modelle verwenden.",
+      "customApiKeyRequired": "Ein Cursor-API-Schlüssel ist erforderlich.",
+      "authModeApiKey": "Cursor-API-Schlüssel (Headless/Server)",
+      "authModeApiKeyHint": "Mit einem Cursor-Konto-API-Schlüssel aus dem Cursor-Dashboard authentifizieren (für Headless-/Servermaschinen). Das ist ein Cursor-Kontoschlüssel, kein Drittanbieter-/OpenAI-Endpunkt – cursor-agent kommuniziert nur mit dem Cursor-Backend. Um einen codex-/OpenAI-kompatiblen Endpunkt zu nutzen, verwende stattdessen den Codex-Agenten.",
+      "modelPickerPlaceholder": "Modelle suchen…",
+      "modelNoMatch": "Kein passendes Modell",
+      "modelsNeedAuth": "Melde dich an, um die Modellliste zu laden.",
+      "modelDefaultBadge": "Standard"
     }
   },
   "SettingsPages": {
@@ -1239,7 +1307,8 @@
         "togglePinFailed": "Anheften konnte nicht umgeschaltet werden: {message}",
         "changeFolderDefaultAgentFailed": "Standard-Agent konnte nicht gesetzt werden: {message}",
         "importedAndUpdated": "{imported, plural, one {# Sitzung} other {# Sitzungen}} importiert, {updated, plural, one {# Titel} other {# Titel}} aktualisiert, {skipped} übersprungen",
-        "updatedTitles": "{updated, plural, one {# Titel} other {# Titel}} aktualisiert, {skipped} übersprungen"
+        "updatedTitles": "{updated, plural, one {# Titel} other {# Titel}} aktualisiert, {skipped} übersprungen",
+        "setFolderAliasFailed": "Alias konnte nicht festgelegt werden: {message}"
       },
       "statsLabel": "{folders} Ordner · {convos} Konversationen",
       "reorderHandle": "Zum Neuordnen ziehen",
@@ -1272,7 +1341,12 @@
         "setDefaultAgent": "Standard-Agent festlegen",
         "defaultAgentNone": "Kein Standard (global verwenden)",
         "agentUnavailableSuffix": "(nicht verfügbar)",
-        "loadingAgents": "Agenten werden geladen…"
+        "loadingAgents": "Agenten werden geladen…",
+        "setAlias": "Alias festlegen…",
+        "setAliasTitle": "Ordner-Alias festlegen",
+        "setAliasPlaceholder": "Alias eingeben (zum Entfernen leer lassen)",
+        "setAliasSave": "Speichern",
+        "setAliasCancel": "Abbrechen"
       },
       "sections": {
         "pinned": "Angeheftet",
@@ -1349,7 +1423,8 @@
         "system": "System",
         "toolResult": "Ergebnis",
         "toolError": "Fehler"
-      }
+      },
+      "moreActions": "Weitere Aktionen"
     },
     "sessionDetails": {
       "menuLabel": "Sitzungsdetails",
@@ -1380,7 +1455,8 @@
       "updatedAt": "Aktualisiert",
       "none": "—",
       "copyField": "{field} kopieren",
-      "copiedField": "{field} kopiert"
+      "copiedField": "{field} kopiert",
+      "noActiveSession": "Keine aktive Sitzung"
     },
     "conversationCard": {
       "untitledConversation": "Unbenannte Konversation",
@@ -1583,7 +1659,8 @@
       "openInEditorFailed": "Öffnen im Editor fehlgeschlagen: {message}",
       "openInBrowserFailed": "Konnte nicht im Browser geöffnet werden: {message}",
       "maximize": "Maximieren",
-      "restore": "Wiederherstellen"
+      "restore": "Wiederherstellen",
+      "emptyDirectory": "Leerer Ordner"
     },
     "terminal": {
       "rename": "Umbenennen",
@@ -2051,7 +2128,8 @@
         "downloadFailed": "Herunterladen von {name} fehlgeschlagen",
         "downloadSaved": "{name} heruntergeladen",
         "pathCopied": "Pfad kopiert",
-        "copyPathFailed": "Pfad konnte nicht kopiert werden"
+        "copyPathFailed": "Pfad konnte nicht kopiert werden",
+        "moveFailed": "Verschieben fehlgeschlagen"
       },
       "createDialog": {
         "newFile": "Neue Datei",
@@ -2340,7 +2418,8 @@
         "enableAgentFirstPlaceholder": "Aktivieren Sie mindestens einen Agenten, bevor Sie eine Sitzung starten...",
         "prepareSessionFailed": "Die Chat-Sitzung konnte nicht vorbereitet werden. Bitte versuche es erneut.",
         "createConversationFailed": "Die Konversation konnte nicht erstellt werden. Bitte versuche es erneut.",
-        "askAnythingPlaceholder": "Fragen Sie alles..."
+        "askAnythingPlaceholder": "Fragen Sie alles...",
+        "agentNotInstalled": "{agent} ist nicht installiert · in den Agents-Einstellungen installieren"
       },
       "welcomePanel": {
         "greeting": "Was möchtest du heute <highlight>machen</highlight>?",
@@ -2440,7 +2519,8 @@
       },
       "agentSelector": {
         "noEnabledAgents": "Keine aktivierten Agenten",
-        "openAgentsSettings": "Agenten-Einstellungen öffnen"
+        "openAgentsSettings": "Agenten-Einstellungen öffnen",
+        "notInstalled": "Nicht installiert"
       },
       "agentPlanOverlay": {
         "title": "Agentenplan",

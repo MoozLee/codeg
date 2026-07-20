@@ -129,6 +129,29 @@
       "sectionTitle": "Área de selección de modo",
       "sectionDescription": "Las tarjetas de acceso rápido «Desarrollo de código / Ofimática» que se muestran sobre el editor en la página de nueva conversación.",
       "showQuickActions": "Mostrar en la página de nueva conversación"
+    },
+    "workspaceBackground": {
+      "sectionTitle": "Fondo del espacio de trabajo",
+      "sectionDescription": "Muestra una imagen detrás de todo el espacio de trabajo. La barra lateral y los paneles se vuelven translúcidos y esmerilados para dejar ver la imagen, y una máscara mantiene el texto legible.",
+      "enable": "Activar imagen de fondo",
+      "image": "Imagen",
+      "chooseImage": "Elegir imagen",
+      "replaceImage": "Reemplazar imagen",
+      "removeImage": "Quitar",
+      "fillMode": "Modo de relleno",
+      "fillModes": {
+        "cover": "Cubrir",
+        "contain": "Ajustar",
+        "center": "Centrar",
+        "tile": "Mosaico"
+      },
+      "maskOpacity": "Opacidad de la máscara",
+      "maskOpacityHint": "Los valores más altos difuminan la imagen hacia el color de fondo del tema, mejorando el contraste del texto.",
+      "imageBlur": "Desenfoque de la imagen",
+      "panelOpacity": "Opacidad de los paneles",
+      "panelOpacityHint": "Cuán opacos son la barra lateral, los paneles y las barras de pestañas. Más bajo deja ver más la imagen.",
+      "errorTooLarge": "La imagen es demasiado grande (máx. 16 MB).",
+      "errorUploadFailed": "No se pudo establecer la imagen de fondo."
     }
   },
   "SystemSettings": {
@@ -1003,7 +1026,9 @@
       "piBinaryInstallFailed": "Error al instalar pi",
       "piBinaryUninstalled": "pi desinstalado",
       "piBinaryUninstallFailed": "Error al desinstalar pi",
-      "savePiTrustFailed": "Error al guardar la confianza del espacio de trabajo"
+      "savePiTrustFailed": "Error al guardar la confianza del espacio de trabajo",
+      "cursorSaved": "Configuración de Cursor guardada",
+      "saveCursorConfigFailed": "Error al guardar la configuración de Cursor"
     },
     "version": {
       "statusLabel": "Estado de versión",
@@ -1090,6 +1115,49 @@
       "trustDescription": "Cuando codeg conecta pi a una carpeta, marca esa carpeta como de confianza para que pi cargue la configuración y las habilidades locales del proyecto sin una confirmación aparte.",
       "trustHint": "Solo se confía en las carpetas que abres aquí, nunca en todo tu equipo, y esto afecta únicamente a la carga de configuración, no a lo que pi puede ejecutar.",
       "configDirSkillsNote": "Con un directorio de configuración personalizado, las habilidades, los expertos y las herramientas de oficina gestionados en Ajustes no se aplican a este pi; gestiona sus habilidades directamente en esa carpeta."
+    },
+    "cursor": {
+      "configDescription": "Configura Cursor aquí. Elige un método de autenticación —suscripción oficial (inicio de sesión en el navegador) o una clave API de Cursor para equipos sin interfaz o servidores— y luego elige un modelo y edita las reglas de permisos y el sandbox del CLI. codeg los escribe en ~/.cursor/cli-config.json, compartido con el CLI cursor-agent.",
+      "authTitle": "Autenticación",
+      "authChecking": "Comprobando…",
+      "authNotInstalled": "cursor-agent no está instalado",
+      "authLoggedIn": "Sesión iniciada",
+      "authNotLoggedIn": "Sin sesión",
+      "loginHint": "Ejecuta esto en una terminal para iniciar sesión con tu cuenta de Cursor (se abre el navegador) y luego pulsa actualizar:",
+      "apiKeyLabel": "Clave API de Cursor",
+      "apiKeyPlaceholder": "clave de cursor.com/dashboard",
+      "apiKeyHint": "CURSOR_API_KEY: una clave de cuenta del panel de Cursor, alternativa al inicio de sesión en el navegador para equipos sin interfaz o servidores. No es una clave de terceros ni de OpenAI.",
+      "modelTitle": "Modelo predeterminado",
+      "loadModels": "Cargar modelos",
+      "modelsUnavailable": "Lista de modelos no disponible",
+      "modelHint": "Se pasa a la CLI como --model al iniciar la sesión. Déjalo en predeterminado para que Cursor elija.",
+      "permissionsTitle": "Permisos y sandbox",
+      "permissionsDescription": "Editor visual de las reglas de permisos de la CLI (cli-config.json). Las reglas permitidas se ejecutan sin confirmación; las denegadas se bloquean siempre.",
+      "permissionModeLabel": "Modo de permisos",
+      "permissionModeDefault": "Preguntar antes de ejecutar (predeterminado)",
+      "permissionModeForce": "Run Everything (--force)",
+      "permissionModeHint": "Run Everything inicia las sesiones con --force: todas las llamadas de herramientas se permiten automáticamente salvo las reglas de denegación, sin confirmaciones (una política de la organización puede limitarlo a las reglas de permiso). Se aplica a las sesiones nuevas.",
+      "optionDefault": "Predeterminado (sin definir)",
+      "sandboxLabel": "Sandbox",
+      "sandboxEnabled": "Activado",
+      "sandboxDisabled": "Desactivado",
+      "allowRulesLabel": "Reglas permitidas",
+      "denyRulesLabel": "Reglas denegadas",
+      "addRule": "Añadir regla",
+      "rulesSyntaxHint": "Sintaxis de reglas: Shell(cmd), Read(ruta/glob), Write(ruta/glob), WebFetch(dominio), Mcp(servidor:herramienta) — las reglas de denegación siempre prevalecen.",
+      "saveConfig": "Guardar configuración",
+      "advancedToggle": "Avanzado: cli-config.json sin procesar",
+      "advancedHint": "El ~/.cursor/cli-config.json completo. Guardar escribe el archivo tal cual; los controles estructurados de arriba se fusionan en él.",
+      "saveRawConfig": "Guardar archivo",
+      "authMode": "Método de autenticación",
+      "subscriptionHint": "Inicia sesión con tu cuenta de Cursor y usa los modelos de Cursor.",
+      "customApiKeyRequired": "Se requiere una clave API de Cursor.",
+      "authModeApiKey": "Clave API de Cursor (sin interfaz)",
+      "authModeApiKeyHint": "Autentícate con una clave API de cuenta de Cursor generada en el panel de Cursor (para equipos sin interfaz o servidores). Es una clave de cuenta de Cursor, no un endpoint de terceros/OpenAI: cursor-agent solo se comunica con el backend de Cursor. Para usar un endpoint compatible con codex/OpenAI, usa el agente Codex en su lugar.",
+      "modelPickerPlaceholder": "Buscar modelos…",
+      "modelNoMatch": "Ningún modelo coincide",
+      "modelsNeedAuth": "Inicia sesión para cargar la lista de modelos.",
+      "modelDefaultBadge": "predeterminado"
     }
   },
   "SettingsPages": {
@@ -1239,7 +1307,8 @@
         "togglePinFailed": "Error al cambiar la fijación: {message}",
         "changeFolderDefaultAgentFailed": "Error al establecer agente predeterminado: {message}",
         "importedAndUpdated": "Se importaron {imported, plural, one {# sesión} other {# sesiones}}, se actualizaron {updated, plural, one {# título} other {# títulos}}, se omitieron {skipped}",
-        "updatedTitles": "Se actualizaron {updated, plural, one {# título} other {# títulos}}, se omitieron {skipped}"
+        "updatedTitles": "Se actualizaron {updated, plural, one {# título} other {# títulos}}, se omitieron {skipped}",
+        "setFolderAliasFailed": "Error al establecer el alias: {message}"
       },
       "statsLabel": "{folders} carpetas · {convos} conversaciones",
       "reorderHandle": "Arrastrar para reordenar",
@@ -1272,7 +1341,12 @@
         "setDefaultAgent": "Establecer agente predeterminado",
         "defaultAgentNone": "Sin valor (usar predeterminado global)",
         "agentUnavailableSuffix": "(no disponible)",
-        "loadingAgents": "Cargando agentes…"
+        "loadingAgents": "Cargando agentes…",
+        "setAlias": "Establecer alias…",
+        "setAliasTitle": "Establecer alias de la carpeta",
+        "setAliasPlaceholder": "Introduce un alias (déjalo vacío para borrarlo)",
+        "setAliasSave": "Guardar",
+        "setAliasCancel": "Cancelar"
       },
       "sections": {
         "pinned": "Fijados",
@@ -1349,7 +1423,8 @@
         "system": "Sistema",
         "toolResult": "Resultado",
         "toolError": "Error"
-      }
+      },
+      "moreActions": "Más acciones"
     },
     "sessionDetails": {
       "menuLabel": "Detalles de la sesión",
@@ -1380,7 +1455,8 @@
       "updatedAt": "Actualizado",
       "none": "—",
       "copyField": "Copiar {field}",
-      "copiedField": "{field} copiado"
+      "copiedField": "{field} copiado",
+      "noActiveSession": "No hay ninguna sesión activa"
     },
     "conversationCard": {
       "untitledConversation": "Conversación sin título",
@@ -1583,7 +1659,8 @@
       "openInEditorFailed": "No se pudo abrir en el editor: {message}",
       "openInBrowserFailed": "No se pudo abrir en el navegador: {message}",
       "maximize": "Maximizar",
-      "restore": "Restaurar"
+      "restore": "Restaurar",
+      "emptyDirectory": "Carpeta vacía"
     },
     "terminal": {
       "rename": "Renombrar",
@@ -2051,7 +2128,8 @@
         "downloadFailed": "No se pudo descargar {name}",
         "downloadSaved": "{name} descargado",
         "pathCopied": "Ruta copiada",
-        "copyPathFailed": "No se pudo copiar la ruta"
+        "copyPathFailed": "No se pudo copiar la ruta",
+        "moveFailed": "Error al mover"
       },
       "createDialog": {
         "newFile": "Nuevo archivo",
@@ -2340,7 +2418,8 @@
         "enableAgentFirstPlaceholder": "Habilita al menos un agente antes de iniciar una sesión...",
         "prepareSessionFailed": "No se pudo preparar la sesión de chat. Inténtalo de nuevo.",
         "createConversationFailed": "No se pudo crear la conversación. Inténtalo de nuevo.",
-        "askAnythingPlaceholder": "Pregunta lo que sea..."
+        "askAnythingPlaceholder": "Pregunta lo que sea...",
+        "agentNotInstalled": "{agent} no está instalado · abre la configuración de Agents para instalarlo"
       },
       "welcomePanel": {
         "greeting": "¿Qué te gustaría <highlight>hacer hoy</highlight>?",
@@ -2440,7 +2519,8 @@
       },
       "agentSelector": {
         "noEnabledAgents": "No hay agentes habilitados",
-        "openAgentsSettings": "Abrir ajustes de agentes"
+        "openAgentsSettings": "Abrir ajustes de agentes",
+        "notInstalled": "No instalado"
       },
       "agentPlanOverlay": {
         "title": "Plan del agente",

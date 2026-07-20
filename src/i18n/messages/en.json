@@ -129,6 +129,29 @@
       "sectionTitle": "Mode selection area",
       "sectionDescription": "The Code Development / Office Work shortcut cards shown above the composer on the new conversation page.",
       "showQuickActions": "Show on the new conversation page"
+    },
+    "workspaceBackground": {
+      "sectionTitle": "Workspace background",
+      "sectionDescription": "Show a picture behind the whole workspace. Sidebar and panels turn translucent and frosted so the image shows through, and a mask keeps text readable.",
+      "enable": "Enable background image",
+      "image": "Image",
+      "chooseImage": "Choose image",
+      "replaceImage": "Replace image",
+      "removeImage": "Remove",
+      "fillMode": "Fill mode",
+      "fillModes": {
+        "cover": "Cover",
+        "contain": "Contain",
+        "center": "Center",
+        "tile": "Tile"
+      },
+      "maskOpacity": "Mask opacity",
+      "maskOpacityHint": "Higher values fade the image toward the theme background, improving text contrast.",
+      "imageBlur": "Image blur",
+      "panelOpacity": "Panel opacity",
+      "panelOpacityHint": "How opaque the sidebar, panels and tab bars are. Lower lets more of the image show through.",
+      "errorTooLarge": "Image is too large (max 16 MB).",
+      "errorUploadFailed": "Failed to set the background image."
     }
   },
   "SystemSettings": {
@@ -1003,7 +1026,9 @@
       "piBinaryInstallFailed": "Failed to install pi",
       "piBinaryUninstalled": "pi uninstalled",
       "piBinaryUninstallFailed": "Failed to uninstall pi",
-      "savePiTrustFailed": "Failed to save workspace trust"
+      "savePiTrustFailed": "Failed to save workspace trust",
+      "cursorSaved": "Cursor config saved",
+      "saveCursorConfigFailed": "Failed to save Cursor config"
     },
     "version": {
       "statusLabel": "Version Status",
@@ -1090,6 +1115,49 @@
       "trustDescription": "When codeg connects pi to a folder, mark that folder trusted so pi loads the project's local config and skills without a separate prompt.",
       "trustHint": "Only folders you open here are trusted, never your whole machine — and this affects config loading only, not what pi is allowed to run.",
       "configDirSkillsNote": "With a custom config directory, the Skills, Experts, and Office tools managed in Settings won't apply to this pi — manage its skills in that folder directly."
+    },
+    "cursor": {
+      "configDescription": "Configure Cursor here. Choose an authentication method — official subscription (browser sign-in) or a Cursor API key for headless/server machines — then pick a model and edit the CLI's permission rules and sandbox. codeg writes them into ~/.cursor/cli-config.json, shared with the cursor-agent CLI.",
+      "authTitle": "Authentication",
+      "authChecking": "Checking…",
+      "authNotInstalled": "cursor-agent is not installed",
+      "authLoggedIn": "Logged in",
+      "authNotLoggedIn": "Not logged in",
+      "loginHint": "Run this in a terminal to sign in with your Cursor account (a browser window opens), then hit refresh:",
+      "apiKeyLabel": "Cursor API key",
+      "apiKeyPlaceholder": "key from cursor.com/dashboard",
+      "apiKeyHint": "CURSOR_API_KEY — a Cursor Dashboard account key, an alternative to browser login for headless/server machines. Not a third-party or OpenAI key.",
+      "modelTitle": "Default model",
+      "loadModels": "Load models",
+      "modelsUnavailable": "Model list unavailable",
+      "modelHint": "Passed to the CLI as --model at session start. Leave on default to let Cursor choose.",
+      "permissionsTitle": "Permissions & sandbox",
+      "permissionsDescription": "Visual editor for the CLI's permission rules (cli-config.json). Allow rules run without prompting; deny rules are always blocked.",
+      "permissionModeLabel": "Permission mode",
+      "permissionModeDefault": "Ask before running (default)",
+      "permissionModeForce": "Run Everything (--force)",
+      "permissionModeHint": "Run Everything launches sessions with --force: every tool call is auto-allowed except deny rules, with no confirmation prompts (an organization policy may downgrade it to allow-rule matching). Takes effect for new sessions.",
+      "optionDefault": "Default (unset)",
+      "sandboxLabel": "Sandbox",
+      "sandboxEnabled": "Enabled",
+      "sandboxDisabled": "Disabled",
+      "allowRulesLabel": "Allow rules",
+      "denyRulesLabel": "Deny rules",
+      "addRule": "Add rule",
+      "rulesSyntaxHint": "Rule syntax: Shell(cmd), Read(path/glob), Write(path/glob), WebFetch(domain), Mcp(server:tool) — deny rules always win.",
+      "saveConfig": "Save configuration",
+      "advancedToggle": "Advanced: raw cli-config.json",
+      "advancedHint": "The whole ~/.cursor/cli-config.json. Saving writes the file verbatim — the structured controls above merge into it instead.",
+      "saveRawConfig": "Save file",
+      "authMode": "Authentication method",
+      "subscriptionHint": "Sign in with your Cursor account and use Cursor's models.",
+      "customApiKeyRequired": "A Cursor API key is required.",
+      "authModeApiKey": "Cursor API key (headless)",
+      "authModeApiKeyHint": "Authenticate with a Cursor account API key from the Cursor dashboard — for headless or server machines. This is a Cursor account key, not a third-party/OpenAI endpoint: cursor-agent only talks to Cursor's own backend. To use a codex/OpenAI-compatible endpoint, use the Codex agent instead.",
+      "modelPickerPlaceholder": "Search models…",
+      "modelNoMatch": "No matching model",
+      "modelsNeedAuth": "Sign in to load the model list.",
+      "modelDefaultBadge": "default"
     }
   },
   "SettingsPages": {
@@ -1239,7 +1307,8 @@
         "togglePinFailed": "Failed to toggle folder pin: {message}",
         "changeFolderDefaultAgentFailed": "Failed to set default agent: {message}",
         "importedAndUpdated": "Imported {imported, plural, one {# session} other {# sessions}}, updated {updated, plural, one {# title} other {# titles}}, skipped {skipped}",
-        "updatedTitles": "Updated {updated, plural, one {# title} other {# titles}}, skipped {skipped}"
+        "updatedTitles": "Updated {updated, plural, one {# title} other {# titles}}, skipped {skipped}",
+        "setFolderAliasFailed": "Failed to set alias: {message}"
       },
       "statsLabel": "{folders} folders · {convos} conversations",
       "reorderHandle": "Drag to reorder",
@@ -1272,7 +1341,12 @@
         "setDefaultAgent": "Set default agent",
         "defaultAgentNone": "No default (use global)",
         "agentUnavailableSuffix": "(unavailable)",
-        "loadingAgents": "Loading agents…"
+        "loadingAgents": "Loading agents…",
+        "setAlias": "Set alias…",
+        "setAliasTitle": "Set folder alias",
+        "setAliasPlaceholder": "Enter an alias (leave empty to clear)",
+        "setAliasSave": "Save",
+        "setAliasCancel": "Cancel"
       },
       "sections": {
         "pinned": "Pinned",
@@ -1349,7 +1423,8 @@
         "system": "System",
         "toolResult": "Result",
         "toolError": "Error"
-      }
+      },
+      "moreActions": "More actions"
     },
     "sessionDetails": {
       "menuLabel": "Session Details",
@@ -1380,7 +1455,8 @@
       "updatedAt": "Updated",
       "none": "—",
       "copyField": "Copy {field}",
-      "copiedField": "Copied {field}"
+      "copiedField": "Copied {field}",
+      "noActiveSession": "No active session"
     },
     "conversationCard": {
       "untitledConversation": "Untitled conversation",
@@ -1583,7 +1659,8 @@
       "openInEditorFailed": "Failed to open in editor: {message}",
       "openInBrowserFailed": "Failed to open in browser: {message}",
       "maximize": "Maximize",
-      "restore": "Restore"
+      "restore": "Restore",
+      "emptyDirectory": "Empty folder"
     },
     "terminal": {
       "rename": "Rename",
@@ -2051,7 +2128,8 @@
         "downloadFailed": "Failed to download {name}",
         "downloadSaved": "Downloaded {name}",
         "pathCopied": "Path copied",
-        "copyPathFailed": "Failed to copy path"
+        "copyPathFailed": "Failed to copy path",
+        "moveFailed": "Move failed"
       },
       "createDialog": {
         "newFile": "New file",
@@ -2340,7 +2418,8 @@
         "enableAgentFirstPlaceholder": "Enable at least one agent before starting a session...",
         "prepareSessionFailed": "Couldn't prepare the chat session. Please try again.",
         "createConversationFailed": "Couldn't create the conversation. Please try again.",
-        "askAnythingPlaceholder": "Ask anything..."
+        "askAnythingPlaceholder": "Ask anything...",
+        "agentNotInstalled": "{agent} is not installed — open Agents settings to install it"
       },
       "welcomePanel": {
         "greeting": "What would you like to <highlight>do today</highlight>?",
@@ -2440,7 +2519,8 @@
       },
       "agentSelector": {
         "noEnabledAgents": "No enabled agents",
-        "openAgentsSettings": "Open Agents settings"
+        "openAgentsSettings": "Open Agents settings",
+        "notInstalled": "Not installed"
       },
       "agentPlanOverlay": {
         "title": "Agent Plan",

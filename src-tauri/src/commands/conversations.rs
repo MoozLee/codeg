@@ -12,6 +12,7 @@ use crate::parsers::cline::ClineParser;
 use crate::parsers::codebuddy::CodeBuddyParser;
 use crate::parsers::codex::CodexParser;
 use crate::parsers::gemini::GeminiParser;
+use crate::parsers::cursor::CursorParser;
 use crate::parsers::grok::GrokParser;
 use crate::parsers::hermes::HermesParser;
 use crate::parsers::kimi_code::KimiCodeParser;
@@ -174,6 +175,7 @@ fn list_conversations_sync(
         (AgentType::KimiCode, Box::new(KimiCodeParser::new())),
         (AgentType::Pi, Box::new(PiParser::new())),
         (AgentType::Grok, Box::new(GrokParser::new())),
+        (AgentType::Cursor, Box::new(CursorParser::new())),
     ];
 
     for (at, parser) in &parsers {
@@ -282,6 +284,7 @@ pub async fn get_conversation(
             AgentType::KimiCode => Box::new(KimiCodeParser::new()),
             AgentType::Pi => Box::new(PiParser::new()),
             AgentType::Grok => Box::new(GrokParser::new()),
+            AgentType::Cursor => Box::new(CursorParser::new()),
         };
 
         parser
@@ -409,7 +412,8 @@ pub async fn import_local_conversations(
 /// Build the `meta["codeg.delegation"]` value for a delegation child loaded
 /// from the DB. Mirrors the shape produced at runtime by
 /// `acp::delegation::meta_writer::build_delegation_meta`, but only includes
-/// the fields the DB can vouch for: `status` and `child_conversation_id`.
+/// the fields the DB can vouch for: `status`, `agent_type`, and
+/// `child_conversation_id`.
 /// `child_connection_id` is omitted (no live connection for a historical
 /// view; the frontend's parser treats it as optional).
 ///
@@ -441,6 +445,7 @@ fn build_historical_delegation_meta(child: &DbConversationSummary) -> serde_json
         "child_conversation_id".into(),
         serde_json::Value::Number(child.id.into()),
     );
+    obj.insert("agent_type".into(), serde_json::json!(child.agent_type));
     serde_json::Value::Object(obj)
 }
 
@@ -524,6 +529,7 @@ pub async fn get_folder_conversation_core(
                     AgentType::KimiCode => Box::new(KimiCodeParser::new()),
                     AgentType::Pi => Box::new(PiParser::new()),
                     AgentType::Grok => Box::new(GrokParser::new()),
+                    AgentType::Cursor => Box::new(CursorParser::new()),
                 };
                 match parser.get_conversation(&eid) {
                     Ok(d) => Ok((
@@ -1938,6 +1944,7 @@ mod tests {
         let inner = meta.get("codeg.delegation").expect("codeg.delegation key");
         assert_eq!(inner["status"], "completed");
         assert_eq!(inner["child_conversation_id"], 42);
+        assert_eq!(inner["agent_type"], "codex");
         assert!(
             inner.get("error_code").is_none(),
             "completed has no error_code"

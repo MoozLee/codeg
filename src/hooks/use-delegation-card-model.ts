@@ -127,7 +127,12 @@ export function useDelegationCardModel(
   const childLive = useDelegationChildLive(childConnectionId)
   const childAwaitingPermission = childLive?.pendingPermission != null
 
-  const agentType: AgentType | null = binding?.agentType ?? parsed.agentType
+  const agentType: AgentType | null =
+    binding?.agentType ??
+    parsed.agentType ??
+    parsedMeta?.agentType ??
+    childLive?.agentType ??
+    null
   const status = resolveDelegationStatus({
     binding,
     parsedMeta,
@@ -140,12 +145,18 @@ export function useDelegationCardModel(
 
   return {
     agentType,
-    task: parsed.task,
-    taskId,
+    // Parsed raw_input first (full text on hosts that carry it), then the
+    // live binding's preview, then the broker meta — the latter two are the
+    // only sources on hosts whose announcements never carry arguments
+    // (Cursor), covering live / refresh-mid-run / persisted respectively.
+    task: parsed.task ?? binding?.task ?? parsedMeta?.task ?? null,
+    taskId: taskId ?? binding?.taskId ?? parsedMeta?.taskId ?? null,
     status,
     errorCode,
     childConversationId,
     childConnectionId,
-    hasModel: Boolean(binding || parsed.agentType || parsed.task),
+    // Broker-stamped meta alone is proof enough of a delegation — the
+    // persisted Cursor shape has empty raw_input and no live binding.
+    hasModel: Boolean(binding || parsed.agentType || parsed.task || parsedMeta),
   }
 }

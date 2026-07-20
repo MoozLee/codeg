@@ -43,6 +43,7 @@ fn to_detail(m: folder::Model) -> FolderDetail {
         is_pinned: m.is_pinned,
         parent_id: m.parent_id,
         kind: m.kind,
+        alias: m.alias,
     }
 }
 
@@ -146,6 +147,7 @@ async fn add_folder_inner(
                 ParentWrite::Set(parent_id) => parent_id,
             }),
             kind: Set(FolderKind::Regular),
+            alias: Set(None),
         };
         active.insert(conn).await?
     };
@@ -188,6 +190,7 @@ pub async fn add_chat_folder(
         is_pinned: Set(false),
         parent_id: Set(None),
         kind: Set(FolderKind::Chat),
+        alias: Set(None),
     };
     let model = active.insert(conn).await?;
     Ok(to_detail(model))
@@ -256,6 +259,29 @@ pub async fn update_folder_pinned(
     let updated = active.update(&txn).await?;
 
     txn.commit().await?;
+    Ok(Some(to_detail(updated)))
+}
+
+/// Sets (or clears) a folder's display alias. `alias = None` clears it; callers
+/// are expected to have already normalized empty/whitespace input to `None`.
+pub async fn update_folder_alias(
+    conn: &DatabaseConnection,
+    folder_id: i32,
+    alias: Option<String>,
+) -> Result<Option<FolderDetail>, DbError> {
+    let row = folder::Entity::find_by_id(folder_id)
+        .filter(folder::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let mut active = row.into_active_model();
+    active.alias = Set(alias);
+    active.updated_at = Set(Utc::now());
+    let updated = active.update(conn).await?;
     Ok(Some(to_detail(updated)))
 }
 

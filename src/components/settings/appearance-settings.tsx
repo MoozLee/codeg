@@ -38,6 +38,7 @@ import {
 } from "@/lib/theme-presets"
 import { PetManagerSection } from "./pet-manager-section"
 import { FontSettingsSection } from "./font-settings-section"
+import { WorkspaceBackgroundSection } from "./workspace-background-section"
 
 type ThemeMode = "system" | "light" | "dark"
 
@@ -257,6 +258,9 @@ export function AppearanceSettings() {
 
         {/* ===== Fonts ===== */}
         <FontSettingsSection />
+
+        {/* ===== Workspace background ===== */}
+        <WorkspaceBackgroundSection />
 
         <div className="flex justify-end">
           <Button

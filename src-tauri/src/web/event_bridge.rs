@@ -555,6 +555,7 @@ mod tests {
                     parent_id: Some(7),
                     kind: FolderKind::Regular,
                     is_pinned: false,
+                    alias: None
                 }),
             },
         );
