@@ -10,7 +10,9 @@ use sea_orm::{
     TransactionTrait,
 };
 
-use crate::acp::connection::{spawn_agent_connection, AgentConnection, ConnectionCommand};
+use crate::acp::connection::{
+    spawn_agent_connection, AgentConnection, ConnectionCommand, SessionConfigCommandValue,
+};
 use crate::acp::error::AcpError;
 use crate::acp::feedback::{
     bounded_feedback_batch, FeedbackItem, FeedbackStatus, PendingFeedback,
@@ -1139,20 +1141,29 @@ impl ConnectionManager {
         &self,
         conn_id: &str,
         config_id: String,
-        value_id: String,
+        value: SessionConfigCommandValue,
     ) -> Result<(), AcpError> {
-        let cmd_tx = {
+        let (cmd_tx, state) = {
             let connections = self.connections.lock().await;
             let conn = connections
                 .get(conn_id)
                 .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
-            conn.cmd_tx.clone()
+            (conn.cmd_tx.clone(), Arc::clone(&conn.state))
         };
+        let advertised = state
+            .read()
+            .await
+            .config_options
+            .as_ref()
+            .and_then(|options| options.iter().find(|option| option.id == config_id))
+            .is_some_and(|option| value.is_advertised_by(option));
+        if !advertised {
+            return Err(AcpError::protocol(format!(
+                "Invalid or unadvertised session config option '{config_id}'"
+            )));
+        }
         cmd_tx
-            .send(ConnectionCommand::SetConfigOption {
-                config_id,
-                value_id,
-            })
+            .send(ConnectionCommand::SetConfigOption { config_id, value })
             .await
             .map_err(|_| AcpError::ProcessExited)
     }

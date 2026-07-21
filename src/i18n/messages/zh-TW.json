@@ -1479,7 +1479,57 @@
         "output": "輸出",
         "cacheRead": "快取讀取",
         "cacheWrite": "快取寫入",
-        "total": "總計"
+        "total": "總計",
+        "contextSource": "用量來源",
+        "contextMaxSource": "上限來源",
+        "source": {
+          "live": "即時用量",
+          "history": "歷史統計"
+        },
+        "maxSource": {
+          "live": "Agent 上報上限",
+          "configured": "設定的自動壓縮視窗",
+          "history": "歷史統計",
+          "unknown": "未知"
+        },
+        "contextLevel": {
+          "unknown": "上下文用量未知。",
+          "normal": "上下文用量正常。",
+          "high": "上下文用量偏高，建議準備壓縮。",
+          "critical": "上下文視窗接近上限。"
+        },
+        "contextManagement": "上下文管理",
+        "agentType": "Agent",
+        "configuredModel": "設定模型",
+        "selectorModel": "ACP 選擇器模型",
+        "unknown": "未知",
+        "enabled": "已啟用",
+        "disabled": "已停用",
+        "autoCompaction": "自動壓縮",
+        "autoCompactionThreshold": "觸發閾值",
+        "configuredContextWindowMax": "設定的自動壓縮視窗",
+        "runtimeContextWindowMax": "執行階段回報視窗",
+        "contextWindowClampedWarning": "已設定 {configured}，但執行階段僅回報 {runtime}。執行階段/模型限制可能會壓低實際視窗。",
+        "compactionSupport": "壓縮支援",
+        "compactionStatus": "壓縮狀態",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "設定環境變數",
+          "agent_config_env": "config.env",
+          "agent_root_config": "頂層設定"
+        },
+        "compactionSupportState": {
+          "unknown": "未知",
+          "unsupported": "不支援",
+          "agent_managed": "Agent 管理",
+          "native_managed": "Claude Code 原生管理"
+        },
+        "compactionStatusState": {
+          "idle": "閒置",
+          "triggered": "已觸發",
+          "running": "執行中",
+          "completed": "已完成",
+          "failed": "失敗"
+        }
       }
     },
     "auxPanel": {

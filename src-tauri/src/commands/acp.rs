@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
 use crate::acp::binary_cache;
+#[cfg(feature = "tauri-runtime")]
+use crate::acp::connection::SessionConfigCommandValue;
 use crate::acp::error::AcpError;
 use crate::acp::manager::ConnectionManager;
 use crate::acp::opencode_plugins::{self, PluginCheckSummary};
@@ -6574,11 +6576,23 @@ pub async fn acp_set_mode(
 pub async fn acp_set_config_option(
     connection_id: String,
     config_id: String,
-    value_id: String,
+    value_id: Option<String>,
+    value: Option<bool>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
+    let value = match (value_id, value) {
+        (Some(value_id), None) if !value_id.trim().is_empty() => {
+            SessionConfigCommandValue::ValueId(value_id)
+        }
+        (None, Some(value)) => SessionConfigCommandValue::Boolean(value),
+        _ => {
+            return Err(AcpError::protocol(
+                "Exactly one session config option value is required".to_string(),
+            ));
+        }
+    };
     manager
-        .set_config_option(&connection_id, config_id, value_id)
+        .set_config_option(&connection_id, config_id, value)
         .await
 }
 
@@ -6871,11 +6885,34 @@ pub(crate) async fn acp_get_agent_status_core(
         ),
     };
 
+    let local_config_json = if agent_type == AgentType::Grok {
+        load_grok_config_toml_raw()
+            .map(|raw| parse_grok_settings(&raw))
+            .and_then(|settings| serde_json::to_string(&settings).ok())
+    } else {
+        load_agent_local_config_json(agent_type)
+    };
+    let env =
+        build_runtime_env_from_setting(agent_type, setting.as_ref(), local_config_json.as_deref());
+    let config_file_path = if agent_type == AgentType::Grok {
+        Some(
+            crate::parsers::grok::resolve_grok_home_dir()
+                .join("config.toml")
+                .display()
+                .to_string(),
+        )
+    } else {
+        agent_local_config_path(agent_type).map(|path| path.display().to_string())
+    };
+
     Ok(crate::acp::types::AcpAgentStatus {
         agent_type,
         available,
-        enabled: setting.map(|m| m.enabled).unwrap_or(true),
+        enabled: setting.as_ref().map(|model| model.enabled).unwrap_or(true),
         installed_version,
+        env,
+        config_json: local_config_json,
+        config_file_path,
     })
 }
 
@@ -6956,34 +6993,12 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             ),
         };
 
-        let mut env = setting
-            .and_then(|m| m.env_json.as_deref())
-            .and_then(|s| serde_json::from_str::<BTreeMap<String, String>>(s).ok())
-            .unwrap_or_default();
         let local_config_json = load_agent_local_config_json(agent_type);
-        if let Some(raw_local_config) = local_config_json.as_deref() {
-            if let Ok(local_cfg) = serde_json::from_str::<AgentRuntimeConfig>(raw_local_config) {
-                for (key, value) in local_cfg.env {
-                    let trimmed = value.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    env.insert(key, trimmed.to_string());
-                }
-                let (api_base_url_key, api_key_key, model_key) = agent_env_keys(agent_type);
-                if let Some(value) = trim_non_empty(local_cfg.api_base_url) {
-                    env.insert(api_base_url_key.to_string(), value);
-                }
-                if let Some(value) = trim_non_empty(local_cfg.api_key) {
-                    env.insert(api_key_key.to_string(), value);
-                }
-                if agent_type != AgentType::ClaudeCode {
-                    if let Some(value) = trim_non_empty(local_cfg.model) {
-                        env.insert(model_key.to_string(), value);
-                    }
-                }
-            }
-        }
+        let env = build_runtime_env_from_setting(
+            agent_type,
+            setting,
+            local_config_json.as_deref(),
+        );
         let sort_order = setting.map(|m| m.sort_order).unwrap_or(idx as i32);
         // Persist detected version to DB for binary agents (npx written during install/upgrade)
         if dist_type == "binary" {

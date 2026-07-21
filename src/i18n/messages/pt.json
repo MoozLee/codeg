@@ -1479,7 +1479,57 @@
         "output": "Saída",
         "cacheRead": "Leitura de cache",
         "cacheWrite": "Gravação de cache",
-        "total": "Total de tokens"
+        "total": "Total de tokens",
+        "contextSource": "Fonte de uso",
+        "contextMaxSource": "Fonte do máximo",
+        "source": {
+          "live": "Uso ao vivo",
+          "history": "Estatísticas históricas"
+        },
+        "maxSource": {
+          "live": "Máximo informado pelo Agent",
+          "configured": "Janela de autocompactação configurada",
+          "history": "Estatísticas históricas",
+          "unknown": "Desconhecido"
+        },
+        "contextLevel": {
+          "unknown": "O uso de contexto é desconhecido.",
+          "normal": "O uso de contexto está normal.",
+          "high": "O uso de contexto está alto.",
+          "critical": "A janela de contexto está perto do limite."
+        },
+        "contextManagement": "Gerenciamento de contexto",
+        "agentType": "Agent",
+        "configuredModel": "Modelo configurado",
+        "selectorModel": "Modelo do seletor ACP",
+        "unknown": "Desconhecido",
+        "enabled": "Ativado",
+        "disabled": "Desativado",
+        "autoCompaction": "Compactação automática",
+        "autoCompactionThreshold": "Limite de acionamento",
+        "configuredContextWindowMax": "Janela de autocompactação configurada",
+        "runtimeContextWindowMax": "Janela informada pelo runtime",
+        "contextWindowClampedWarning": "Configurado como {configured}, mas o runtime informa apenas {runtime}. O limite do runtime/modelo pode reduzir a janela ativa.",
+        "compactionSupport": "Suporte a compactação",
+        "compactionStatus": "Status da compactação",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "Ambiente configurado",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Configuração raiz"
+        },
+        "compactionSupportState": {
+          "unknown": "Desconhecido",
+          "unsupported": "Sem suporte",
+          "agent_managed": "Gerenciado pelo Agent",
+          "native_managed": "Gerenciado nativamente pelo Claude Code"
+        },
+        "compactionStatusState": {
+          "idle": "Ocioso",
+          "triggered": "Acionado",
+          "running": "Em execução",
+          "completed": "Concluído",
+          "failed": "Falhou"
+        }
       }
     },
     "auxPanel": {
