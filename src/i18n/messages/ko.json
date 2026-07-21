@@ -1522,7 +1522,57 @@
         "output": "출력",
         "cacheRead": "캐시 읽기",
         "cacheWrite": "캐시 쓰기",
-        "total": "합계"
+        "total": "합계",
+        "contextSource": "사용량 소스",
+        "contextMaxSource": "최대값 소스",
+        "source": {
+          "live": "실시간 사용량",
+          "history": "기록 통계"
+        },
+        "maxSource": {
+          "live": "Agent 보고 최대값",
+          "configured": "구성된 자동 압축 창",
+          "history": "기록 통계",
+          "unknown": "알 수 없음"
+        },
+        "contextLevel": {
+          "unknown": "컨텍스트 사용량을 알 수 없습니다.",
+          "normal": "컨텍스트 사용량이 정상입니다.",
+          "high": "컨텍스트 사용량이 높습니다.",
+          "critical": "컨텍스트 창이 한도에 가깝습니다."
+        },
+        "contextManagement": "컨텍스트 관리",
+        "agentType": "Agent",
+        "configuredModel": "설정된 모델",
+        "selectorModel": "ACP 선택기 모델",
+        "unknown": "알 수 없음",
+        "enabled": "활성화됨",
+        "disabled": "비활성화됨",
+        "autoCompaction": "자동 압축",
+        "autoCompactionThreshold": "트리거 임계값",
+        "configuredContextWindowMax": "구성된 자동 압축 창",
+        "runtimeContextWindowMax": "런타임 보고 창",
+        "contextWindowClampedWarning": "구성값은 {configured}이지만 런타임은 {runtime}만 보고합니다. 런타임/모델 제한으로 활성 창이 낮아질 수 있습니다.",
+        "compactionSupport": "압축 지원",
+        "compactionStatus": "압축 상태",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "구성된 환경 변수",
+          "agent_config_env": "config.env",
+          "agent_root_config": "루트 설정"
+        },
+        "compactionSupportState": {
+          "unknown": "알 수 없음",
+          "unsupported": "지원 안 함",
+          "agent_managed": "Agent 관리",
+          "native_managed": "Claude Code 기본 관리"
+        },
+        "compactionStatusState": {
+          "idle": "대기",
+          "triggered": "트리거됨",
+          "running": "실행 중",
+          "completed": "완료",
+          "failed": "실패"
+        }
       }
     },
     "auxPanel": {

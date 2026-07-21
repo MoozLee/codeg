@@ -412,6 +412,34 @@ describe("MessageInput collapsed selectors popover", () => {
     )
   })
 
+  it("toggles a boolean config option from the cog Popover", async () => {
+    const user = userEvent.setup()
+    const onConfigOptionChange = vi.fn()
+    const autoCompact: SessionConfigOptionInfo = {
+      id: "auto_compact",
+      name: "Auto compact",
+      description: null,
+      category: null,
+      kind: { type: "boolean", current_value: false },
+    }
+    const { container } = renderInput({
+      configOptions: [autoCompact],
+      onConfigOptionChange,
+    })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+
+    const settingsLabel = enMessages.Folder.chat.messageInput.agentSettings
+    await user.click(screen.getByRole("button", { name: settingsLabel }))
+    const popover = await screen.findByRole("dialog", { name: settingsLabel })
+    await user.click(
+      within(popover).getByRole("switch", { name: "Auto compact" })
+    )
+
+    expect(onConfigOptionChange).toHaveBeenCalledWith("auto_compact", true)
+  })
+
   it("groups model values by their provider prefix in the cog Popover", async () => {
     const user = userEvent.setup()
     const onConfigOptionChange = vi.fn()

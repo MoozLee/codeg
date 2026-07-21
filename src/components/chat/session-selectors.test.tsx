@@ -165,6 +165,32 @@ describe("SessionSelectorsPanel", () => {
     expect(screen.getByText("OpenAI")).toBeInTheDocument()
   })
 
+  it("renders boolean settings as a switch", () => {
+    const onSelect = vi.fn()
+    const onAfterSelect = vi.fn()
+    const settings: SessionSelectorSetting[] = [
+      {
+        type: "boolean",
+        key: "config:auto_compact",
+        title: "Auto compact",
+        currentValue: false,
+        currentLabel: "Disabled",
+        onSelect,
+      },
+    ]
+    render(
+      <SessionSelectorsPanel
+        settings={settings}
+        settingsLabel="Settings"
+        onAfterSelect={onAfterSelect}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("switch", { name: "Auto compact" }))
+    expect(onSelect).toHaveBeenCalledWith(true)
+    expect(onAfterSelect).toHaveBeenCalledTimes(1)
+  })
+
   it("renders nothing when there are no settings", () => {
     const { container } = render(
       <SessionSelectorsPanel settings={[]} settingsLabel="Settings" />

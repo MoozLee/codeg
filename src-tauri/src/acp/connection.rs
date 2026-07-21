@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -37,15 +38,41 @@ use crate::acp::terminal_runtime::{TerminalRuntime, TerminalRuntimeError};
 use crate::acp::types::{
     AcpEvent, AvailableCommandInfo, ConnectionInfo, ConnectionStatus, GrokEffortSpec,
     PermissionOptionInfo, PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock,
-    SessionConfigKindInfo, SessionConfigOptionInfo, SessionConfigSelectGroupInfo,
-    SessionConfigSelectInfo, SessionConfigSelectOptionInfo, SessionModeInfo, SessionModeStateInfo,
-    ToolCallImageInfo, UserMessageBlock,
+    SessionConfigBooleanInfo, SessionConfigKindInfo, SessionConfigOptionInfo,
+    SessionConfigSelectGroupInfo, SessionConfigSelectInfo, SessionConfigSelectOptionInfo,
+    SessionModeInfo, SessionModeStateInfo, ToolCallImageInfo, UserMessageBlock,
 };
 use crate::models::agent::AgentType;
 use crate::network::proxy;
 use crate::web::event_bridge::{emit_with_state, EventEmitter};
 
 const DEFAULT_COMMAND_COLOR_ENV: [(&str, &str); 1] = [("CLICOLOR_FORCE", "1")];
+const CLAUDE_CONTEXT_1M_BETA: &str = "context-1m-2025-08-07";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionConfigCommandValue {
+    ValueId(String),
+    Boolean(bool),
+}
+
+impl SessionConfigCommandValue {
+    pub(crate) fn is_advertised_by(&self, option: &SessionConfigOptionInfo) -> bool {
+        match (self, &option.kind) {
+            (Self::ValueId(value), SessionConfigKindInfo::Select(select)) => {
+                !value.trim().is_empty()
+                    && (select.options.iter().any(|candidate| candidate.value == *value)
+                        || select.groups.iter().any(|group| {
+                            group
+                                .options
+                                .iter()
+                                .any(|candidate| candidate.value == *value)
+                        }))
+            }
+            (Self::Boolean(_), SessionConfigKindInfo::Boolean(_)) => true,
+            _ => false,
+        }
+    }
+}
 
 fn merge_agent_env(
     env: &[(&'static str, &'static str)],
@@ -210,7 +237,7 @@ pub enum ConnectionCommand {
     },
     SetConfigOption {
         config_id: String,
-        value_id: String,
+        value: SessionConfigCommandValue,
     },
     Cancel,
     RespondPermission {
@@ -868,6 +895,7 @@ pub async fn spawn_agent_connection(
             cmd_rx,
             emitter_clone.clone(),
             Arc::clone(&state_clone),
+            runtime_env,
             terminal_base_env,
             preferred_mode_id,
             preferred_config_values,
@@ -1049,6 +1077,15 @@ fn map_session_config_option(option: &SessionConfigOption) -> Option<SessionConf
                 }),
             })
         }
+        SessionConfigKind::Boolean(boolean) => Some(SessionConfigOptionInfo {
+            id: option.id.to_string(),
+            name: option.name.clone(),
+            description: option.description.clone(),
+            category: option.category.as_ref().map(map_session_config_category),
+            kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
+                current_value: boolean.current_value,
+            }),
+        }),
         _ => None,
     }
 }
@@ -1547,15 +1584,20 @@ async fn apply_grok_preferred_options(
             .iter()
             .find(|o| o.id == GROK_MODEL_OPTION_ID)
             .is_some_and(|o| {
-                let SessionConfigKindInfo::Select(sel) = &o.kind;
+                let SessionConfigKindInfo::Select(sel) = &o.kind else {
+                    return false;
+                };
                 // Skip if already current, or the saved model is no longer offered.
                 sel.current_value != pref && sel.options.iter().any(|x| x.value == pref)
             });
         if eligible {
             match set_grok_model(cx, session_id, pref.clone(), None).await {
                 Ok(()) => {
-                    if let Some(o) = opts.iter_mut().find(|o| o.id == GROK_MODEL_OPTION_ID) {
-                        let SessionConfigKindInfo::Select(sel) = &mut o.kind;
+                    if let Some(SessionConfigKindInfo::Select(sel)) = opts
+                        .iter_mut()
+                        .find(|o| o.id == GROK_MODEL_OPTION_ID)
+                        .map(|o| &mut o.kind)
+                    {
                         sel.current_value = pref.clone();
                     }
                     if !specs.is_empty() {
@@ -1574,14 +1616,15 @@ async fn apply_grok_preferred_options(
     if let Some(pref) = preferred_config_values.get(GROK_EFFORT_OPTION_ID) {
         let model_id = current_grok_model_id_from_opts(opts);
         if let Some(effort_opt) = opts.iter_mut().find(|o| o.id == GROK_EFFORT_OPTION_ID) {
-            let SessionConfigKindInfo::Select(sel) = &mut effort_opt.kind;
-            if &sel.current_value != pref && sel.options.iter().any(|o| &o.value == pref) {
-                if let Some(model_id) = model_id {
-                    match set_grok_model(cx, session_id, model_id, Some(pref.clone())).await {
-                        Ok(()) => sel.current_value = pref.clone(),
-                        Err(e) => tracing::error!(
-                            "[ACP] failed to apply preferred grok effort '{pref}' on connect: {e}"
-                        ),
+            if let SessionConfigKindInfo::Select(sel) = &mut effort_opt.kind {
+                if &sel.current_value != pref && sel.options.iter().any(|o| &o.value == pref) {
+                    if let Some(model_id) = model_id {
+                        match set_grok_model(cx, session_id, model_id, Some(pref.clone())).await {
+                            Ok(()) => sel.current_value = pref.clone(),
+                            Err(e) => tracing::error!(
+                                "[ACP] failed to apply preferred grok effort '{pref}' on connect: {e}"
+                            ),
+                        }
                     }
                 }
             }
@@ -1591,10 +1634,12 @@ async fn apply_grok_preferred_options(
 
 /// The Grok model selector's current value, read from an in-memory options list.
 fn current_grok_model_id_from_opts(opts: &[SessionConfigOptionInfo]) -> Option<String> {
-    opts.iter().find(|o| o.id == GROK_MODEL_OPTION_ID).map(|o| {
-        let SessionConfigKindInfo::Select(sel) = &o.kind;
-        sel.current_value.clone()
-    })
+    opts.iter()
+        .find(|o| o.id == GROK_MODEL_OPTION_ID)
+        .and_then(|o| match &o.kind {
+            SessionConfigKindInfo::Select(select) => Some(select.current_value.clone()),
+            SessionConfigKindInfo::Boolean(_) => None,
+        })
 }
 
 /// The Grok model selector's current value, read from the authoritative
@@ -1651,8 +1696,9 @@ async fn set_grok_config_option(
             };
             if let Some(mut opts) = current {
                 if let Some(o) = opts.iter_mut().find(|o| o.id == config_id) {
-                    let SessionConfigKindInfo::Select(sel) = &mut o.kind;
-                    sel.current_value = value_id.clone();
+                    if let SessionConfigKindInfo::Select(sel) = &mut o.kind {
+                        sel.current_value = value_id.clone();
+                    }
                 }
                 // A MODEL switch must re-point the effort selector at the new
                 // model — grok never re-sends per-model effort data on
@@ -1753,6 +1799,7 @@ async fn apply_and_emit_session_config_options(
         session,
         state,
         emitter,
+        agent_type,
         preferred_mode_id,
         preferred_config_values,
         initial_config_options,
@@ -1795,8 +1842,83 @@ fn resolve_working_dir(working_dir: Option<&str>) -> PathBuf {
     }
 }
 
+fn resolve_claude_auto_compact_window(
+    runtime_env: &BTreeMap<String, String>,
+) -> Option<i64> {
+    let value = runtime_env
+        .get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")?
+        .trim()
+        .parse::<i64>()
+        .ok()?;
+    (100_000..=1_000_000).contains(&value).then_some(value)
+}
+
+fn read_claude_code_user_options(
+    runtime_env: &BTreeMap<String, String>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let Some(settings_path) = runtime_env
+        .get("CODEG_TEST_CLAUDE_SETTINGS_PATH")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".claude").join("settings.json")))
+    else {
+        return serde_json::Map::new();
+    };
+
+    fs::read_to_string(settings_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| {
+            value
+                .get("_meta")
+                .and_then(|meta| meta.get("claudeCode"))
+                .and_then(|claude_code| claude_code.get("options"))
+                .and_then(serde_json::Value::as_object)
+                .cloned()
+        })
+        .unwrap_or_default()
+}
+
+fn merge_json_objects(
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    patch: serde_json::Map<String, serde_json::Value>,
+) {
+    for (key, value) in patch {
+        match (target.get_mut(&key), value) {
+            (
+                Some(serde_json::Value::Object(target_object)),
+                serde_json::Value::Object(patch_object),
+            ) => merge_json_objects(target_object, patch_object),
+            (_, value) => {
+                target.insert(key, value);
+            }
+        }
+    }
+}
+
+fn merge_claude_context_beta(options: &mut serde_json::Map<String, serde_json::Value>) {
+    match options.get_mut("betas") {
+        Some(serde_json::Value::Array(betas)) => {
+            if !betas
+                .iter()
+                .any(|value| value.as_str() == Some(CLAUDE_CONTEXT_1M_BETA))
+            {
+                betas.push(serde_json::Value::String(
+                    CLAUDE_CONTEXT_1M_BETA.to_string(),
+                ));
+            }
+        }
+        _ => {
+            options.insert(
+                "betas".to_string(),
+                serde_json::json!([CLAUDE_CONTEXT_1M_BETA]),
+            );
+        }
+    }
+}
+
 fn claude_raw_sdk_session_meta(
     agent_type: AgentType,
+    runtime_env: &BTreeMap<String, String>,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     if agent_type != AgentType::ClaudeCode {
         return None;
@@ -1807,6 +1929,23 @@ fn claude_raw_sdk_session_meta(
         "emitRawSDKMessages".to_string(),
         serde_json::Value::Bool(true),
     );
+
+    if let Some(auto_compact_window) = resolve_claude_auto_compact_window(runtime_env) {
+        let mut options = read_claude_code_user_options(runtime_env);
+        merge_json_objects(
+            &mut options,
+            serde_json::json!({
+                "settings": { "autoCompactWindow": auto_compact_window }
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+        );
+        if auto_compact_window > 200_000 {
+            merge_claude_context_beta(&mut options);
+        }
+        claude_code.insert("options".to_string(), serde_json::Value::Object(options));
+    }
 
     let mut meta = serde_json::Map::new();
     meta.insert(
@@ -1820,9 +1959,10 @@ fn build_new_session_request(
     agent_type: AgentType,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
+    runtime_env: &BTreeMap<String, String>,
 ) -> NewSessionRequest {
     let mut req = NewSessionRequest::new(cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type, runtime_env) {
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -1836,9 +1976,10 @@ fn build_load_session_request(
     session_id: SessionId,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
+    runtime_env: &BTreeMap<String, String>,
 ) -> LoadSessionRequest {
     let mut req = LoadSessionRequest::new(session_id, cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type, runtime_env) {
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -1857,9 +1998,10 @@ fn build_resume_session_request(
     session_id: SessionId,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
+    runtime_env: &BTreeMap<String, String>,
 ) -> ResumeSessionRequest {
     let mut req = ResumeSessionRequest::new(session_id, cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type, runtime_env) {
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -2317,6 +2459,7 @@ async fn run_connection(
     mut cmd_rx: mpsc::Receiver<ConnectionCommand>,
     emitter: EventEmitter,
     state: Arc<RwLock<SessionState>>,
+    runtime_env: BTreeMap<String, String>,
     terminal_base_env: BTreeMap<String, String>,
     preferred_mode_id: Option<String>,
     preferred_config_values: BTreeMap<String, String>,
@@ -2708,6 +2851,7 @@ async fn run_connection(
                         SessionId::new(sid.clone()),
                         &cwd,
                         mcp_servers.clone(),
+                        &runtime_env,
                     );
                     match send_resume_session(&cx, resume_req).await {
                         Ok((resume_resp, grok_models_raw)) => {
@@ -2767,6 +2911,7 @@ async fn run_connection(
                                 terminal_runtime.clone(),
                                 &cwd_string,
                                 supports_fork,
+                                &runtime_env,
                                 &prompt_ledger,
                                 delegation_injection.as_ref(),
                             )
@@ -2788,6 +2933,7 @@ async fn run_connection(
                                 terminal_runtime.clone(),
                                 &cwd,
                                 &cwd_string,
+                                &runtime_env,
                                 &prompt_ledger,
                                 delegation_injection.as_ref(),
                             )
@@ -2821,6 +2967,7 @@ async fn run_connection(
                     SessionId::new(sid.clone()),
                     &cwd,
                     mcp_servers.clone(),
+                    &runtime_env,
                 );
                 let load_result = cx.send_request_to(Agent, load_req).block_task().await;
 
@@ -2929,6 +3076,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd_string,
                             supports_fork,
+                            &runtime_env,
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
@@ -2946,6 +3094,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd,
                             &cwd_string,
+                            &runtime_env,
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
@@ -3018,7 +3167,7 @@ async fn run_connection(
                         let (new_resp, grok_models_raw) = send_new_session_capturing_models(
                             &cx,
                             agent_type,
-                            build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                            build_new_session_request(agent_type, &cwd, mcp_servers.clone(), &runtime_env),
                         )
                         .await?;
                         let fallback_sid = new_resp.session_id.0.to_string();
@@ -3066,6 +3215,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd_string,
                             supports_fork,
+                            &runtime_env,
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
@@ -3085,6 +3235,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd,
                             &cwd_string,
+                            &runtime_env,
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
@@ -3096,7 +3247,7 @@ async fn run_connection(
                 let (new_resp, grok_models_raw) = send_new_session_capturing_models(
                     &cx,
                     agent_type,
-                    build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                    build_new_session_request(agent_type, &cwd, mcp_servers.clone(), &runtime_env),
                 )
                 .await?;
                 let sid = new_resp.session_id.0.to_string();
@@ -3144,6 +3295,7 @@ async fn run_connection(
                     terminal_runtime.clone(),
                     &cwd_string,
                     supports_fork,
+                    &runtime_env,
                     &prompt_ledger,
                     delegation_injection.as_ref(),
                 )
@@ -3161,6 +3313,7 @@ async fn run_connection(
                     terminal_runtime.clone(),
                     &cwd,
                     &cwd_string,
+                    &runtime_env,
                     &prompt_ledger,
                     delegation_injection.as_ref(),
                 )
@@ -3413,9 +3566,9 @@ async fn set_session_config_option(
     emitter: &EventEmitter,
     agent_type: AgentType,
     config_id: String,
-    value_id: String,
+    value: SessionConfigCommandValue,
 ) -> Result<(), sacp::Error> {
-    let updated = set_session_config_option_inner(cx, session_id, config_id, value_id).await?;
+    let updated = set_session_config_option_inner(cx, session_id, config_id, value).await?;
     emit_session_config_options_values(state, emitter, agent_type, updated).await;
     Ok(())
 }
@@ -3429,9 +3582,16 @@ async fn set_session_config_option_inner(
     cx: &ConnectionTo<Agent>,
     session_id: &SessionId,
     config_id: String,
-    value_id: String,
+    value: SessionConfigCommandValue,
 ) -> Result<Vec<SessionConfigOption>, sacp::Error> {
-    let req = SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value_id);
+    let req = match value {
+        SessionConfigCommandValue::ValueId(value) => {
+            SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value.as_str())
+        }
+        SessionConfigCommandValue::Boolean(value) => {
+            SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value)
+        }
+    };
     let untyped_req = UntypedMessage::new("session/set_config_option", req).map_err(|e| {
         sacp::util::internal_error(format!("Failed to build config option request: {e}"))
     })?;
@@ -3443,6 +3603,60 @@ async fn set_session_config_option_inner(
         })?;
 
     Ok(response.config_options)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PreferredConfigResolution {
+    Skip,
+    Apply(SessionConfigCommandValue),
+    Invalid,
+}
+
+fn select_advertises_value(select: &sacp::schema::SessionConfigSelect, value: &str) -> bool {
+    match &select.options {
+        SessionConfigSelectOptions::Ungrouped(options) => {
+            options.iter().any(|option| option.value.to_string() == value)
+        }
+        SessionConfigSelectOptions::Grouped(groups) => groups.iter().any(|group| {
+            group
+                .options
+                .iter()
+                .any(|option| option.value.to_string() == value)
+        }),
+        _ => false,
+    }
+}
+
+fn resolve_preferred_config_command(
+    option: Option<&SessionConfigOption>,
+    value: &str,
+) -> PreferredConfigResolution {
+    match option.map(|option| &option.kind) {
+        Some(SessionConfigKind::Select(select)) => {
+            if !select_advertises_value(select, value) {
+                PreferredConfigResolution::Invalid
+            } else if select.current_value.to_string() == value {
+                PreferredConfigResolution::Skip
+            } else {
+                PreferredConfigResolution::Apply(SessionConfigCommandValue::ValueId(
+                    value.to_string(),
+                ))
+            }
+        }
+        Some(SessionConfigKind::Boolean(boolean)) => {
+            let preferred = match value.trim().to_ascii_lowercase().as_str() {
+                "true" => true,
+                "false" => false,
+                _ => return PreferredConfigResolution::Invalid,
+            };
+            if boolean.current_value == preferred {
+                PreferredConfigResolution::Skip
+            } else {
+                PreferredConfigResolution::Apply(SessionConfigCommandValue::Boolean(preferred))
+            }
+        }
+        _ => PreferredConfigResolution::Invalid,
+    }
 }
 
 /// Apply user-saved mode and config-option preferences to a freshly-attached
@@ -3470,6 +3684,7 @@ async fn apply_preferred_session_options(
     session: &mut sacp::ActiveSession<'_, Agent>,
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
+    agent_type: AgentType,
     preferred_mode_id: Option<&str>,
     preferred_config_values: &BTreeMap<String, String>,
     initial_config_options: Vec<SessionConfigOption>,
@@ -3493,29 +3708,28 @@ async fn apply_preferred_session_options(
 
     let session_id = session.session_id().clone();
     let mut options = initial_config_options;
-    for (config_id, value_id) in preferred_config_values {
-        // Skip the round-trip when the agent's current value already matches.
-        // Note: codex-acp 1.0.0 advertises "mode" as a config option (so the
-        // match check below normally fires), but we still do NOT skip when a
-        // requested config_id is absent from the advertised options — older or
-        // edge-case builds accept `set_config_option` for an unadvertised "mode"
-        // (see `ensure_codex_mode_option`), so let the agent decide.
-        let already_matches = options.iter().any(|o| {
-            o.id.to_string() == *config_id
-                && matches!(
-                    &o.kind,
-                    SessionConfigKind::Select(s) if s.current_value.to_string() == *value_id
-                )
-        });
-        if already_matches {
+    for (config_id, value) in preferred_config_values {
+        // Codex modes are owned by session/set_mode, never config replay.
+        if agent_type == AgentType::Codex && config_id == "mode" {
             continue;
         }
-        match set_session_config_option_inner(cx, &session_id, config_id.clone(), value_id.clone())
-            .await
-        {
+        let advertised = options
+            .iter()
+            .find(|option| option.id.to_string() == *config_id);
+        let command = match resolve_preferred_config_command(advertised, value) {
+            PreferredConfigResolution::Skip => continue,
+            PreferredConfigResolution::Apply(command) => command,
+            PreferredConfigResolution::Invalid => {
+                tracing::warn!(
+                    "[ACP] skip invalid or unadvertised preferred config '{config_id}' on connect"
+                );
+                continue;
+            }
+        };
+        match set_session_config_option_inner(cx, &session_id, config_id.clone(), command).await {
             Ok(updated) => options = updated,
             Err(e) => tracing::error!(
-                "[ACP] failed to apply preferred config '{config_id}'='{value_id}' \
+                "[ACP] failed to apply preferred config '{config_id}'='{value}' \
                  on connect: {e}"
             ),
         }
@@ -4178,6 +4392,7 @@ async fn handle_fork_or_exit(
     terminal_runtime: Arc<TerminalRuntime>,
     _cwd: &std::path::Path,
     cwd_string: &str,
+    runtime_env: &BTreeMap<String, String>,
     // Threaded through from run_connection: the connection-scoped prompt
     // ledger (the forked session's loop keeps fingerprinting into the SAME
     // ledger the still-running watcher consumes from).
@@ -4264,6 +4479,7 @@ async fn handle_fork_or_exit(
         terminal_runtime.clone(),
         cwd_string,
         true, // fork already succeeded on this process
+        runtime_env,
         prompt_ledger,
         delegation_injection,
     )
@@ -4283,6 +4499,7 @@ async fn handle_fork_or_exit(
         terminal_runtime,
         _cwd,
         cwd_string,
+        runtime_env,
         prompt_ledger,
         delegation_injection,
     ))
@@ -4425,6 +4642,7 @@ async fn run_conversation_loop<'a>(
     terminal_runtime: Arc<TerminalRuntime>,
     cwd: &str,
     supports_fork: bool,
+    runtime_env: &BTreeMap<String, String>,
     // Connection-scoped (created once in `run_connection`, shared across fork
     // restarts of this loop): outgoing prompts are fingerprinted here so the
     // transcript watcher can classify their turns as wire-rendered foreground.
@@ -4858,17 +5076,24 @@ async fn run_conversation_loop<'a>(
                                 }
                                 Some(ConnectionCommand::SetConfigOption {
                                     config_id,
-                                    value_id,
+                                    value,
                                 }) => {
                                     let set_result = if agent_type == AgentType::Grok {
-                                        set_grok_config_option(
-                                            &cx, &sid, state, emitter, config_id, value_id,
-                                        )
-                                        .await
+                                        match value {
+                                            SessionConfigCommandValue::ValueId(value_id) => {
+                                                set_grok_config_option(
+                                                    &cx, &sid, state, emitter, config_id, value_id,
+                                                )
+                                                .await
+                                            }
+                                            SessionConfigCommandValue::Boolean(_) => {
+                                                Err(sacp::Error::invalid_params()
+                                                    .data("Grok config options require a select value"))
+                                            }
+                                        }
                                     } else {
                                         set_session_config_option(
-                                            &cx, &sid, state, emitter, agent_type, config_id,
-                                            value_id,
+                                            &cx, &sid, state, emitter, agent_type, config_id, value,
                                         )
                                         .await
                                     };
@@ -5035,17 +5260,23 @@ async fn run_conversation_loop<'a>(
                     .await;
                 }
             }
-            Some(ConnectionCommand::SetConfigOption {
-                config_id,
-                value_id,
-            }) => {
+            Some(ConnectionCommand::SetConfigOption { config_id, value }) => {
                 let cx = session.connection();
                 let sid = session.session_id().clone();
                 let set_result = if agent_type == AgentType::Grok {
-                    set_grok_config_option(&cx, &sid, state, emitter, config_id, value_id).await
+                    match value {
+                        SessionConfigCommandValue::ValueId(value_id) => {
+                            set_grok_config_option(
+                                &cx, &sid, state, emitter, config_id, value_id,
+                            )
+                            .await
+                        }
+                        SessionConfigCommandValue::Boolean(_) => Err(sacp::Error::invalid_params()
+                            .data("Grok config options require a select value")),
+                    }
                 } else {
                     set_session_config_option(
-                        &cx, &sid, state, emitter, agent_type, config_id, value_id,
+                        &cx, &sid, state, emitter, agent_type, config_id, value,
                     )
                     .await
                 };
@@ -5109,7 +5340,13 @@ async fn run_conversation_loop<'a>(
                     "[ACP] Sending session/fork for session_id={} cwd={}",
                     sid.0, cwd
                 );
-                let result = crate::acp::fork::fork_session(&cx, &sid, cwd).await;
+                let result = crate::acp::fork::fork_session(
+                    &cx,
+                    &sid,
+                    cwd,
+                    claude_raw_sdk_session_meta(agent_type, runtime_env),
+                )
+                .await;
                 match result {
                     Ok((fork_response, fork_models_raw)) => {
                         tracing::info!(
@@ -6819,7 +7056,8 @@ mod tests {
 
     #[test]
     fn claude_raw_sdk_meta_enabled_only_for_claude() {
-        let claude_meta = claude_raw_sdk_session_meta(AgentType::ClaudeCode)
+        let runtime_env = BTreeMap::new();
+        let claude_meta = claude_raw_sdk_session_meta(AgentType::ClaudeCode, &runtime_env)
             .expect("Claude must have raw SDK meta");
         assert_eq!(
             claude_meta
@@ -6829,7 +7067,7 @@ mod tests {
             Some(true)
         );
 
-        assert!(claude_raw_sdk_session_meta(AgentType::Codex).is_none());
+        assert!(claude_raw_sdk_session_meta(AgentType::Codex, &runtime_env).is_none());
     }
 
     #[test]
@@ -6893,7 +7131,12 @@ mod tests {
     #[test]
     fn build_new_session_request_sets_claude_raw_meta() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new());
+        let req = build_new_session_request(
+            AgentType::ClaudeCode,
+            &cwd,
+            Vec::new(),
+            &BTreeMap::new(),
+        );
 
         assert_eq!(
             req.meta
@@ -6906,6 +7149,166 @@ mod tests {
     }
 
     #[test]
+    fn claude_auto_compact_window_enforces_supported_bounds() {
+        for value in ["100000", "200000", "1000000"] {
+            let env = BTreeMap::from([(
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                value.to_string(),
+            )]);
+            assert_eq!(
+                resolve_claude_auto_compact_window(&env),
+                value.parse::<i64>().ok()
+            );
+        }
+        for value in ["", "not-a-number", "99999", "1000001"] {
+            let env = BTreeMap::from([(
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                value.to_string(),
+            )]);
+            assert_eq!(resolve_claude_auto_compact_window(&env), None);
+        }
+    }
+
+    #[test]
+    fn claude_window_is_injected_into_new_load_and_resume_requests() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let env = BTreeMap::from([(
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+            "300000".to_string(),
+        )]);
+        let requests = [
+            serde_json::to_value(build_new_session_request(
+                AgentType::ClaudeCode,
+                &cwd,
+                Vec::new(),
+                &env,
+            ))
+            .expect("serialize new request"),
+            serde_json::to_value(build_load_session_request(
+                AgentType::ClaudeCode,
+                SessionId::new("load-session".to_string()),
+                &cwd,
+                Vec::new(),
+                &env,
+            ))
+            .expect("serialize load request"),
+            serde_json::to_value(build_resume_session_request(
+                AgentType::ClaudeCode,
+                SessionId::new("resume-session".to_string()),
+                &cwd,
+                Vec::new(),
+                &env,
+            ))
+            .expect("serialize resume request"),
+        ];
+
+        for request in requests {
+            assert_eq!(
+                request.pointer("/_meta/claudeCode/options/settings/autoCompactWindow"),
+                Some(&serde_json::json!(300000))
+            );
+            assert_eq!(
+                request.pointer("/_meta/claudeCode/options/betas/0"),
+                Some(&serde_json::json!(CLAUDE_CONTEXT_1M_BETA))
+            );
+        }
+    }
+
+    #[test]
+    fn claude_window_preserves_user_options_and_existing_betas() {
+        let dir =
+            std::env::temp_dir().join(format!("codeg-claude-settings-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create settings dir");
+        let settings_path = dir.join("settings.json");
+        std::fs::write(
+            &settings_path,
+            r#"{
+              "_meta": {
+                "claudeCode": {
+                  "options": {
+                    "betas": ["existing-beta"],
+                    "settings": {"permissions": {"allow": ["Bash(git status:*)"]}},
+                    "extraOption": true
+                  }
+                }
+              }
+            }"#,
+        )
+        .expect("write settings");
+        let env = BTreeMap::from([
+            (
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                "300000".to_string(),
+            ),
+            (
+                "CODEG_TEST_CLAUDE_SETTINGS_PATH".to_string(),
+                settings_path.to_string_lossy().to_string(),
+            ),
+        ]);
+        let meta = claude_raw_sdk_session_meta(AgentType::ClaudeCode, &env)
+            .expect("claude session meta");
+        let options = meta
+            .get("claudeCode")
+            .and_then(|value| value.get("options"))
+            .expect("claude options");
+
+        assert_eq!(
+            options.pointer("/settings/autoCompactWindow"),
+            Some(&serde_json::json!(300000))
+        );
+        assert!(options.pointer("/settings/permissions").is_some());
+        assert_eq!(options.get("extraOption"), Some(&serde_json::json!(true)));
+        let betas = options
+            .get("betas")
+            .and_then(serde_json::Value::as_array)
+            .expect("betas array");
+        assert!(betas.iter().any(|value| value == "existing-beta"));
+        assert_eq!(
+            betas
+                .iter()
+                .filter(|value| value.as_str() == Some(CLAUDE_CONTEXT_1M_BETA))
+                .count(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn config_command_value_must_match_the_advertised_kind_and_value() {
+        let select = SessionConfigOptionInfo {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            description: None,
+            category: Some("model".to_string()),
+            kind: SessionConfigKindInfo::Select(SessionConfigSelectInfo {
+                current_value: "opus".to_string(),
+                options: vec![SessionConfigSelectOptionInfo {
+                    value: "opus".to_string(),
+                    name: "Opus".to_string(),
+                    description: None,
+                }],
+                groups: Vec::new(),
+            }),
+        };
+        let boolean = SessionConfigOptionInfo {
+            id: "auto_compact".to_string(),
+            name: "Auto compact".to_string(),
+            description: None,
+            category: None,
+            kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
+                current_value: false,
+            }),
+        };
+
+        assert!(SessionConfigCommandValue::ValueId("opus".to_string())
+            .is_advertised_by(&select));
+        assert!(!SessionConfigCommandValue::ValueId("stale".to_string())
+            .is_advertised_by(&select));
+        assert!(!SessionConfigCommandValue::Boolean(true).is_advertised_by(&select));
+        assert!(SessionConfigCommandValue::Boolean(true).is_advertised_by(&boolean));
+    }
+
+    #[test]
     fn build_load_session_request_skips_meta_for_non_claude() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
         let req = build_load_session_request(
@@ -6913,6 +7316,7 @@ mod tests {
             SessionId::new("abc".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
 
         assert!(req.meta.is_none());
@@ -6931,7 +7335,12 @@ mod tests {
     fn openclaw_session_requests_carry_no_mcp_servers() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
 
-        let new_req = build_new_session_request(AgentType::OpenClaw, &cwd, Vec::new());
+        let new_req = build_new_session_request(
+            AgentType::OpenClaw,
+            &cwd,
+            Vec::new(),
+            &BTreeMap::new(),
+        );
         assert!(
             new_req.mcp_servers.is_empty(),
             "OpenClaw session/new must carry no MCP servers"
@@ -6948,6 +7357,7 @@ mod tests {
             SessionId::new("openclaw-session".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
         assert!(
             load_req.mcp_servers.is_empty(),
@@ -6969,6 +7379,7 @@ mod tests {
             SessionId::new("abc".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
 
         assert_eq!(
@@ -6989,6 +7400,7 @@ mod tests {
             SessionId::new("abc".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
 
         assert!(req.meta.is_none());
@@ -7010,6 +7422,7 @@ mod tests {
             SessionId::new("openclaw-session".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
         assert!(
             req.mcp_servers.is_empty(),
@@ -7122,7 +7535,9 @@ mod tests {
         let model = &opts[0];
         assert_eq!(model.id, GROK_MODEL_OPTION_ID);
         assert_eq!(model.category.as_deref(), Some("model"));
-        let SessionConfigKindInfo::Select(model_sel) = &model.kind;
+        let SessionConfigKindInfo::Select(model_sel) = &model.kind else {
+            panic!("expected model select option");
+        };
         // Both models appear (agent-type filtering is deliberately NOT applied —
         // cross-type switches are handled gracefully at set time instead).
         assert_eq!(model_sel.options.len(), 2);
@@ -7132,7 +7547,9 @@ mod tests {
         let effort = &opts[1];
         assert_eq!(effort.id, GROK_EFFORT_OPTION_ID);
         assert_eq!(effort.category.as_deref(), Some("mode"));
-        let SessionConfigKindInfo::Select(effort_sel) = &effort.kind;
+        let SessionConfigKindInfo::Select(effort_sel) = &effort.kind else {
+            panic!("expected effort select option");
+        };
         assert_eq!(effort_sel.options.len(), 2);
         assert_eq!(effort_sel.current_value, "high", "the `selected` effort is current");
         assert!(effort_sel.options.iter().any(|o| o.value == "low"));
@@ -7245,7 +7662,9 @@ mod tests {
         // switchable list), current = xhigh, with canonical labels.
         let effort = build_grok_effort_option("grok-4.5", &specs).expect("has effort");
         assert_eq!(effort.id, GROK_EFFORT_OPTION_ID);
-        let SessionConfigKindInfo::Select(sel) = &effort.kind;
+        let SessionConfigKindInfo::Select(sel) = &effort.kind else {
+            panic!("expected effort select option");
+        };
         assert_eq!(sel.current_value, "xhigh");
         assert_eq!(sel.options.len(), 4, "high/medium/low + injected xhigh");
         assert_eq!(sel.options[0].value, "xhigh");
@@ -7288,7 +7707,9 @@ mod tests {
             .iter()
             .find(|o| o.id == GROK_EFFORT_OPTION_ID)
             .expect("effort selector");
-        let SessionConfigKindInfo::Select(sel) = &effort.kind;
+        let SessionConfigKindInfo::Select(sel) = &effort.kind else {
+            panic!("expected effort select option");
+        };
         assert_eq!(sel.current_value, "xhigh", "grok-4.5's real default");
         assert!(sel.options.iter().any(|o| o.value == "xhigh" && o.name == "Max"));
     }
@@ -7329,7 +7750,9 @@ mod tests {
             .iter()
             .find(|o| o.id == GROK_EFFORT_OPTION_ID)
             .expect("re-added");
-        let SessionConfigKindInfo::Select(sel) = &effort.kind;
+        let SessionConfigKindInfo::Select(sel) = &effort.kind else {
+            panic!("expected effort select option");
+        };
         assert_eq!(sel.current_value, "xhigh");
     }
 
@@ -7389,7 +7812,9 @@ mod tests {
 
         // The optimistic pick is reverted: the authoritative model is unchanged.
         let opts = guard.config_options.as_ref().expect("options preserved");
-        let SessionConfigKindInfo::Select(sel) = &opts[0].kind;
+        let SessionConfigKindInfo::Select(sel) = &opts[0].kind else {
+            panic!("expected model select option");
+        };
         assert_eq!(sel.current_value, "grok-4.5");
 
         // Event ordering: the authoritative options (revert) precede the coded
@@ -7407,7 +7832,9 @@ mod tests {
 
         // The reverted options carry the original model.
         if let AcpEvent::SessionConfigOptions { config_options } = &events[cfg_idx].payload {
-            let SessionConfigKindInfo::Select(sel) = &config_options[0].kind;
+            let SessionConfigKindInfo::Select(sel) = &config_options[0].kind else {
+                panic!("expected model select option");
+            };
             assert_eq!(sel.current_value, "grok-4.5");
         }
 

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import { getCurrentEffectiveAppLocale } from "./i18n"
+import { isValidSessionConfigValue } from "./acp-context-management"
 import type {
   AgentType,
   ConversationSummary,
@@ -129,9 +130,17 @@ export async function acpSetMode(
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ): Promise<void> {
-  return invoke("acp_set_config_option", { connectionId, configId, valueId })
+  if (!configId.trim() || !isValidSessionConfigValue(value)) {
+    throw new Error("Invalid config option value")
+  }
+  return invoke("acp_set_config_option", {
+    connectionId,
+    configId,
+    valueId: typeof value === "string" ? value : null,
+    value: typeof value === "boolean" ? value : null,
+  })
 }
 
 export async function acpCancel(connectionId: string): Promise<void> {

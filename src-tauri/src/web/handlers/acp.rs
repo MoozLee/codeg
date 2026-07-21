@@ -4,6 +4,7 @@ use std::sync::Arc;
 use axum::{extract::Extension, Json};
 use serde::Deserialize;
 
+use crate::acp::connection::SessionConfigCommandValue;
 use crate::acp::error::AcpError;
 use crate::acp::opencode_plugins::PluginCheckSummary;
 use crate::acp::preflight::PreflightResult;
@@ -332,16 +333,28 @@ pub async fn acp_set_mode(
 pub struct AcpSetConfigOptionParams {
     pub connection_id: String,
     pub config_id: String,
-    pub value_id: String,
+    pub value_id: Option<String>,
+    pub value: Option<bool>,
 }
 
 pub async fn acp_set_config_option(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpSetConfigOptionParams>,
 ) -> Result<Json<()>, AppCommandError> {
+    let value = match (params.value_id, params.value) {
+        (Some(value_id), None) if !value_id.trim().is_empty() => {
+            SessionConfigCommandValue::ValueId(value_id)
+        }
+        (None, Some(value)) => SessionConfigCommandValue::Boolean(value),
+        _ => {
+            return Err(AppCommandError::invalid_input(
+                "Exactly one session config option value is required".to_string(),
+            ));
+        }
+    };
     let manager = &state.connection_manager;
     manager
-        .set_config_option(&params.connection_id, params.config_id, params.value_id)
+        .set_config_option(&params.connection_id, params.config_id, value)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
