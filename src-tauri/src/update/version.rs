@@ -16,12 +16,11 @@ use crate::app_error::AppCommandError;
 /// Update manifest URL — mirrors the `endpoints` entry in `tauri.conf.json`
 /// so desktop and server modes consult the same source of truth.
 pub const UPDATE_MANIFEST_URL: &str =
-    "https://github.com/xintaofei/codeg/releases/latest/download/latest.json";
+    "https://github.com/MoozLee/codeg/releases/latest/download/latest.json";
 
 /// Deterministic base for "latest" release assets (server tarballs + their
 /// `.sig` detached signatures). Same channel as the manifest.
-pub const RELEASE_DOWNLOAD_BASE: &str =
-    "https://github.com/xintaofei/codeg/releases/latest/download";
+pub const RELEASE_DOWNLOAD_BASE: &str = "https://github.com/MoozLee/codeg/releases/latest/download";
 
 /// Short-timeout client for the small manifest fetch. Proxy env vars are
 /// sampled at build time, so `init_proxy_from_db` must run before the first
@@ -111,6 +110,21 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_channel_matches_tauri_config() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let desktop_endpoint = config
+            .pointer("/plugins/updater/endpoints/0")
+            .and_then(serde_json::Value::as_str);
+
+        assert_eq!(desktop_endpoint, Some(UPDATE_MANIFEST_URL));
+        assert_eq!(
+            UPDATE_MANIFEST_URL.strip_suffix("/latest.json"),
+            Some(RELEASE_DOWNLOAD_BASE)
+        );
+    }
 
     #[test]
     fn newer_by_semver() {
