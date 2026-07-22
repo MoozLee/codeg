@@ -341,10 +341,7 @@ pub enum AcpEvent {
     /// clear its "restart to apply" banner. Carried into `SessionState` so a
     /// snapshot attach (web reconnect, window refresh, new tile) recovers the
     /// staleness the one-shot event won't replay for it.
-    SessionConfigStale {
-        stale: bool,
-        kind: ConfigStaleKind,
-    },
+    SessionConfigStale { stale: bool, kind: ConfigStaleKind },
 }
 
 /// One background task settled by a `<task-notification>` transcript record,
@@ -800,16 +797,67 @@ pub struct CursorModelsResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfiguredModelSource {
+    AgentEnv,
+    AgentConfigEnv,
+    AgentRootConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextWindowMaxSource {
+    AgentEnv,
+    AgentConfigEnv,
+    AgentRootConfig,
+}
+
+/// Safe projection of launch-time context-management settings. Raw environment
+/// variables and native config documents must never be added to this wire DTO.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ContextRuntimeConfigInfo {
+    pub configured_model: Option<String>,
+    pub configured_model_source: Option<ConfiguredModelSource>,
+    pub configured_context_window_max_tokens: Option<u64>,
+    pub context_window_max_source: Option<ContextWindowMaxSource>,
+    pub auto_compaction_enabled: Option<bool>,
+    pub auto_compaction_threshold: Option<f64>,
+    pub native_auto_compact_window: Option<u64>,
+}
+
 /// Lightweight status info for a single agent, used by connect() pre-check.
-#[derive(Debug, Clone, Serialize)]
+/// Context configuration is projected by the backend before serialization; the
+/// complete environment and native config remain inside the backend boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AcpAgentStatus {
     pub agent_type: crate::models::agent::AgentType,
     pub available: bool,
     pub enabled: bool,
     pub installed_version: Option<String>,
-    pub env: BTreeMap<String, String>,
-    pub config_json: Option<String>,
-    pub config_file_path: Option<String>,
+    pub context_runtime_config: ContextRuntimeConfigInfo,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MaintenanceCommandOutcome {
+    Completed,
+    Failed,
+    Cancelled,
+    Stale,
+}
+
+/// Correlated result of an internal ACP slash-command turn. Only allowlisted
+/// outcome data crosses the wire; prompt blocks and protocol error payloads do
+/// not.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MaintenanceCommandResult {
+    pub operation_id: String,
+    pub connection_id: String,
+    pub session_id: String,
+    pub stop_reason: Option<String>,
+    pub outcome: MaintenanceCommandOutcome,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

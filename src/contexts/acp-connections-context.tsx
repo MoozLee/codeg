@@ -21,6 +21,7 @@ import {
   acpConnect,
   acpGetAgentStatus,
   acpPrompt,
+  acpRunMaintenanceCommand,
   acpSetMode,
   acpSetConfigOption,
   acpCancel,
@@ -506,6 +507,7 @@ type Action =
       type: "COMPACTION_STATUS_CHANGED"
       contextKey: string
       status: CompactionTriggerStatus
+      operationId: string | null
       error?: string | null
     }
   | {
@@ -1325,14 +1327,14 @@ function connectionsReducer(
         action.patch.pendingPermission,
         hydratedLiveMessage ?? current.liveMessage
       )
-      const hydratedContextIdentity = applyContextRuntimeIdentity(
-        deriveContextManagementFromSelectors(
-          action.patch.configOptions,
-          action.patch.availableCommands,
-          current.contextManagement
-        ),
-        action.patch.connectionId,
-        action.patch.sessionId
+      const hydratedContextIdentity = deriveContextManagementFromSelectors(
+        action.patch.configOptions,
+        action.patch.availableCommands,
+        applyContextRuntimeIdentity(
+          current.contextManagement,
+          action.patch.connectionId,
+          action.patch.sessionId
+        )
       )
       const hydratedContextManagement = action.patch.usage
         ? applyContextUsage(hydratedContextIdentity, action.patch.usage)
@@ -1420,13 +1422,6 @@ function connectionsReducer(
         // The out-of-turn window ended: its tool-call contexts (kept only for
         // background permission enrichment) are stale for the new turn.
         updated.outOfTurnToolCalls = null
-        if (conn.contextManagement.compactionStatus === "triggered") {
-          updated.contextManagement = {
-            ...conn.contextManagement,
-            compactionStatus: "running",
-            lastCompactionError: null,
-          }
-        }
       } else if (conn.status === "prompting") {
         // Prompt cycle ended: clear in-flight Claude API retry banner.
         updated.claudeApiRetry = null
@@ -1434,16 +1429,6 @@ function connectionsReducer(
         // clears it via `question_resolved`; this is the safety net for a turn
         // that ended without one (agent error / abandoned block).
         updated.pendingAskQuestion = null
-        if (
-          conn.contextManagement.compactionStatus === "triggered" ||
-          conn.contextManagement.compactionStatus === "running"
-        ) {
-          updated.contextManagement = {
-            ...conn.contextManagement,
-            compactionStatus: "completed",
-            lastCompactionError: null,
-          }
-        }
       }
       next.set(action.contextKey, updated)
       return next
@@ -1971,21 +1956,27 @@ function connectionsReducer(
       const conn = state.get(action.contextKey)
       if (!conn || conn.sessionId === action.sessionId) return state
       const next = new Map(state)
+      const resetContextManagement = applyContextRuntimeIdentity(
+        conn.contextManagement,
+        conn.connectionId,
+        action.sessionId
+      )
       next.set(action.contextKey, {
         ...conn,
         sessionId: action.sessionId,
+        modes: null,
+        configOptions: null,
+        availableCommands: null,
+        selectorsReady: false,
         usage: null,
-        contextManagement: applyContextRuntimeIdentity(
-          {
-            ...conn.contextManagement,
-            runtimeContextWindowMaxTokens: null,
-            runtimeContextWindowClamped: false,
-            compactionStatus: "idle",
-            lastCompactionError: null,
-          },
-          conn.connectionId,
-          action.sessionId
-        ),
+        contextManagement: {
+          ...resetContextManagement,
+          runtimeContextWindowMaxTokens: null,
+          runtimeContextWindowClamped: false,
+          compactionStatus: "idle",
+          activeCompactionOperationId: null,
+          lastCompactionError: null,
+        },
       })
       return next
     }
@@ -2157,9 +2148,21 @@ function connectionsReducer(
     case "COMPACTION_STATUS_CHANGED": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
+      const isTerminal =
+        action.status === "completed" || action.status === "failed"
+      if (
+        isTerminal &&
+        conn.contextManagement.activeCompactionOperationId !==
+          action.operationId
+      ) {
+        return state
+      }
       const error = action.error ?? null
+      const activeOperationId = isTerminal ? null : action.operationId
       if (
         conn.contextManagement.compactionStatus === action.status &&
+        conn.contextManagement.activeCompactionOperationId ===
+          activeOperationId &&
         conn.contextManagement.lastCompactionError === error
       ) {
         return state
@@ -2170,6 +2173,7 @@ function connectionsReducer(
         contextManagement: {
           ...conn.contextManagement,
           compactionStatus: action.status,
+          activeCompactionOperationId: activeOperationId,
           lastCompactionError: error,
         },
       })
@@ -2982,7 +2986,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const maybeTriggerAgentCompaction = useCallback(
     (contextKey: string) => {
       const conn = storeRef.current.connections.get(contextKey)
-      if (!conn || conn.isDelegationChild) return
+      if (!conn || conn.isDelegationChild || conn.isViewer || !conn.sessionId) {
+        return
+      }
       const decision = getCompactionTriggerDecision({
         connectionId: conn.connectionId,
         sessionId: conn.sessionId,
@@ -2995,41 +3001,86 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         return
       }
 
+      const operationId = randomUUID()
+      const { connectionId, sessionId } = conn
       compactionTriggerKeysRef.current.add(decision.key)
       dispatch({
         type: "COMPACTION_STATUS_CHANGED",
         contextKey,
         status: "triggered",
+        operationId,
       })
+      const request = acpRunMaintenanceCommand(
+        connectionId,
+        sessionId,
+        operationId,
+        decision.command
+      )
       dispatch({
         type: "COMPACTION_STATUS_CHANGED",
         contextKey,
         status: "running",
+        operationId,
       })
       lastActivityRef.current.set(contextKey, Date.now())
 
-      const { connectionId, sessionId } = conn
-      void acpPrompt(connectionId, [
-        { type: "text", text: decision.command },
-      ]).catch((error: unknown) => {
-        let currentContextKey: string | null = null
-        for (const [candidateKey, candidate] of storeRef.current.connections) {
+      void request
+        .then((result) => {
           if (
-            candidate.connectionId === connectionId &&
-            candidate.sessionId === sessionId
+            result.connection_id !== connectionId ||
+            result.session_id !== sessionId ||
+            result.operation_id !== operationId
           ) {
-            currentContextKey = candidateKey
-            break
+            return
           }
-        }
-        if (!currentContextKey) return
-        dispatch({
-          type: "COMPACTION_STATUS_CHANGED",
-          contextKey: currentContextKey,
-          status: "failed",
-          error: normalizeErrorMessage(error),
+          let currentContextKey: string | null = null
+          for (const [candidateKey, candidate] of storeRef.current
+            .connections) {
+            if (
+              candidate.connectionId === connectionId &&
+              candidate.sessionId === sessionId &&
+              candidate.contextManagement.activeCompactionOperationId ===
+                operationId
+            ) {
+              currentContextKey = candidateKey
+              break
+            }
+          }
+          if (!currentContextKey) return
+          const completed = result.outcome === "completed"
+          dispatch({
+            type: "COMPACTION_STATUS_CHANGED",
+            contextKey: currentContextKey,
+            status: completed ? "completed" : "failed",
+            operationId,
+            error: completed
+              ? null
+              : (result.error ?? "Maintenance command did not complete"),
+          })
         })
-      })
+        .catch((error: unknown) => {
+          let currentContextKey: string | null = null
+          for (const [candidateKey, candidate] of storeRef.current
+            .connections) {
+            if (
+              candidate.connectionId === connectionId &&
+              candidate.sessionId === sessionId &&
+              candidate.contextManagement.activeCompactionOperationId ===
+                operationId
+            ) {
+              currentContextKey = candidateKey
+              break
+            }
+          }
+          if (!currentContextKey) return
+          dispatch({
+            type: "COMPACTION_STATUS_CHANGED",
+            contextKey: currentContextKey,
+            status: "failed",
+            operationId,
+            error: normalizeErrorMessage(error),
+          })
+        })
     },
     [dispatch]
   )

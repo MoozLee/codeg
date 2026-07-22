@@ -2524,7 +2524,9 @@
         "tokenCacheWrite": "캐시 쓰기",
         "duration": "소요 시간",
         "completedAt": "완료 시각",
-        "jumpToPreviousUserMessage": "이전 사용자 메시지로 이동"
+        "jumpToPreviousUserMessage": "이전 사용자 메시지로 이동",
+        "showMore": "더보기",
+        "showLess": "접기"
       },
       "liveTurnStats": {
         "thinking": "생각 중...",
@@ -2836,7 +2838,7 @@
       "noFolders": "No folders",
       "noBranches": "No branches",
       "noBranch": "(no branch)",
-      "chatModeLabel": "폴더 없음 모드",
+      "chatModeLabel": "채팅 모드",
       "commit": "Commit",
       "push": "Push",
       "merge": "Merge",

@@ -1123,6 +1123,18 @@
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
+/* 折叠态用户消息底部渐隐：遮罩内容本身而非叠加层，跟 .qa-marquee-viewport /
+   .browser-tab-label 同技术，天然适配纯色 bg-secondary 或开工作区背景图后的
+   半透明 ws-msg-secondary。不属于下面的 ws- 门控家族，始终生效。 */
+.collapsed-user-message-fade {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - 2.5rem),
+    transparent
+  );
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2.5rem), transparent);
+}
+
 /* ===== 消息内半透明表面 ws-msg-* =====
    会话消息内一切带底色元素读作同一种半透明中性染色（**不磨砂**，用户要真透出背景图）+ 1px
    var(--border) 边。alpha 固定（--ws-msg-alpha=0.5），刻意不随「面板不透明度」滑块——消息不随
@@ -1231,12 +1243,35 @@
    连续下边框无法在激活 tab 处「开口」（透明子元素盖不住祖先画的线），故平线逐段画在激活
    tab 的兄弟区域（预留区/非激活 tab/按钮/拖拽填充），激活 tab 及其祖先不画。拱门轮廓（顶 +
    两侧 + 反向圆角脚）与两端 group px-2 补缝都在下方 .browser-tab-item 区块。色 =
-   var(--border)（纯色，比 detail header 的 border/50 略深，让透出背景图时分隔线更清晰）。 */
+   var(--ws-chrome-border)（下方定义的加强色，与状态栏/header 等所有 chrome 分隔线统一）。 */
+
+/* ===== 结构性 chrome 分隔线加强色 --ws-chrome-border =====
+   状态栏顶边 / 会话·文件 header 底边 / 移动端标题栏·aux 标签条底边 / 标签条平线 + 激活 tab 拱门——
+   这些持久的 chrome 细分隔线原本用主题 --border（浅色主题=0.922 灰，在浅色磨砂面上几乎看不见；深色
+   主题=白/10%）。开启背景图后（默认遮罩 0.82 把画面veil向 --background），它们常被冲淡看不清（用户
+   反馈「边框很多时候不清楚」）。这里给它们一个 foreground 染色的加强 hairline：浅色主题转深、深色主题
+   转浅，自动在两侧都有对比；alpha 低只描出一条清晰细线。仅 bg-on 生效，关图零回归。单一变量=一处调深浅。 */
+[data-workspace-bg="on"] {
+  --ws-chrome-border: color-mix(in oklch, var(--foreground) 13%, transparent);
+}
+/* 老引擎无 color-mix 时回落到主题 --border（仍随主题，至少不崩）。 */
+@supports not (background: color-mix(in oklch, white, transparent)) {
+  [data-workspace-bg="on"] {
+    --ws-chrome-border: var(--border);
+  }
+}
+/* 组合式 utility（无 base 规则）：挂在已带 border-* / border-border* 的 chrome 元素上，开图时用加强色
+   覆盖其 border-color。unlayered 压过 Tailwind 的 layered border-border（与 specificity 无关）。关图无此
+   规则 → 元素保留自带 border 颜色，零回归。这些分隔线无 hover 变色，故 unlayered 覆盖不会误盖交互态。 */
+[data-workspace-bg="on"] .ws-chrome-border {
+  border-color: var(--ws-chrome-border);
+}
 
 /* 平线：挂到激活 tab 的兄弟/非祖先区域，逐段 border-bottom 连成一条线（各兄弟 h-full，
-   底都落在 strip 底 y=40）。激活 tab 不挂 → 留缺口给拱门。 */
+   底都落在 strip 底 y=40）。激活 tab 不挂 → 留缺口给拱门。色随 --ws-chrome-border（同上加强色，
+   与状态栏/header 分隔线统一）。 */
 [data-workspace-bg="on"] .ws-strip-line {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--ws-chrome-border);
 }
 
 /* 旧 WebKitGTK 无 color-mix 时降级为不透明（背景图仅在透明内容区透出，不崩）。 */
@@ -1988,7 +2023,9 @@
 /* Browser-style tab separators (embedded desktop title-bar tab strips).
    Each tab draws a hairline on its LEFT edge; the line is suppressed for the
    first tab and around any active / hovered tab (Chrome behavior) using only
-   adjacent-sibling selectors — no :has(), so it is robust across webviews. */
+   adjacent-sibling selectors — no :has(), so it is robust across webviews.
+   Tone: `--border` off-image; boosted to `--ws-chrome-border` under a workspace
+   background so it matches the tab arch / strip-line border (rule below). */
 .browser-tab-item {
   position: relative;
 }
@@ -2015,6 +2052,44 @@
 .browser-tab-item[data-active="true"] + .browser-tab-item::before,
 .browser-tab-item:hover + .browser-tab-item::before {
   opacity: 0;
+}
+
+/* Trailing separator between the last tab and the new-conversation button (the
+   conversation strip only — see tab-bar.tsx `tab-strip-tail`). Inter-tab
+   separators sit on each tab's LEFT edge, so the last tab's RIGHT edge, where
+   the flush-pinned button wrapper begins, has none. Same hairline geometry as
+   `.browser-tab-item::before` (the wrapper shares the tabs' flex box, so the
+   `calc(50% - 3px)` nudge centers it on the strip midline identically) and the
+   same tone (`--border` off-image, `--ws-chrome-border` on — see below), so it
+   reads as just another inter-tab separator. Suppressed when the last tab is
+   active or hovered, mirroring how a tab drops the separators flanking the
+   active/hovered tab. */
+.tab-strip-tail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: calc(50% - 3px);
+  height: 1rem;
+  width: 1px;
+  transform: translateY(-50%);
+  background: var(--border);
+  opacity: 1;
+  transition: opacity 150ms ease;
+  pointer-events: none;
+}
+.browser-tab-item[data-active="true"] + .tab-strip-tail::before,
+.browser-tab-item:hover + .tab-strip-tail::before {
+  opacity: 0;
+}
+
+/* Under a workspace background image, lift the inter-tab separators (and the
+   trailing new-conversation divider) to the boosted `--ws-chrome-border` so they
+   match the tab's own arch / strip-line border color instead of the faint
+   theme `--border`, which washes out on the frosted strip. Off-image they stay
+   `--border` (above). Covers both the conversation and file tab strips. */
+[data-workspace-bg="on"] .browser-tab-item::before,
+[data-workspace-bg="on"] .tab-strip-tail::before {
+  background: var(--ws-chrome-border);
 }
 
 /* Embedded tab label — no ellipsis: fade the right edge so an overflowing title
@@ -2105,16 +2180,18 @@
    detail header. A dedicated span hosts these because the tab's own surface is
    `overflow-hidden` (it would clip the outboard flares) and its ::before is
    already the separator hairline. It is rendered for every embedded tab but
-   stays invisible (opacity 0) until the tab is active OR hovered — so hovering
-   a tab reveals the same reverse corners. The fill matches the tab surface:
-   solid `var(--background)` for the active tab, and the translucent hover shade
-   (`bg-background/60`) for a hovered non-active tab, so the concave never pops
-   as solid white. The radial-gradient mask carves the concave quarter (no color
-   seam). Since the item has no horizontal padding, the seat spans the surface
-   flush (`left/right: 0`) and each flare reaches 0.5rem outward; that fits
-   exactly within the group's `px-2` padding, so `overflow-hidden` never clips
-   the first/last tab's flare. The active tab is elevated (`z-10` on the item),
-   so a hovered neighbour's flare can never paint over the active tab's corner. */
+   stays invisible (opacity 0) until the tab is ACTIVE. Only the active tab's
+   solid `var(--background)` body reaches the strip bottom, so its feet flare from
+   real corners and read cleanly. A hovered non-active tab instead shows a
+   floating inset pill (`browser-tab-hover`, inset 2/2/8/2) that stops 8px short
+   of the bottom; revealing the feet under it left two concave nubs disconnected
+   from the pill at the bottom corners, so hover no longer reveals the seat. The
+   radial-gradient mask carves the concave quarter (no color seam). Since the item
+   has no horizontal padding, the seat spans the surface flush (`left/right: 0`)
+   and each flare reaches 0.5rem outward; that fits exactly within the group's
+   `px-2` padding, so `overflow-hidden` never clips the first/last tab's flare.
+   The active tab is elevated (`z-10` on the item), so a hovered neighbour's flare
+   can never paint over the active tab's corner. */
 .browser-tab-seat {
   position: absolute;
   bottom: 0;
@@ -2130,8 +2207,7 @@
     transition: none;
   }
 }
-.browser-tab-item[data-active="true"] .browser-tab-seat,
-.browser-tab-item:hover .browser-tab-seat {
+.browser-tab-item[data-active="true"] .browser-tab-seat {
   opacity: 1;
 }
 .browser-tab-seat::before,
@@ -2142,12 +2218,6 @@
   height: 0.5rem;
   width: 0.5rem;
   background-color: var(--background);
-}
-/* Hovered (non-active) tab: match its translucent hover fill so the concave
-   corner blends with the hover surface instead of popping solid white. */
-.browser-tab-item:not([data-active="true"]):hover .browser-tab-seat::before,
-.browser-tab-item:not([data-active="true"]):hover .browser-tab-seat::after {
-  background-color: color-mix(in oklab, var(--background) 60%, transparent);
 }
 .browser-tab-seat::before {
   left: -0.5rem;
@@ -2168,17 +2238,10 @@
   mask-image: radial-gradient(circle at top right, transparent 7px, #000 8px);
 }
 /* Workspace 背景图开启：所有 tab 全透明，seat 反向圆角默认不显示（否则透明 tab 会挂
-   var(--background) 白色小圆角）；hover 的非激活 tab 也抑制其填充凹角，保持全透明基调。 */
+   var(--background) 白色小圆角）。非激活 tab 的 seat 已不随 hover 显示（见上「仅激活」），
+   激活 tab 的脚在下方用真实 border 重画。 */
 [data-workspace-bg="on"] .browser-tab-seat::before,
 [data-workspace-bg="on"] .browser-tab-seat::after {
-  background-color: transparent;
-}
-[data-workspace-bg="on"]
-  .browser-tab-item:not([data-active="true"]):hover
-  .browser-tab-seat::before,
-[data-workspace-bg="on"]
-  .browser-tab-item:not([data-active="true"]):hover
-  .browser-tab-seat::after {
   background-color: transparent;
 }
 /* 激活 tab 的两个反向圆角脚（bg-on）：用**真实 border + border-radius** 画 1px 凹弧描边，
@@ -2187,7 +2250,7 @@
    0.5rem 见方的盒(left/right:-0.5rem, y32→40, box-sizing:border-box)，把**对角圆角 + 相邻
    两条边框**做成一段干净四分之一凹弧：左脚=右下角圆角+下/右边框，右脚=左下角圆角+下/左边框。
    弧顶(tab 边 y32)竖直切线接拱门 ::after 侧边、弧底(gutter 外沿 y40)水平切线接 ws-strip-line
-   平线，两端相切→过渡自然。清掉 mask 与填充色，只留描边，色 var(--border) 与拱门同深。 */
+   平线，两端相切→过渡自然。清掉 mask 与填充色，只留描边，色 var(--ws-chrome-border) 与拱门同深。 */
 [data-workspace-bg="on"]
   .browser-tab-item[data-active="true"]
   .browser-tab-seat::before,
@@ -2201,15 +2264,15 @@
 [data-workspace-bg="on"]
   .browser-tab-item[data-active="true"]
   .browser-tab-seat::before {
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--ws-chrome-border);
+  border-right: 1px solid var(--ws-chrome-border);
   border-bottom-right-radius: 0.5rem;
 }
 [data-workspace-bg="on"]
   .browser-tab-item[data-active="true"]
   .browser-tab-seat::after {
-  border-bottom: 1px solid var(--border);
-  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--ws-chrome-border);
+  border-left: 1px solid var(--ws-chrome-border);
   border-bottom-left-radius: 0.5rem;
 }
 
@@ -2229,9 +2292,9 @@
   left: -1px;
   right: -1px;
   bottom: 0.5rem;
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  border-top: 1px solid var(--ws-chrome-border);
+  border-left: 1px solid var(--ws-chrome-border);
+  border-right: 1px solid var(--ws-chrome-border);
   border-top-left-radius: 0.5rem;
   border-top-right-radius: 0.5rem;
   pointer-events: none;
@@ -2254,7 +2317,7 @@
   bottom: 0;
   height: 1px;
   width: 0.5rem;
-  background-color: var(--border);
+  background-color: var(--ws-chrome-border);
   pointer-events: none;
 }
 [data-workspace-bg="on"]
@@ -2291,7 +2354,7 @@
   position: absolute;
   bottom: 0;
   height: 1px;
-  background-color: var(--border);
+  background-color: var(--ws-chrome-border);
   pointer-events: none;
 }
 [data-workspace-bg="on"]
@@ -2324,6 +2387,6 @@
   left: 0.5rem;
   right: 0;
   height: 1px;
-  background-color: var(--border);
+  background-color: var(--ws-chrome-border);
   pointer-events: none;
 }

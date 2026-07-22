@@ -32,6 +32,8 @@ import type {
   QuestionAnswer,
   AcpAgentInfo,
   AcpAgentStatus,
+  MaintenanceCommand,
+  MaintenanceCommandResult,
   GrokStructuredConfig,
   CursorStructuredConfig,
   CursorAuthStatus,
@@ -195,6 +197,20 @@ export async function acpPrompt(
     if (isTurnInProgressRejection(e)) throw new TurnBusyError()
     throw e
   }
+}
+
+export async function acpRunMaintenanceCommand(
+  connectionId: string,
+  sessionId: string,
+  operationId: string,
+  command: MaintenanceCommand
+): Promise<MaintenanceCommandResult> {
+  return getTransport().call("acp_run_maintenance_command", {
+    connectionId,
+    sessionId,
+    operationId,
+    command,
+  })
 }
 
 export async function acpSetMode(

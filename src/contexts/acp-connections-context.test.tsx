@@ -39,6 +39,7 @@ const h = vi.hoisted(() => {
     acpDisconnect: vi.fn(),
     acpGetSessionSnapshot: vi.fn(),
     acpPrompt: vi.fn(),
+    acpRunMaintenanceCommand: vi.fn(),
     buildDelegationSeedEnvelopes: vi.fn(() => []),
     denormalizeSnapshot: vi.fn(),
   }
@@ -86,6 +87,7 @@ vi.mock("@/lib/api", () => ({
   acpDisconnect: h.acpDisconnect,
   acpGetSessionSnapshot: h.acpGetSessionSnapshot,
   acpPrompt: h.acpPrompt,
+  acpRunMaintenanceCommand: h.acpRunMaintenanceCommand,
   acpSetMode: vi.fn(),
   acpSetConfigOption: vi.fn(),
   acpCancel: vi.fn(),
@@ -124,6 +126,16 @@ async function mountProvider() {
 
 const TAB = "conv-1-claude_code-42"
 
+const EMPTY_CONTEXT_RUNTIME_CONFIG = {
+  configured_model: null,
+  configured_model_source: null,
+  configured_context_window_max_tokens: null,
+  context_window_max_source: null,
+  auto_compaction_enabled: null,
+  auto_compaction_threshold: null,
+  native_auto_compact_window: null,
+}
+
 beforeEach(() => {
   h.attach.mockClear()
   h.store = null
@@ -135,6 +147,7 @@ beforeEach(() => {
   h.acpDisconnect.mockReset()
   h.acpGetSessionSnapshot.mockReset()
   h.acpPrompt.mockReset()
+  h.acpRunMaintenanceCommand.mockReset()
   h.denormalizeSnapshot.mockReset()
   h.denormalizeSnapshot.mockReturnValue({
     connectionId: "owner-conn",
@@ -163,11 +176,23 @@ beforeEach(() => {
     enabled: true,
     available: true,
     installed_version: "1.0.0",
+    context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
   })
   h.acpConnect.mockResolvedValue("spawned-conn")
   h.acpDisconnect.mockResolvedValue(undefined)
   h.acpGetSessionSnapshot.mockResolvedValue(null)
   h.acpPrompt.mockResolvedValue(undefined)
+  h.acpRunMaintenanceCommand.mockImplementation(
+    (connectionId: string, sessionId: string, operationId: string) =>
+      Promise.resolve({
+        operation_id: operationId,
+        connection_id: connectionId,
+        session_id: sessionId,
+        stop_reason: "end_turn",
+        outcome: "completed" as const,
+        error: null,
+      })
+  )
 })
 
 function latestAttachHandlers(): AttachHandlers {
@@ -1004,17 +1029,17 @@ describe("out-of-turn wire guard + background activity", () => {
 
 describe("AcpConnectionsProvider automatic context compaction", () => {
   async function connectCompactionOwner(
-    agentStatus: Record<string, unknown> = {}
+    runtimeConfig: Record<string, unknown> = {}
   ): Promise<AttachHandlers> {
     h.acpGetAgentStatus.mockResolvedValue({
       agent_type: "claude_code",
       enabled: true,
       available: true,
       installed_version: "1.0.0",
-      env: {},
-      config_json: null,
-      config_file_path: "/tmp/settings.json",
-      ...agentStatus,
+      context_runtime_config: {
+        ...EMPTY_CONTEXT_RUNTIME_CONFIG,
+        ...runtimeConfig,
+      },
     })
     await mountProvider()
     await act(async () => {
@@ -1059,14 +1084,64 @@ describe("AcpConnectionsProvider automatic context compaction", () => {
 
   it("suppresses app-side triggering for native-managed Claude", async () => {
     const handlers = await connectCompactionOwner({
-      env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1000000" },
+      configured_context_window_max_tokens: 1_000_000,
+      context_window_max_source: "agent_env",
+      auto_compaction_enabled: true,
+      native_auto_compact_window: 1_000_000,
     })
     emitEligibleUsage(handlers)
 
     expect(h.acpPrompt).not.toHaveBeenCalled()
+    expect(h.acpRunMaintenanceCommand).not.toHaveBeenCalled()
     expect(
       h.store!.getConnection(TAB)?.contextManagement.compactionSupport
     ).toBe("native_managed")
+  })
+
+  it("leaves automatic compaction ownership with the connection owner", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue({
+      connection_id: "owner-conn",
+      event_seq: 0,
+    })
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(
+        TAB,
+        "claude_code",
+        "/tmp/x",
+        "viewer-session",
+        42
+      )
+    })
+    const handlers = latestAttachHandlers()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "owner-conn",
+      type: "session_started",
+      session_id: "viewer-session",
+    })
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "owner-conn",
+      type: "session_config_options",
+      config_options: compactionConfigOptions(),
+    })
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "owner-conn",
+      type: "available_commands",
+      commands: [compactCommand],
+    })
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "owner-conn",
+      type: "usage_update",
+      used: 351_000,
+      size: 1_000_000,
+    })
+
+    expect(h.store!.getConnection(TAB)?.isViewer).toBe(true)
+    expect(h.acpRunMaintenanceCommand).not.toHaveBeenCalled()
   })
 
   it("dedupes a 5% zone, completes, and permits the same zone in a new session", async () => {
@@ -1078,32 +1153,43 @@ describe("AcpConnectionsProvider automatic context compaction", () => {
       if (status) observedStatuses.push(status)
     })
 
+    let resolveMaintenance: (() => void) | null = null
+    h.acpRunMaintenanceCommand.mockImplementation(
+      (connectionId: string, sessionId: string, operationId: string) =>
+        new Promise((resolve) => {
+          resolveMaintenance = () =>
+            resolve({
+              operation_id: operationId,
+              connection_id: connectionId,
+              session_id: sessionId,
+              stop_reason: "end_turn",
+              outcome: "completed" as const,
+              error: null,
+            })
+        })
+    )
+
     emitEligibleUsage(handlers)
-    expect(h.acpPrompt).toHaveBeenCalledTimes(1)
-    expect(h.acpPrompt).toHaveBeenCalledWith("spawned-conn", [
-      { type: "text", text: "/compact" },
-    ])
+    expect(h.acpPrompt).not.toHaveBeenCalled()
+    expect(h.acpRunMaintenanceCommand).toHaveBeenCalledWith(
+      "spawned-conn",
+      "session-1",
+      expect.any(String),
+      "/compact"
+    )
     expect(observedStatuses).toEqual(
       expect.arrayContaining(["triggered", "running"])
     )
 
+    // Ordinary connection edges and TurnComplete are not maintenance outcomes.
     emitAcpEvent(handlers, {
       seq: 6,
-      connection_id: "spawned-conn",
-      type: "usage_update",
-      used: 352_000,
-      size: 1_000_000,
-    })
-    expect(h.acpPrompt).toHaveBeenCalledTimes(1)
-
-    emitAcpEvent(handlers, {
-      seq: 7,
       connection_id: "spawned-conn",
       type: "status_changed",
       status: "prompting",
     })
     emitAcpEvent(handlers, {
-      seq: 8,
+      seq: 7,
       connection_id: "spawned-conn",
       type: "turn_complete",
       session_id: "session-1",
@@ -1111,7 +1197,24 @@ describe("AcpConnectionsProvider automatic context compaction", () => {
     })
     expect(
       h.store!.getConnection(TAB)?.contextManagement.compactionStatus
+    ).toBe("running")
+
+    await act(async () => {
+      resolveMaintenance?.()
+      await Promise.resolve()
+    })
+    expect(
+      h.store!.getConnection(TAB)?.contextManagement.compactionStatus
     ).toBe("completed")
+
+    emitAcpEvent(handlers, {
+      seq: 8,
+      connection_id: "spawned-conn",
+      type: "usage_update",
+      used: 352_000,
+      size: 1_000_000,
+    })
+    expect(h.acpRunMaintenanceCommand).toHaveBeenCalledTimes(1)
 
     emitAcpEvent(handlers, {
       seq: 9,
@@ -1122,16 +1225,62 @@ describe("AcpConnectionsProvider automatic context compaction", () => {
     expect(
       h.store!.getConnection(TAB)?.contextManagement.compactionStatus
     ).toBe("idle")
+    expect(
+      h.store!.getConnection(TAB)?.contextManagement.activeCompactionOperationId
+    ).toBeNull()
+    expect(h.store!.getConnection(TAB)?.configOptions).toBeNull()
+    expect(h.store!.getConnection(TAB)?.availableCommands).toBeNull()
     emitAcpEvent(handlers, {
       seq: 10,
+      connection_id: "spawned-conn",
+      type: "session_config_options",
+      config_options: compactionConfigOptions(),
+    })
+    emitAcpEvent(handlers, {
+      seq: 11,
+      connection_id: "spawned-conn",
+      type: "available_commands",
+      commands: [compactCommand],
+    })
+    emitAcpEvent(handlers, {
+      seq: 12,
       connection_id: "spawned-conn",
       type: "usage_update",
       used: 351_000,
       size: 1_000_000,
     })
-    expect(h.acpPrompt).toHaveBeenCalledTimes(2)
+    expect(h.acpRunMaintenanceCommand).toHaveBeenCalledTimes(2)
     unsubscribe()
   })
+
+  it.each(["cancelled", "stale"] as const)(
+    "never marks a %s maintenance outcome completed",
+    async (outcome) => {
+      h.acpRunMaintenanceCommand.mockImplementation(
+        (connectionId: string, sessionId: string, operationId: string) =>
+          Promise.resolve({
+            operation_id: operationId,
+            connection_id: connectionId,
+            session_id: sessionId,
+            stop_reason: outcome === "cancelled" ? "cancelled" : null,
+            outcome,
+            error: outcome === "cancelled" ? "Maintenance cancelled" : null,
+          })
+      )
+      const handlers = await connectCompactionOwner()
+      emitEligibleUsage(handlers)
+
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(
+        h.store!.getConnection(TAB)?.contextManagement.compactionStatus
+      ).toBe("failed")
+      expect(
+        h.store!.getConnection(TAB)?.contextManagement.compactionStatus
+      ).not.toBe("completed")
+    }
+  )
 
   it("evaluates an eligible reconnect snapshot and keeps its session identity", async () => {
     const handlers = await connectCompactionOwner()
@@ -1162,7 +1311,7 @@ describe("AcpConnectionsProvider automatic context compaction", () => {
       event_seq: 12,
     } as unknown as LiveSessionSnapshot)
 
-    expect(h.acpPrompt).toHaveBeenCalledTimes(1)
+    expect(h.acpRunMaintenanceCommand).toHaveBeenCalledTimes(1)
     expect(
       h.store!.getConnection(TAB)?.contextManagement.runtimeConfig?.sessionId
     ).toBe("snapshot-session")
@@ -1172,9 +1321,9 @@ describe("AcpConnectionsProvider automatic context compaction", () => {
     ).toBe(1_000_000)
   })
 
-  it("records current trigger failures but ignores a stale rejected prompt", async () => {
+  it("records current maintenance failures but ignores a stale rejection", async () => {
     let rejectPrompt: ((reason: Error) => void) | null = null
-    h.acpPrompt.mockImplementation(
+    h.acpRunMaintenanceCommand.mockImplementation(
       () =>
         new Promise<void>((_resolve, reject) => {
           rejectPrompt = reject
@@ -1195,7 +1344,7 @@ describe("AcpConnectionsProvider automatic context compaction", () => {
     ).toBe("compact failed")
 
     let rejectStalePrompt: ((reason: Error) => void) | null = null
-    h.acpPrompt.mockImplementation(
+    h.acpRunMaintenanceCommand.mockImplementation(
       () =>
         new Promise<void>((_resolve, reject) => {
           rejectStalePrompt = reject
@@ -1210,11 +1359,23 @@ describe("AcpConnectionsProvider automatic context compaction", () => {
     emitAcpEvent(handlers, {
       seq: 7,
       connection_id: "spawned-conn",
+      type: "session_config_options",
+      config_options: compactionConfigOptions(),
+    })
+    emitAcpEvent(handlers, {
+      seq: 8,
+      connection_id: "spawned-conn",
+      type: "available_commands",
+      commands: [compactCommand],
+    })
+    emitAcpEvent(handlers, {
+      seq: 9,
+      connection_id: "spawned-conn",
       type: "usage_update",
       used: 401_000,
       size: 1_000_000,
     })
-    expect(h.acpPrompt).toHaveBeenCalledTimes(2)
+    expect(h.acpRunMaintenanceCommand).toHaveBeenCalledTimes(2)
 
     h.acpConnect.mockResolvedValueOnce("replacement-conn")
     await act(async () => {
@@ -1263,6 +1424,7 @@ describe("AcpConnectionsProvider Grok cross-agent-type model switch", () => {
       enabled: true,
       available: true,
       installed_version: "0.2.94",
+      context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
     })
     await mountProvider()
     await act(async () => {
@@ -1369,6 +1531,7 @@ describe("HYDRATE_FROM_SNAPSHOT last_error recovery", () => {
       enabled: true,
       available: true,
       installed_version: "1.0.0",
+      context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
     })
     await mountProvider()
     await act(async () => {

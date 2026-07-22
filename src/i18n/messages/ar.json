@@ -2524,7 +2524,9 @@
         "tokenCacheWrite": "كتابة التخزين المؤقت",
         "duration": "المدة",
         "completedAt": "وقت الإنجاز",
-        "jumpToPreviousUserMessage": "الانتقال إلى رسالة المستخدم"
+        "jumpToPreviousUserMessage": "الانتقال إلى رسالة المستخدم",
+        "showMore": "عرض المزيد",
+        "showLess": "طي"
       },
       "liveTurnStats": {
         "thinking": "جارٍ التفكير...",
@@ -2836,7 +2838,7 @@
       "noFolders": "No folders",
       "noBranches": "No branches",
       "noBranch": "(no branch)",
-      "chatModeLabel": "وضع بدون مجلد",
+      "chatModeLabel": "وضع الدردشة",
       "commit": "Commit",
       "push": "Push",
       "merge": "Merge",

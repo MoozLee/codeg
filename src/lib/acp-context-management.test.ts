@@ -9,7 +9,6 @@ import {
   formatNormalizedPercent,
   getCompactionTriggerDecision,
   normalizePercent,
-  safeContextConfigFields,
   sessionConfigOptionAcceptsValue,
 } from "./acp-context-management"
 import type {
@@ -24,16 +23,26 @@ const compactCommand: AvailableCommandInfo = {
   input_hint: null,
 }
 
-function agentStatus(patch: Partial<AcpAgentStatus> = {}): AcpAgentStatus {
+function agentStatus(
+  runtimePatch: Partial<AcpAgentStatus["context_runtime_config"]> = {},
+  patch: Partial<Omit<AcpAgentStatus, "context_runtime_config">> = {}
+): AcpAgentStatus {
   return {
     agent_type: "claude_code",
     available: true,
     enabled: true,
     installed_version: "1.0.0",
-    env: {},
-    config_json: null,
-    config_file_path: "/tmp/settings.json",
     ...patch,
+    context_runtime_config: {
+      configured_model: null,
+      configured_model_source: null,
+      configured_context_window_max_tokens: null,
+      context_window_max_source: null,
+      auto_compaction_enabled: null,
+      auto_compaction_threshold: null,
+      native_auto_compact_window: null,
+      ...runtimePatch,
+    },
   }
 }
 
@@ -54,57 +63,31 @@ describe("ACP context management", () => {
     expect(formatNormalizedPercent(3.5)).toBe("3.5%")
   })
 
-  it("keeps only context/model scalars and excludes secrets", () => {
-    expect(
-      safeContextConfigFields({
-        ANTHROPIC_MODEL: "opus",
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: 300000,
-        ANTHROPIC_AUTH_TOKEN: "secret",
-        modelApiKey: "secret",
-        unrelated: "hidden",
-      })
-    ).toEqual([
-      { key: "ANTHROPIC_MODEL", value: "opus" },
-      { key: "CLAUDE_CODE_AUTO_COMPACT_WINDOW", value: "300000" },
-    ])
-  })
-
-  it("uses effective env before config.env and root config", () => {
-    const state = deriveContextManagementFromAgentStatus(
-      agentStatus({
-        env: {
-          ANTHROPIC_MODEL: "env-model",
-          CLAUDE_CODE_AUTO_COMPACT_WINDOW: "300000",
-          ANTHROPIC_AUTH_TOKEN: "must-not-surface",
-        },
-        config_json: JSON.stringify({
-          model: "root-model",
-          env: {
-            ANTHROPIC_MODEL: "config-env-model",
-            CLAUDE_CODE_AUTO_COMPACT_WINDOW: "200000",
-          },
-        }),
-      })
-    )
+  it("derives context state only from the backend allowlist DTO", () => {
+    const status = agentStatus({
+      configured_model: "env-model",
+      configured_model_source: "agent_env",
+      configured_context_window_max_tokens: 300000,
+      context_window_max_source: "agent_env",
+      auto_compaction_enabled: true,
+      auto_compaction_threshold: 35,
+      native_auto_compact_window: 300000,
+    })
+    const state = deriveContextManagementFromAgentStatus(status)
 
     expect(state.configuredModel).toBe("env-model")
     expect(state.configuredModelSource).toBe("agent_env")
     expect(state.configuredContextWindowMaxTokens).toBe(300000)
     expect(state.contextWindowMaxSource).toBe("agent_env")
+    expect(state.autoCompactionThreshold).toBe(35)
     expect(state.compactionSupport).toBe("native_managed")
-    expect(
-      state.runtimeConfig?.safeEnvFields.some((field) =>
-        field.key.includes("TOKEN")
-      )
-    ).toBe(false)
+    expect(status).not.toHaveProperty("env")
+    expect(status).not.toHaveProperty("config_json")
+    expect(status).not.toHaveProperty("config_file_path")
   })
 
-  it("rejects fractional configured context-window values", () => {
-    const state = deriveContextManagementFromAgentStatus(
-      agentStatus({
-        env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: "300000.5" },
-      })
-    )
+  it("preserves null backend values without parsing raw configuration", () => {
+    const state = deriveContextManagementFromAgentStatus(agentStatus())
 
     expect(state.configuredContextWindowMaxTokens).toBeNull()
     expect(state.compactionSupport).toBe("unknown")
@@ -158,15 +141,38 @@ describe("ACP context management", () => {
   })
 
   it("resets session-scoped state when runtime identity changes", () => {
+    const statusState = deriveContextManagementFromAgentStatus(
+      agentStatus({
+        configured_model: "opus",
+        configured_model_source: "agent_env",
+      }),
+      DEFAULT_CONTEXT_MANAGEMENT,
+      "connection",
+      null
+    )
+    const selectorState = deriveContextManagementFromSelectors(
+      [
+        booleanOption(true),
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          kind: {
+            type: "select",
+            current_value: "session-model",
+            options: [{ value: "session-model", name: "Session model" }],
+            groups: [],
+          },
+        },
+      ],
+      [compactCommand],
+      statusState
+    )
     const initial = applyContextUsage(
       {
-        ...deriveContextManagementFromAgentStatus(
-          agentStatus({ env: { ANTHROPIC_MODEL: "opus" } }),
-          DEFAULT_CONTEXT_MANAGEMENT,
-          "connection",
-          null
-        ),
+        ...selectorState,
         compactionStatus: "failed",
+        activeCompactionOperationId: "old-operation",
         lastCompactionError: "old session",
       },
       { used: 100000, size: 200000 }
@@ -177,16 +183,24 @@ describe("ACP context management", () => {
       "session-2"
     )
     expect(updated.runtimeConfig?.sessionId).toBe("session-2")
+    expect(updated.runtimeConfig?.selectorModel).toBeNull()
     expect(updated.configuredModel).toBe("opus")
+    expect(updated.runtimeModel).toBeNull()
+    expect(updated.autoCompactionEnabled).toBeNull()
+    expect(updated.compactionSupport).toBe("unknown")
     expect(updated.runtimeContextWindowMaxTokens).toBeNull()
     expect(updated.compactionStatus).toBe("idle")
+    expect(updated.activeCompactionOperationId).toBeNull()
     expect(updated.lastCompactionError).toBeNull()
   })
 
   it("never selects app-side triggering for native-managed Claude", () => {
     const state = deriveContextManagementFromAgentStatus(
       agentStatus({
-        env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1000000" },
+        configured_context_window_max_tokens: 1_000_000,
+        context_window_max_source: "agent_env",
+        auto_compaction_enabled: true,
+        native_auto_compact_window: 1_000_000,
       })
     )
     expect(
@@ -239,6 +253,16 @@ describe("ACP context management", () => {
         connectionId: "conn",
         sessionId: "session",
         status: "prompting",
+        usage: { used: 351000, size: 1000000 },
+        management: state,
+        commands: [compactCommand],
+      })
+    ).toBeNull()
+    expect(
+      getCompactionTriggerDecision({
+        connectionId: "conn",
+        sessionId: null,
+        status: "connected",
         usage: { used: 351000, size: 1000000 },
         management: state,
         commands: [compactCommand],

@@ -2524,7 +2524,9 @@
         "tokenCacheWrite": "Cache-Schreiben",
         "duration": "Dauer",
         "completedAt": "Abgeschlossen um",
-        "jumpToPreviousUserMessage": "Zur Benutzernachricht springen"
+        "jumpToPreviousUserMessage": "Zur Benutzernachricht springen",
+        "showMore": "Mehr anzeigen",
+        "showLess": "Weniger anzeigen"
       },
       "liveTurnStats": {
         "thinking": "Denkt nach...",
@@ -2836,7 +2838,7 @@
       "noFolders": "No folders",
       "noBranches": "No branches",
       "noBranch": "(no branch)",
-      "chatModeLabel": "Ohne-Ordner-Modus",
+      "chatModeLabel": "Chat-Modus",
       "commit": "Commit",
       "push": "Push",
       "merge": "Merge",

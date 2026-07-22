@@ -12,6 +12,8 @@ import type {
   ConnectionInfo,
   AcpAgentInfo,
   AcpAgentStatus,
+  MaintenanceCommand,
+  MaintenanceCommandResult,
   AgentSkillScope,
   AgentSkillLayout,
   AgentSkillItem,
@@ -118,6 +120,20 @@ export async function acpPrompt(
   blocks: PromptInputBlock[]
 ): Promise<void> {
   return invoke("acp_prompt", { connectionId, blocks })
+}
+
+export async function acpRunMaintenanceCommand(
+  connectionId: string,
+  sessionId: string,
+  operationId: string,
+  command: MaintenanceCommand
+): Promise<MaintenanceCommandResult> {
+  return invoke("acp_run_maintenance_command", {
+    connectionId,
+    sessionId,
+    operationId,
+    command,
+  })
 }
 
 export async function acpSetMode(

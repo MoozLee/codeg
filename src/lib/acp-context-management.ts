@@ -2,7 +2,11 @@ import type {
   AcpAgentStatus,
   AgentType,
   AvailableCommandInfo,
+  ConfiguredModelSource as BackendConfiguredModelSource,
+  ContextRuntimeConfigInfo,
+  ContextWindowMaxSource as BackendContextWindowMaxSource,
   ConnectionStatus,
+  MaintenanceCommand,
   SessionConfigOptionInfo,
   SessionUsageUpdateInfo,
 } from "@/lib/types"
@@ -20,30 +24,15 @@ export type CompactionTriggerStatus =
   | "completed"
   | "failed"
 
-export type ConfiguredModelSource =
-  | "agent_env"
-  | "agent_config_env"
-  | "agent_root_config"
-  | "selector"
+export type ConfiguredModelSource = BackendConfiguredModelSource | "selector"
 
-export type ContextWindowMaxSource =
-  | "agent_env"
-  | "agent_config_env"
-  | "agent_root_config"
-
-export interface RuntimeConfigField {
-  key: string
-  value: string
-}
+export type ContextWindowMaxSource = BackendContextWindowMaxSource
 
 export interface RuntimeConfigSnapshot {
   agentType: AgentType
-  configFilePath: string | null
   connectionId: string | null
   sessionId: string | null
-  safeEnvFields: RuntimeConfigField[]
-  safeRootConfigFields: RuntimeConfigField[]
-  safeConfigEnvFields: RuntimeConfigField[]
+  agentConfig: ContextRuntimeConfigInfo
   selectorModel: string | null
 }
 
@@ -59,6 +48,7 @@ export interface ContextManagementState {
   autoCompactionThreshold: number | null
   compactionSupport: CompactionSupport
   compactionStatus: CompactionTriggerStatus
+  activeCompactionOperationId: string | null
   lastCompactionError: string | null
   runtimeConfig: RuntimeConfigSnapshot | null
 }
@@ -100,52 +90,9 @@ export const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementState = {
   autoCompactionThreshold: null,
   compactionSupport: "unknown",
   compactionStatus: "idle",
+  activeCompactionOperationId: null,
   lastCompactionError: null,
   runtimeConfig: null,
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null
-  }
-  return value as Record<string, unknown>
-}
-
-function parseJsonObject(raw: string | null | undefined) {
-  if (!raw) return null
-  try {
-    return asRecord(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null
-}
-
-function firstRecordString(
-  record: Record<string, unknown> | null,
-  keys: string[]
-): string | null {
-  for (const key of keys) {
-    const value = stringValue(record?.[key])
-    if (value) return value
-  }
-  return null
-}
-
-function firstEnvString(
-  env: Record<string, string> | null | undefined,
-  keys: string[]
-): string | null {
-  for (const key of keys) {
-    const value = stringValue(env?.[key])
-    if (value) return value
-  }
-  return null
 }
 
 export function normalizePercent(value: unknown): number | null {
@@ -163,79 +110,16 @@ export function formatNormalizedPercent(percent: number | null): string {
   return `${percent.toFixed(percent >= 10 ? 0 : 1)}%`
 }
 
-function positiveInteger(value: unknown): number | null {
-  if (typeof value !== "string" && typeof value !== "number") return null
-  const parsed = Number(String(value).trim())
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
-}
-
-function firstPositiveInteger(
-  record: Record<string, unknown> | Record<string, string> | null | undefined,
-  keys: string[],
-  bounds?: { min: number; max: number }
-): number | null {
-  for (const key of keys) {
-    const value = positiveInteger(record?.[key])
-    if (value == null) continue
-    if (bounds && (value < bounds.min || value > bounds.max)) continue
-    return value
-  }
-  return null
-}
-
-function firstPercent(
-  record: Record<string, unknown> | Record<string, string> | null | undefined,
-  keys: string[]
-): number | null {
-  for (const key of keys) {
-    const value = normalizePercent(record?.[key])
-    if (value != null) return value
-  }
-  return null
-}
-
-const CONTEXT_FIELD_PATTERNS = ["model", "compact", "compaction", "context"]
-const SECRET_FIELD_PATTERNS = [
-  "key",
-  "token",
-  "secret",
-  "password",
-  "credential",
-  "auth",
-]
-
-export function safeContextConfigFields(
-  record: Record<string, unknown> | Record<string, string> | null | undefined
-): RuntimeConfigField[] {
-  if (!record) return []
-  return Object.entries(record)
-    .filter(([key, value]) => {
-      const normalized = key.toLowerCase()
-      if (
-        !CONTEXT_FIELD_PATTERNS.some((pattern) =>
-          normalized.includes(pattern)
-        ) ||
-        SECRET_FIELD_PATTERNS.some((pattern) => normalized.includes(pattern))
-      ) {
-        return false
-      }
-      return ["string", "number", "boolean"].includes(typeof value)
-    })
-    .map(([key, value]) => ({ key, value: String(value) }))
-    .sort((a, b) => a.key.localeCompare(b.key))
-}
-
-function modelEnvKeys(agentType: AgentType): string[] {
-  switch (agentType) {
-    case "claude_code":
-      return ["ANTHROPIC_MODEL"]
-    case "gemini":
-      return ["GEMINI_MODEL", "GOOGLE_GEMINI_MODEL", "MODEL"]
-    case "grok":
-      return ["GROK_DEFAULT_MODEL", "MODEL"]
-    default:
-      return ["OPENAI_MODEL", "MODEL", "ANTHROPIC_MODEL", "GEMINI_MODEL"]
-  }
+function hasNativeClaudeContextConfig(
+  agentType: AgentType,
+  runtime: ContextRuntimeConfigInfo
+): boolean {
+  return (
+    agentType === "claude_code" &&
+    runtime.auto_compaction_enabled === true &&
+    (runtime.native_auto_compact_window != null ||
+      runtime.auto_compaction_threshold != null)
+  )
 }
 
 export function deriveContextManagementFromAgentStatus(
@@ -246,109 +130,31 @@ export function deriveContextManagementFromAgentStatus(
 ): ContextManagementState {
   if (!agent) return previous
 
-  const config = parseJsonObject(agent.config_json)
-  const configEnv = asRecord(config?.env)
   const sameIdentity =
     previous.runtimeConfig?.agentType === agent.agent_type &&
-    previous.runtimeConfig.configFilePath ===
-      (agent.config_file_path ?? null) &&
     previous.runtimeConfig.connectionId === connectionId &&
     previous.runtimeConfig.sessionId === sessionId
   const base = sameIdentity ? previous : DEFAULT_CONTEXT_MANAGEMENT
-
-  const modelKeys = modelEnvKeys(agent.agent_type)
-  const envModel = firstEnvString(agent.env, modelKeys)
-  const configEnvModel = firstRecordString(configEnv, modelKeys)
-  const rootModel = firstRecordString(config, ["model", "custom_model_id"])
-  const configuredModel = envModel ?? configEnvModel ?? rootModel
-  const configuredModelSource: ConfiguredModelSource | null = envModel
-    ? "agent_env"
-    : configEnvModel
-      ? "agent_config_env"
-      : rootModel
-        ? "agent_root_config"
-        : null
-
-  const claudeBounds = { min: 100_000, max: 1_000_000 }
-  const envContextMax =
-    agent.agent_type === "claude_code"
-      ? firstPositiveInteger(
-          agent.env,
-          ["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],
-          claudeBounds
-        )
-      : null
-  const configEnvContextMax =
-    agent.agent_type === "claude_code"
-      ? firstPositiveInteger(
-          configEnv,
-          ["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],
-          claudeBounds
-        )
-      : null
-  const rootContextMax =
-    agent.agent_type === "claude_code"
-      ? firstPositiveInteger(
-          config,
-          [
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-            "claudeCodeAutoCompactWindow",
-            "claude_code_auto_compact_window",
-          ],
-          claudeBounds
-        )
-      : agent.agent_type === "grok"
-        ? firstPositiveInteger(config, [
-            "custom_context_window",
-            "customContextWindow",
-          ])
-        : null
-  const configuredContextWindowMaxTokens =
-    envContextMax ?? configEnvContextMax ?? rootContextMax
-  const contextWindowMaxSource: ContextWindowMaxSource | null =
-    envContextMax != null
-      ? "agent_env"
-      : configEnvContextMax != null
-        ? "agent_config_env"
-        : rootContextMax != null
-          ? "agent_root_config"
-          : null
-
-  const claudeThreshold =
-    firstPercent(agent.env, ["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"]) ??
-    firstPercent(configEnv, ["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"]) ??
-    firstPercent(config, [
-      "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-      "claudeAutocompactPctOverride",
-      "claude_autocompact_pct_override",
-    ])
-  const grokThreshold = firstPercent(config, [
-    "auto_compact_threshold_percent",
-    "autoCompactThresholdPercent",
-  ])
-  const threshold = claudeThreshold ?? grokThreshold
-  const nativeClaude =
-    agent.agent_type === "claude_code" &&
-    (configuredContextWindowMaxTokens != null || claudeThreshold != null)
+  const runtime = agent.context_runtime_config
+  const nativeClaude = hasNativeClaudeContextConfig(agent.agent_type, runtime)
 
   return {
     ...base,
-    configuredModel,
-    configuredModelSource,
-    configuredContextWindowMaxTokens,
-    contextWindowMaxSource,
+    configuredModel: runtime.configured_model,
+    configuredModelSource: runtime.configured_model_source,
+    configuredContextWindowMaxTokens:
+      runtime.configured_context_window_max_tokens,
+    contextWindowMaxSource: runtime.context_window_max_source,
     autoCompactionEnabled:
-      nativeClaude || grokThreshold != null ? true : base.autoCompactionEnabled,
-    autoCompactionThreshold: threshold ?? base.autoCompactionThreshold,
+      runtime.auto_compaction_enabled ?? base.autoCompactionEnabled,
+    autoCompactionThreshold:
+      runtime.auto_compaction_threshold ?? base.autoCompactionThreshold,
     compactionSupport: nativeClaude ? "native_managed" : base.compactionSupport,
     runtimeConfig: {
       agentType: agent.agent_type,
-      configFilePath: agent.config_file_path ?? null,
       connectionId,
       sessionId,
-      safeEnvFields: safeContextConfigFields(agent.env),
-      safeRootConfigFields: safeContextConfigFields(config),
-      safeConfigEnvFields: safeContextConfigFields(configEnv),
+      agentConfig: runtime,
       selectorModel: sameIdentity
         ? (previous.runtimeConfig?.selectorModel ?? null)
         : null,
@@ -448,16 +254,33 @@ export function applyContextRuntimeIdentity(
     state.runtimeConfig.connectionId !== connectionId ||
     state.runtimeConfig.sessionId !== sessionId
   if (!identityChanged) return state
+
+  const agentConfig = state.runtimeConfig.agentConfig
+  const nativeClaude = hasNativeClaudeContextConfig(
+    state.runtimeConfig.agentType,
+    agentConfig
+  )
   return {
     ...state,
+    configuredModel: agentConfig.configured_model,
+    configuredModelSource: agentConfig.configured_model_source,
+    runtimeModel: null,
+    configuredContextWindowMaxTokens:
+      agentConfig.configured_context_window_max_tokens,
+    contextWindowMaxSource: agentConfig.context_window_max_source,
     runtimeContextWindowMaxTokens: null,
     runtimeContextWindowClamped: false,
+    autoCompactionEnabled: agentConfig.auto_compaction_enabled,
+    autoCompactionThreshold: agentConfig.auto_compaction_threshold,
+    compactionSupport: nativeClaude ? "native_managed" : "unknown",
     compactionStatus: "idle",
+    activeCompactionOperationId: null,
     lastCompactionError: null,
     runtimeConfig: {
       ...state.runtimeConfig,
       connectionId,
       sessionId,
+      selectorModel: null,
     },
   }
 }
@@ -487,7 +310,7 @@ export interface CompactionTriggerDecisionInput {
 }
 
 export interface CompactionTriggerDecision {
-  command: string
+  command: MaintenanceCommand
   key: string
 }
 
@@ -497,6 +320,7 @@ export function getCompactionTriggerDecision(
   const { management, usage } = input
   if (
     input.status !== "connected" ||
+    !input.sessionId ||
     !usage ||
     usage.used <= 0 ||
     management.compactionSupport !== "agent_managed" ||
@@ -515,9 +339,12 @@ export function getCompactionTriggerDecision(
     management.autoCompactionThreshold ?? DEFAULT_AUTO_COMPACTION_THRESHOLD
   if (percent < threshold) return null
   const zone = Math.floor(percent / 5) * 5
-  const session = input.sessionId ?? input.connectionId
+  const commandName: MaintenanceCommand =
+    command.name.replace(/^\//, "").toLowerCase() === "compact"
+      ? "/compact"
+      : "/summarize"
   return {
-    command: command.name.startsWith("/") ? command.name : `/${command.name}`,
-    key: `${input.connectionId}:${session}:${threshold}:${contextMax}:${zone}`,
+    command: commandName,
+    key: `${input.connectionId}:${input.sessionId}:${threshold}:${contextMax}:${zone}`,
   }
 }

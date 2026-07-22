@@ -2524,7 +2524,9 @@
         "tokenCacheWrite": "缓存写入",
         "duration": "耗时",
         "completedAt": "完成时间",
-        "jumpToPreviousUserMessage": "跳转到上一条用户消息"
+        "jumpToPreviousUserMessage": "跳转到上一条用户消息",
+        "showMore": "展开",
+        "showLess": "收起"
       },
       "liveTurnStats": {
         "thinking": "思考中...",
@@ -2836,7 +2838,7 @@
       "noFolders": "暂无文件夹",
       "noBranches": "暂无分支",
       "noBranch": "（无分支）",
-      "chatModeLabel": "无文件夹模式",
+      "chatModeLabel": "聊天模式",
       "commit": "提交",
       "push": "推送",
       "merge": "合并",

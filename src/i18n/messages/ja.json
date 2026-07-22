@@ -2524,7 +2524,9 @@
         "tokenCacheWrite": "キャッシュ書込",
         "duration": "所要時間",
         "completedAt": "完了時刻",
-        "jumpToPreviousUserMessage": "前のユーザーメッセージへ"
+        "jumpToPreviousUserMessage": "前のユーザーメッセージへ",
+        "showMore": "もっと見る",
+        "showLess": "折りたたむ"
       },
       "liveTurnStats": {
         "thinking": "考え中...",
@@ -2836,7 +2838,7 @@
       "noFolders": "No folders",
       "noBranches": "No branches",
       "noBranch": "(no branch)",
-      "chatModeLabel": "フォルダーなしモード",
+      "chatModeLabel": "チャットモード",
       "commit": "Commit",
       "push": "Push",
       "merge": "Merge",

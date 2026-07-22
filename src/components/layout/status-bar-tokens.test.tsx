@@ -100,12 +100,17 @@ function fixtureManagement() {
     compactionStatus: "idle" as const,
     runtimeConfig: {
       agentType: "claude_code" as const,
-      configFilePath: "/tmp/settings.json",
       connectionId: "connection",
       sessionId: "session",
-      safeEnvFields: [],
-      safeRootConfigFields: [],
-      safeConfigEnvFields: [],
+      agentConfig: {
+        configured_model: "gpt-5.6-terra",
+        configured_model_source: "agent_env" as const,
+        configured_context_window_max_tokens: 1_000_000,
+        context_window_max_source: "agent_env" as const,
+        auto_compaction_enabled: true,
+        auto_compaction_threshold: 35,
+        native_auto_compact_window: 1_000_000,
+      },
       selectorModel: "opus",
     },
   }
