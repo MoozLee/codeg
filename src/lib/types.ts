@@ -1023,7 +1023,13 @@ export interface SessionConfigSelectInfo {
   groups: SessionConfigSelectGroupInfo[]
 }
 
-export type SessionConfigKindInfo = { type: "select" } & SessionConfigSelectInfo
+export interface SessionConfigBooleanInfo {
+  current_value: boolean
+}
+
+export type SessionConfigKindInfo =
+  | ({ type: "select" } & SessionConfigSelectInfo)
+  | ({ type: "boolean" } & SessionConfigBooleanInfo)
 
 export interface SessionConfigOptionInfo {
   id: string
@@ -1793,12 +1799,52 @@ export interface CursorModelsResult {
   error: string | null
 }
 
-// Lightweight agent status returned by acp_get_agent_status
+export type ConfiguredModelSource =
+  | "agent_env"
+  | "agent_config_env"
+  | "agent_root_config"
+
+export type ContextWindowMaxSource =
+  | "agent_env"
+  | "agent_config_env"
+  | "agent_root_config"
+
+/** Backend-owned allowlist of context-management runtime settings. */
+export interface ContextRuntimeConfigInfo {
+  configured_model: string | null
+  configured_model_source: ConfiguredModelSource | null
+  configured_context_window_max_tokens: number | null
+  context_window_max_source: ContextWindowMaxSource | null
+  auto_compaction_enabled: boolean | null
+  auto_compaction_threshold: number | null
+  native_auto_compact_window: number | null
+}
+
+// Lightweight agent status returned by acp_get_agent_status. Raw environment
+// variables and native config documents are intentionally absent.
 export interface AcpAgentStatus {
   agent_type: AgentType
   available: boolean
   enabled: boolean
   installed_version: string | null
+  context_runtime_config: ContextRuntimeConfigInfo
+}
+
+export type MaintenanceCommand = "/compact" | "/summarize"
+
+export type MaintenanceCommandOutcome =
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "stale"
+
+export interface MaintenanceCommandResult {
+  operation_id: string
+  connection_id: string
+  session_id: string
+  stop_reason: string | null
+  outcome: MaintenanceCommandOutcome
+  error: string | null
 }
 
 export type AgentSkillScope = "global" | "project"

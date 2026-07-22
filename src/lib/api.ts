@@ -10,6 +10,7 @@ import { getCodegToken } from "./transport/web-auth"
 import { notifyWebUnauthorized } from "./transport/web-connection-store"
 import { getCurrentEffectiveAppLocale } from "./i18n"
 import { TurnBusyError, isTurnInProgressRejection } from "./turn-busy"
+import { isValidSessionConfigValue } from "./acp-context-management"
 import type { FolderThemeColor } from "./theme-presets"
 import type {
   AgentType,
@@ -31,6 +32,8 @@ import type {
   QuestionAnswer,
   AcpAgentInfo,
   AcpAgentStatus,
+  MaintenanceCommand,
+  MaintenanceCommandResult,
   GrokStructuredConfig,
   CursorStructuredConfig,
   CursorAuthStatus,
@@ -196,6 +199,20 @@ export async function acpPrompt(
   }
 }
 
+export async function acpRunMaintenanceCommand(
+  connectionId: string,
+  sessionId: string,
+  operationId: string,
+  command: MaintenanceCommand
+): Promise<MaintenanceCommandResult> {
+  return getTransport().call("acp_run_maintenance_command", {
+    connectionId,
+    sessionId,
+    operationId,
+    command,
+  })
+}
+
 export async function acpSetMode(
   connectionId: string,
   modeId: string
@@ -206,12 +223,16 @@ export async function acpSetMode(
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ): Promise<void> {
+  if (!configId.trim() || !isValidSessionConfigValue(value)) {
+    throw new Error("Invalid config option value")
+  }
   return getTransport().call("acp_set_config_option", {
     connectionId,
     configId,
-    valueId,
+    valueId: typeof value === "string" ? value : null,
+    value: typeof value === "boolean" ? value : null,
   })
 }
 
