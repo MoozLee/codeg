@@ -16,12 +16,11 @@ use crate::app_error::AppCommandError;
 /// Update manifest URL — mirrors the `endpoints` entry in `tauri.conf.json`
 /// so desktop and server modes consult the same source of truth.
 pub const UPDATE_MANIFEST_URL: &str =
-    "https://github.com/xintaofei/codeg/releases/latest/download/latest.json";
+    "https://github.com/MoozLee/codeg/releases/latest/download/latest.json";
 
 /// Deterministic base for "latest" release assets (server tarballs + their
 /// `.sig` detached signatures). Same channel as the manifest.
-pub const RELEASE_DOWNLOAD_BASE: &str =
-    "https://github.com/xintaofei/codeg/releases/latest/download";
+pub const RELEASE_DOWNLOAD_BASE: &str = "https://github.com/MoozLee/codeg/releases/latest/download";
 
 /// Short-timeout client for the small manifest fetch. Proxy env vars are
 /// sampled at build time, so `init_proxy_from_db` must run before the first
@@ -113,6 +112,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn update_channel_matches_tauri_config() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let desktop_endpoint = config
+            .pointer("/plugins/updater/endpoints/0")
+            .and_then(serde_json::Value::as_str);
+
+        assert_eq!(desktop_endpoint, Some(UPDATE_MANIFEST_URL));
+        assert_eq!(
+            UPDATE_MANIFEST_URL.strip_suffix("/latest.json"),
+            Some(RELEASE_DOWNLOAD_BASE)
+        );
+    }
+
+    #[test]
     fn newer_by_semver() {
         assert!(is_newer("0.14.12", "0.14.11"));
         assert!(is_newer("v1.0.0", "0.14.11"));
@@ -125,6 +139,12 @@ mod tests {
         // A prerelease is older than its release per semver.
         assert!(is_newer("1.0.0", "1.0.0-rc.1"));
         assert!(!is_newer("1.0.0-rc.1", "1.0.0"));
+    }
+
+    #[test]
+    fn fork_release_suffix_has_expected_upgrade_ordering() {
+        assert!(is_newer("0.21.4-1", "0.21.3-1"));
+        assert!(!is_newer("0.21.4-1", "0.21.4"));
     }
 
     #[test]
