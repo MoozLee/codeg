@@ -965,100 +965,100 @@ pub async fn get_folder_conversation_core(
 
     let (mut turns, session_stats, resolved_ext_id, parsed_title, transcript_watermark) =
         if let Some(ref ext_id) = summary.external_id {
-        let at = summary.agent_type;
-        let eid = ext_id.clone();
-        let db_created_at = summary.created_at;
-        let folder_path_for_fallback = {
-            let folder = folder_service::get_folder_by_id(conn, summary.folder_id)
-                .await
-                .ok()
-                .flatten();
-            folder.map(|f| f.path)
-        };
-        tokio::task::spawn_blocking(move || -> Result<_, AppCommandError> {
-            let parser: Box<dyn AgentParser> = match at {
-                AgentType::ClaudeCode => Box::new(ClaudeParser::new()),
-                AgentType::Codex => Box::new(CodexParser::new()),
-                AgentType::OpenCode => Box::new(OpenCodeParser::new()),
-                AgentType::Gemini => Box::new(GeminiParser::new()),
-                AgentType::OpenClaw => Box::new(OpenClawParser::new()),
-                AgentType::Cline => Box::new(ClineParser::new()),
-                AgentType::Hermes => Box::new(HermesParser::new()),
-                AgentType::CodeBuddy => Box::new(CodeBuddyParser::new()),
-                AgentType::KimiCode => Box::new(KimiCodeParser::new()),
-                AgentType::Pi => Box::new(PiParser::new()),
-                AgentType::Grok => Box::new(GrokParser::new()),
-                AgentType::Cursor => Box::new(CursorParser::new()),
+            let at = summary.agent_type;
+            let eid = ext_id.clone();
+            let db_created_at = summary.created_at;
+            let folder_path_for_fallback = {
+                let folder = folder_service::get_folder_by_id(conn, summary.folder_id)
+                    .await
+                    .ok()
+                    .flatten();
+                folder.map(|f| f.path)
             };
+            tokio::task::spawn_blocking(move || -> Result<_, AppCommandError> {
+                let parser: Box<dyn AgentParser> = match at {
+                    AgentType::ClaudeCode => Box::new(ClaudeParser::new()),
+                    AgentType::Codex => Box::new(CodexParser::new()),
+                    AgentType::OpenCode => Box::new(OpenCodeParser::new()),
+                    AgentType::Gemini => Box::new(GeminiParser::new()),
+                    AgentType::OpenClaw => Box::new(OpenClawParser::new()),
+                    AgentType::Cline => Box::new(ClineParser::new()),
+                    AgentType::Hermes => Box::new(HermesParser::new()),
+                    AgentType::CodeBuddy => Box::new(CodeBuddyParser::new()),
+                    AgentType::KimiCode => Box::new(KimiCodeParser::new()),
+                    AgentType::Pi => Box::new(PiParser::new()),
+                    AgentType::Grok => Box::new(GrokParser::new()),
+                    AgentType::Cursor => Box::new(CursorParser::new()),
+                };
                 match get_visible_conversation(parser.as_ref(), &eid) {
-                Ok(d) => Ok((
-                    d.turns,
-                    d.session_stats,
-                    None,
-                    d.summary.title,
-                    d.transcript_watermark,
-                )),
-                Err(crate::parsers::ParseError::ConversationNotFound(_)) => {
-                    // The external_id may no longer match any local file —
-                    // e.g. an ACP session UUID (OpenClaw, Cline) or a stale
-                    // ID after session/new fallback overwrote the original
-                    // (Gemini CLI).  Fall back to matching by folder_path
-                    // and started_at from the parsed conversation list.
-                    if matches!(
-                        at,
-                        AgentType::OpenClaw | AgentType::Cline | AgentType::Gemini
-                    ) {
-                        if let Ok(all) = parser.list_conversations() {
-                            // Filter by folder_path first, then find the closest
-                            // started_at match within 300 seconds of db_created_at.
-                            let matched = all
-                                .into_iter()
-                                .filter(|c| {
-                                    c.folder_path
-                                        .as_ref()
-                                        .zip(folder_path_for_fallback.as_ref())
-                                        .is_some_and(|(a, b)| path_eq_for_matching(a, b))
-                                })
-                                .min_by_key(|c| {
-                                    (c.started_at - db_created_at).num_seconds().unsigned_abs()
-                                })
-                                .filter(|c| {
+                    Ok(d) => Ok((
+                        d.turns,
+                        d.session_stats,
+                        None,
+                        d.summary.title,
+                        d.transcript_watermark,
+                    )),
+                    Err(crate::parsers::ParseError::ConversationNotFound(_)) => {
+                        // The external_id may no longer match any local file —
+                        // e.g. an ACP session UUID (OpenClaw, Cline) or a stale
+                        // ID after session/new fallback overwrote the original
+                        // (Gemini CLI).  Fall back to matching by folder_path
+                        // and started_at from the parsed conversation list.
+                        if matches!(
+                            at,
+                            AgentType::OpenClaw | AgentType::Cline | AgentType::Gemini
+                        ) {
+                            if let Ok(all) = parser.list_conversations() {
+                                // Filter by folder_path first, then find the closest
+                                // started_at match within 300 seconds of db_created_at.
+                                let matched = all
+                                    .into_iter()
+                                    .filter(|c| {
+                                        c.folder_path
+                                            .as_ref()
+                                            .zip(folder_path_for_fallback.as_ref())
+                                            .is_some_and(|(a, b)| path_eq_for_matching(a, b))
+                                    })
+                                    .min_by_key(|c| {
+                                        (c.started_at - db_created_at).num_seconds().unsigned_abs()
+                                    })
+                                    .filter(|c| {
                                         let diff = (c.started_at - db_created_at)
                                             .num_seconds()
                                             .unsigned_abs();
-                                    diff < 300
-                                });
-                            if let Some(conv) = matched {
-                                let new_ext_id = conv.id.clone();
+                                        diff < 300
+                                    });
+                                if let Some(conv) = matched {
+                                    let new_ext_id = conv.id.clone();
                                     if let Ok(d) =
                                         get_visible_conversation(parser.as_ref(), &new_ext_id)
                                     {
-                                    return Ok((
-                                        d.turns,
-                                        d.session_stats,
-                                        Some(new_ext_id),
-                                        d.summary.title,
-                                        d.transcript_watermark,
-                                    ));
+                                        return Ok((
+                                            d.turns,
+                                            d.session_stats,
+                                            Some(new_ext_id),
+                                            d.summary.title,
+                                            d.transcript_watermark,
+                                        ));
+                                    }
                                 }
                             }
                         }
+                        Ok((vec![], None, None, None, None))
                     }
-                    Ok((vec![], None, None, None, None))
+                    Err(e) => Err(parse_error_to_app_error(e)),
                 }
-                Err(e) => Err(parse_error_to_app_error(e)),
-            }
-        })
-        .await
-        .map_err(|e| {
-            AppCommandError::task_execution_failed(
-                "Failed to read conversation turns from session file",
-            )
-            .with_detail(e.to_string())
-        })??
-    } else {
-        (vec![], None, None, None, None)
-    };
+            })
+            .await
+            .map_err(|e| {
+                AppCommandError::task_execution_failed(
+                    "Failed to read conversation turns from session file",
+                )
+                .with_detail(e.to_string())
+            })??
+        } else {
+            (vec![], None, None, None, None)
+        };
 
     // If we resolved a different external_id (e.g. ACP UUID → parser branch ID),
     // update the database so future lookups are direct.
@@ -1672,17 +1672,17 @@ pub async fn create_chat_conversation_core(
     let model = match conversation_service::create_chat(conn, folder.id, agent_type, title, None)
         .await
     {
-            Ok(model) => model,
-            Err(create_err) => {
-                if let Err(cleanup_err) = folder_service::remove_folder(conn, &folder.path).await {
-                    tracing::error!(
+        Ok(model) => model,
+        Err(create_err) => {
+            if let Err(cleanup_err) = folder_service::remove_folder(conn, &folder.path).await {
+                tracing::error!(
                         "[conversations] failed to clean up orphan chat folder {} after conversation create error: {cleanup_err}",
                         folder.id
                     );
-                }
-                return Err(AppCommandError::from(create_err));
             }
-        };
+            return Err(AppCommandError::from(create_err));
+        }
+    };
 
     Ok(CreateChatConversationResult {
         conversation_id: model.id,
@@ -2289,7 +2289,7 @@ mod tests {
                     data: data.into(),
                     mime_type: "image/png".into(),
                 }],
-        };
+            };
 
         let mut turns = vec![image_turn("turn-0", "AAAA")];
         apply_in_flight_message_id(
@@ -2704,8 +2704,8 @@ mod tests {
 
         // It surfaces in the default sidebar query (active-folder scope).
         let rows = list_all_conversations_core(&db.conn, None, None, None, None, None, false)
-                .await
-                .expect("list");
+            .await
+            .expect("list");
         assert!(rows.iter().any(|c| c.id == result.conversation_id));
     }
 
@@ -2983,8 +2983,8 @@ mod tests {
         // GC runs under the symlinked spelling; the live dir must still be spared.
         let removed =
             gc_orphan_chat_dirs_core_with_threshold(&db.conn, &link, std::time::Duration::ZERO)
-        .await
-        .expect("gc");
+                .await
+                .expect("gc");
 
         assert_eq!(
             removed, 0,

@@ -2500,11 +2500,11 @@ fn apply_kimi_managed_block(
             }
             let models_empty =
                 if let Some(models) = table.get_mut("models").and_then(toml::Value::as_table_mut) {
-                models.remove(KIMI_MANAGED_MODEL_ALIAS);
-                models.is_empty()
-            } else {
-                false
-            };
+                    models.remove(KIMI_MANAGED_MODEL_ALIAS);
+                    models.is_empty()
+                } else {
+                    false
+                };
             if models_empty {
                 table.remove("models");
             }
@@ -5606,9 +5606,9 @@ async fn run_cursor_probe(
         }
     }
     let output = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
-    .await
-    .map_err(|_| format!("cursor-agent {} timed out", args.join(" ")))?
-    .map_err(|e| format!("failed to run cursor-agent: {e}"))?;
+        .await
+        .map_err(|_| format!("cursor-agent {} timed out", args.join(" ")))?
+        .map_err(|e| format!("failed to run cursor-agent: {e}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     if !output.status.success() && stdout.trim().is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -12230,7 +12230,7 @@ wire_api = "chat"
                 Some("model: [unterminated"),
                 None
             )
-                .is_err(),
+            .is_err(),
             "invalid raw yaml must be rejected"
         );
     }

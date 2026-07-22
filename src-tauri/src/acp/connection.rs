@@ -4808,16 +4808,16 @@ async fn run_conversation_loop<'a>(
                 // or not).
                 let turn_timing_prep = (!is_maintenance && matches!(agent_type, AgentType::Cursor))
                     .then(|| {
-                    cursor_turn_ord += 1;
-                    let text: String = blocks
-                        .iter()
-                        .filter_map(|b| match b {
-                            PromptInputBlock::Text { text } => Some(text.as_str()),
-                            _ => None,
-                        })
-                        .collect();
-                    (crate::turn_timings::prompt_hash(&text), cursor_turn_ord)
-                });
+                        cursor_turn_ord += 1;
+                        let text: String = blocks
+                            .iter()
+                            .filter_map(|b| match b {
+                                PromptInputBlock::Text { text } => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        (crate::turn_timings::prompt_hash(&text), cursor_turn_ord)
+                    });
                 let prompt_blocks = map_prompt_blocks(blocks);
                 if prompt_blocks.is_empty() {
                     // Defensive: send_prompt_inner rejects this before enqueue.
@@ -4829,30 +4829,30 @@ async fn run_conversation_loop<'a>(
                         let completion = maintenance_transport_failure(&origin);
                         let _ = origin.completion_tx.send(completion);
                     } else {
-                    emit_with_state(
-                        state,
-                        emitter,
-                        AcpEvent::Error {
-                            message: "Prompt must contain at least one content block".into(),
-                            agent_type: agent_type.to_string(),
-                            code: None,
-                            terminal: false,
-                        },
-                    )
-                    .await;
+                        emit_with_state(
+                            state,
+                            emitter,
+                            AcpEvent::Error {
+                                message: "Prompt must contain at least one content block".into(),
+                                agent_type: agent_type.to_string(),
+                                code: None,
+                                terminal: false,
+                            },
+                        )
+                        .await;
                     }
                     continue;
                 }
 
                 if !is_maintenance {
-                emit_with_state(
-                    state,
-                    emitter,
-                    AcpEvent::StatusChanged {
-                        status: ConnectionStatus::Prompting,
-                    },
-                )
-                .await;
+                    emit_with_state(
+                        state,
+                        emitter,
+                        AcpEvent::StatusChanged {
+                            status: ConnectionStatus::Prompting,
+                        },
+                    )
+                    .await;
                 }
 
                 // Broadcast the user's prompt to cross-client viewers BEFORE
@@ -5322,15 +5322,15 @@ async fn run_conversation_loop<'a>(
                 }
 
                 if !is_maintenance {
-                emit_with_state(
-                    state,
-                    emitter,
-                    AcpEvent::StatusChanged {
-                        status: ConnectionStatus::Connected,
-                    },
-                )
-                .await;
-            }
+                    emit_with_state(
+                        state,
+                        emitter,
+                        AcpEvent::StatusChanged {
+                            status: ConnectionStatus::Connected,
+                        },
+                    )
+                    .await;
+                }
                 if let Some(origin) = maintenance_origin.take() {
                     let completion = maintenance_completion
                         .unwrap_or_else(|| maintenance_transport_failure(&origin));
@@ -5375,7 +5375,7 @@ async fn run_conversation_loop<'a>(
                     match value {
                         SessionConfigCommandValue::ValueId(value_id) => {
                             set_grok_config_option(&cx, &sid, state, emitter, config_id, value_id)
-                            .await
+                                .await
                         }
                         SessionConfigCommandValue::Boolean(_) => Err(sacp::Error::invalid_params()
                             .data("Grok config options require a select value")),
@@ -6449,7 +6449,7 @@ async fn emit_conversation_update(
                 None
             };
             let content = serialize_tool_call_content(&tc.content, synthesized_edit.is_none())
-                    .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c));
+                .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c));
             let images = extract_tool_call_images(&tc.content);
             let raw_input = synthesized_edit
                 .or(own_raw_input)
@@ -9030,7 +9030,7 @@ mod tests {
                 false,
                 &mut overrides
             )
-                .as_deref(),
+            .as_deref(),
             Some("agent")
         );
         // The bug: a later status-only update lost the marker (raw_input None).
@@ -9044,7 +9044,7 @@ mod tests {
                 false,
                 &mut overrides
             )
-                .as_deref(),
+            .as_deref(),
             Some("agent"),
             "a status-only update must not downgrade the Agent card mid-stream"
         );
@@ -9059,7 +9059,7 @@ mod tests {
                 false,
                 &mut overrides
             )
-                .as_deref(),
+            .as_deref(),
             Some("agent")
         );
         // A never-classified tool call returns None → caller uses its own title.
@@ -9088,7 +9088,7 @@ mod tests {
                 false,
                 &mut overrides
             )
-                .as_deref(),
+            .as_deref(),
             Some("mcp__codeg-mcp__delegate_to_agent")
         );
         assert_eq!(
@@ -9100,7 +9100,7 @@ mod tests {
                 false,
                 &mut overrides
             )
-                .as_deref(),
+            .as_deref(),
             Some("mcp__codeg-mcp__delegate_to_agent")
         );
         // Non-CodeBuddy agent with no prior classification: never rewritten.
@@ -9164,7 +9164,7 @@ mod tests {
                 true,
                 &mut overrides
             )
-                .as_deref(),
+            .as_deref(),
             Some("agent")
         );
         // Later sparse frames carry NEITHER signal — the override is re-asserted,
@@ -9178,7 +9178,7 @@ mod tests {
                 false,
                 &mut overrides
             )
-                .as_deref(),
+            .as_deref(),
             Some("agent"),
             "meta-classified Agent pill must stay 'agent' across signal-less frames"
         );
@@ -9208,7 +9208,7 @@ mod tests {
         let mut open: HashSet<String> = HashSet::new();
         let mut closed: HashSet<String> = HashSet::new();
         let fg = false; // foreground (not background)
-        // A non-final foreground agent frame opens the window.
+                        // A non-final foreground agent frame opens the window.
         track_subagent_window(
             AgentType::CodeBuddy,
             true,
