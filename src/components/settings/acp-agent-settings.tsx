@@ -29,6 +29,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Stethoscope,
   Trash2,
   Wrench,
 } from "lucide-react"
@@ -80,6 +81,7 @@ import {
   acpDetectAgentLocalVersion,
   acpDownloadAgentBinary,
   acpInstallUvTool,
+  acpGetAgentEditableConfig,
   acpGetAgentStatus,
   acpListAgents,
   acpPreflight,
@@ -99,6 +101,7 @@ import {
   opencodeProviderCatalog,
 } from "@/lib/api"
 import type {
+  AcpAgentEditableConfig,
   AcpAgentInfo,
   AgentType,
   CheckStatus,
@@ -121,6 +124,7 @@ import {
   OpenCodeConnectDialog,
   OpenCodeCustomProviderDialog,
 } from "@/components/settings/opencode-connect-dialog"
+import { AgentDiagnosticsDialog } from "@/components/settings/agent-diagnostics-dialog"
 import {
   buildConnectedModelOptions,
   buildConnectedProviders,
@@ -2714,7 +2718,77 @@ function parseHermesConfig(configText: string): HermesDraftValues {
   }
 }
 
-function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
+type EditableAgent = AcpAgentInfo & AcpAgentEditableConfig
+
+type ConfigSaveOptions = {
+  openCodeAuthJsonText?: string
+  codexAuthJsonText?: string
+  codexConfigTomlText?: string
+  codexModelCatalog?: string
+  grokConfigTomlText?: string
+  grokStructured?: GrokStructuredConfig
+}
+
+export type SelectedEditorPanelState = "editor" | "error" | "loading" | "empty"
+
+export function getSelectedEditorPanelState(
+  hasSelection: boolean,
+  hasEditableConfig: boolean,
+  loadError: string | null
+): SelectedEditorPanelState {
+  if (hasSelection && hasEditableConfig) return "editor"
+  if (hasSelection && loadError) return "error"
+  return hasSelection ? "loading" : "empty"
+}
+
+// The broad agent list is metadata-only. Keep the selected editor's saved
+// values current here so a second merge starts from the first save's result.
+export function applyConfigSaveToEditableConfig(
+  editable: AcpAgentEditableConfig,
+  normalizedConfig: string,
+  options?: ConfigSaveOptions
+): AcpAgentEditableConfig {
+  return {
+    ...editable,
+    config_json: normalizedConfig || null,
+    opencode_auth_json:
+      typeof options?.openCodeAuthJsonText === "string"
+        ? options.openCodeAuthJsonText
+        : editable.opencode_auth_json,
+    codex_auth_json:
+      typeof options?.codexAuthJsonText === "string"
+        ? options.codexAuthJsonText
+        : editable.codex_auth_json,
+    codex_config_toml:
+      typeof options?.codexConfigTomlText === "string"
+        ? options.codexConfigTomlText
+        : editable.codex_config_toml,
+    codex_model_catalog:
+      typeof options?.codexModelCatalog === "string"
+        ? options.codexModelCatalog
+        : editable.codex_model_catalog,
+    grok_config_toml:
+      typeof options?.grokConfigTomlText === "string"
+        ? options.grokConfigTomlText
+        : editable.grok_config_toml,
+    grok_settings: options?.grokStructured
+      ? {
+          default_reasoning_effort:
+            options.grokStructured.defaultReasoningEffort,
+          permission_mode: options.grokStructured.permissionMode,
+          custom_model_id: options.grokStructured.customModelId,
+          custom_base_url: options.grokStructured.customBaseUrl,
+          custom_api_key: options.grokStructured.customApiKey,
+          custom_api_backend: options.grokStructured.customApiBackend,
+          custom_context_window: options.grokStructured.customContextWindow,
+          auto_compact_threshold_percent:
+            options.grokStructured.autoCompactThresholdPercent,
+        }
+      : editable.grok_settings,
+  }
+}
+
+function buildAgentDraft(agent: EditableAgent): AgentDraft {
   const configText =
     typeof agent.config_json === "string" && agent.config_json.trim()
       ? agent.config_json
@@ -3401,7 +3475,7 @@ function KimiCodeConfigPanel({
   agent,
   onSaved,
 }: {
-  agent: AcpAgentInfo
+  agent: AcpAgentInfo & AcpAgentEditableConfig
   onSaved: () => Promise<void>
 }) {
   const t = useTranslations("AcpAgentSettings")
@@ -3952,6 +4026,12 @@ export function AcpAgentSettings() {
   const [drafts, setDrafts] = useState<Partial<Record<AgentType, AgentDraft>>>(
     {}
   )
+  const [editableConfigs, setEditableConfigs] = useState<
+    Partial<Record<AgentType, AcpAgentEditableConfig>>
+  >({})
+  const [editableConfigLoadErrors, setEditableConfigLoadErrors] = useState<
+    Partial<Record<AgentType, string>>
+  >({})
   const [configErrors, setConfigErrors] = useState<
     Partial<Record<AgentType, string | null>>
   >({})
@@ -3992,6 +4072,7 @@ export function AcpAgentSettings() {
   // effect deps (which would re-run the effect and self-cancel the request).
   const openCodeCatalogRequestedRef = useRef(false)
   const [openCodeConnectOpen, setOpenCodeConnectOpen] = useState(false)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   // Add-a-custom-provider dialog (separate from the catalog connect dialog).
   const [openCodeCustomOpen, setOpenCodeCustomOpen] = useState(false)
   // When set, the connect dialog opens in edit mode for this connected provider.
@@ -4026,11 +4107,28 @@ export function AcpAgentSettings() {
       ),
     [agents]
   )
-  const selectedAgent = useMemo(
+  const selectedAgentSummary = useMemo(
     () =>
       sortedAgents.find((agent) => agent.agent_type === selectedAgentType) ??
       null,
     [selectedAgentType, sortedAgents]
+  )
+  const selectedAgent = useMemo<EditableAgent | null>(() => {
+    if (!selectedAgentSummary) return null
+    const editable = editableConfigs[selectedAgentSummary.agent_type]
+    return editable ? { ...selectedAgentSummary, ...editable } : null
+  }, [editableConfigs, selectedAgentSummary])
+  const selectedEditorLoadError = selectedAgentSummary
+    ? (editableConfigLoadErrors[selectedAgentSummary.agent_type] ?? null)
+    : null
+  const selectedEditorPanelState = getSelectedEditorPanelState(
+    Boolean(selectedAgentSummary),
+    Boolean(
+      selectedAgent &&
+      selectedAgentSummary &&
+      drafts[selectedAgentSummary.agent_type]
+    ),
+    selectedEditorLoadError
   )
   const agentTypesKey = useMemo(
     () =>
@@ -4052,25 +4150,6 @@ export function AcpAgentSettings() {
       ])
       setAgents(next)
       setModelProviders(providers)
-      setDrafts((prev) => {
-        const updated = { ...prev }
-        for (const agent of next) {
-          if (!updated[agent.agent_type]) {
-            updated[agent.agent_type] = buildAgentDraft(agent)
-          }
-        }
-        return updated
-      })
-      setConfigErrors((prev) => {
-        const updated = { ...prev }
-        for (const agent of next) {
-          if (typeof updated[agent.agent_type] !== "undefined") continue
-          const configText =
-            typeof agent.config_json === "string" ? agent.config_json : ""
-          updated[agent.agent_type] = parseConfigJsonText(configText).error
-        }
-        return updated
-      })
     } catch (err) {
       const message = toErrorMessage(err)
       setLoadingError(message)
@@ -4078,6 +4157,115 @@ export function AcpAgentSettings() {
       setLoadingAgents(false)
     }
   }, [])
+
+  const hydrateEditableConfig = useCallback(
+    (
+      summary: AcpAgentInfo,
+      editable: AcpAgentEditableConfig,
+      resetDraft = false
+    ) => {
+      const agentType = summary.agent_type
+      const agent: EditableAgent = { ...summary, ...editable }
+      setEditableConfigs((prev) => ({ ...prev, [agentType]: editable }))
+      setEditableConfigLoadErrors((prev) => {
+        if (typeof prev[agentType] === "undefined") return prev
+        const next = { ...prev }
+        delete next[agentType]
+        return next
+      })
+      setDrafts((prev) =>
+        resetDraft || !prev[agentType]
+          ? { ...prev, [agentType]: buildAgentDraft(agent) }
+          : prev
+      )
+      setConfigErrors((prev) =>
+        resetDraft || typeof prev[agentType] === "undefined"
+          ? {
+              ...prev,
+              [agentType]: parseConfigJsonText(editable.config_json ?? "")
+                .error,
+            }
+          : prev
+      )
+    },
+    []
+  )
+
+  const refreshEditableConfig = useCallback(
+    async (agentType: AgentType) => {
+      try {
+        const [summaries, editable] = await Promise.all([
+          acpListAgents(),
+          acpGetAgentEditableConfig(agentType),
+        ])
+        const summary = summaries.find(
+          (agent) => agent.agent_type === agentType
+        )
+        if (!summary)
+          throw new Error("The selected agent is no longer available.")
+        setAgents(summaries)
+        hydrateEditableConfig(summary, editable, true)
+      } catch (err) {
+        const message = toErrorMessage(err)
+        console.error("[Settings] refresh agent editable config failed:", err)
+        setEditableConfigs((prev) => {
+          const next = { ...prev }
+          delete next[agentType]
+          return next
+        })
+        setDrafts((prev) => {
+          const next = { ...prev }
+          delete next[agentType]
+          return next
+        })
+        setEditableConfigLoadErrors((prev) => ({
+          ...prev,
+          [agentType]: message,
+        }))
+      }
+    },
+    [hydrateEditableConfig]
+  )
+
+  const retryEditableConfigLoad = useCallback((agentType: AgentType) => {
+    setEditableConfigLoadErrors((prev) => {
+      if (typeof prev[agentType] === "undefined") return prev
+      const next = { ...prev }
+      delete next[agentType]
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!selectedAgentSummary) return
+    const agentType = selectedAgentSummary.agent_type
+    if (editableConfigs[agentType] || editableConfigLoadErrors[agentType]) {
+      return
+    }
+
+    let cancelled = false
+    void acpGetAgentEditableConfig(agentType)
+      .then((editable) => {
+        if (!cancelled) hydrateEditableConfig(selectedAgentSummary, editable)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        const message = toErrorMessage(err)
+        console.error("[Settings] load agent editable config failed:", err)
+        setEditableConfigLoadErrors((prev) => ({
+          ...prev,
+          [agentType]: message,
+        }))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    editableConfigLoadErrors,
+    editableConfigs,
+    hydrateEditableConfig,
+    selectedAgentSummary,
+  ])
 
   const runPreflight = useCallback(
     async (agentType: AgentType, forceRefresh?: boolean) => {
@@ -4291,12 +4479,22 @@ export function AcpAgentSettings() {
               ? {
                   ...agent,
                   enabled,
-                  env: parsedEnv,
                   model_provider_id: modelProviderId ?? null,
                 }
               : agent
           )
         )
+        setEditableConfigs((prev) => {
+          const editable = prev[agentType]
+          if (!editable) return prev
+          return {
+            ...prev,
+            [agentType]: {
+              ...editable,
+              env: parsedEnv,
+            },
+          }
+        })
         reportAffectedSessions(affected)
       } finally {
         setSavingEnv((prev) => ({ ...prev, [agentType]: false }))
@@ -4309,14 +4507,7 @@ export function AcpAgentSettings() {
     async (
       agentType: AgentType,
       configText: string,
-      options?: {
-        openCodeAuthJsonText?: string
-        codexAuthJsonText?: string
-        codexConfigTomlText?: string
-        codexModelCatalog?: string
-        grokConfigTomlText?: string
-        grokStructured?: GrokStructuredConfig
-      }
+      options?: ConfigSaveOptions
     ) => {
       const parsedConfig = parseConfigJsonText(configText)
       if (parsedConfig.error) {
@@ -4342,9 +4533,9 @@ export function AcpAgentSettings() {
         agentType === "gemini" ||
         agentType === "open_claw"
       if (usesMerge && configForPersist) {
-        const originalAgent = agents.find((a) => a.agent_type === agentType)
-        const originalConfig = originalAgent?.config_json
-          ? parseConfigJsonText(originalAgent.config_json).config
+        const originalConfigText = editableConfigs[agentType]?.config_json
+        const originalConfig = originalConfigText
+          ? parseConfigJsonText(originalConfigText).config
           : {}
         const currentConfig = parsedConfig.config
         configForPersist = JSON.stringify(
@@ -4377,57 +4568,24 @@ export function AcpAgentSettings() {
               : null,
           grok_structured: options?.grokStructured ?? null,
         })
+        setEditableConfigs((prev) => {
+          const editable = prev[agentType]
+          if (!editable) return prev
+          return {
+            ...prev,
+            [agentType]: applyConfigSaveToEditableConfig(
+              editable,
+              normalizedConfig,
+              options
+            ),
+          }
+        })
         reportAffectedSessions(affected)
-        setAgents((prev) =>
-          prev.map((agent) =>
-            agent.agent_type === agentType
-              ? {
-                  ...agent,
-                  config_json: normalizedConfig || null,
-                  opencode_auth_json:
-                    typeof options?.openCodeAuthJsonText === "string"
-                      ? options.openCodeAuthJsonText
-                      : agent.opencode_auth_json,
-                  codex_auth_json:
-                    typeof codexAuthJsonText === "string"
-                      ? codexAuthJsonText
-                      : agent.codex_auth_json,
-                  codex_config_toml:
-                    typeof options?.codexConfigTomlText === "string"
-                      ? options.codexConfigTomlText
-                      : agent.codex_config_toml,
-                  grok_config_toml:
-                    typeof options?.grokConfigTomlText === "string"
-                      ? options.grokConfigTomlText
-                      : agent.grok_config_toml,
-                  grok_settings: options?.grokStructured
-                    ? {
-                        default_reasoning_effort:
-                          options.grokStructured.defaultReasoningEffort,
-                        permission_mode: options.grokStructured.permissionMode,
-                        // buildGrokStructuredConfig already trims/gates/clamps
-                        // these to what the backend writes, so mirror them
-                        // directly (reseedGrokDraft re-reads disk right after).
-                        custom_model_id: options.grokStructured.customModelId,
-                        custom_base_url: options.grokStructured.customBaseUrl,
-                        custom_api_key: options.grokStructured.customApiKey,
-                        custom_api_backend:
-                          options.grokStructured.customApiBackend,
-                        custom_context_window:
-                          options.grokStructured.customContextWindow,
-                        auto_compact_threshold_percent:
-                          options.grokStructured.autoCompactThresholdPercent,
-                      }
-                    : agent.grok_settings,
-                }
-              : agent
-          )
-        )
       } finally {
         setSavingConfig((prev) => ({ ...prev, [agentType]: false }))
       }
     },
-    [agents, reportAffectedSessions]
+    [editableConfigs, reportAffectedSessions]
   )
 
   // After a Grok save, re-read the merged on-disk config and rebuild the Grok
@@ -4435,20 +4593,10 @@ export function AcpAgentSettings() {
   // drafts (to preserve in-progress edits), so without this the collapsed raw
   // editor and the structured dropdowns could drift out of sync with disk (the
   // structured merge and the raw editor each write keys the other doesn't echo).
-  const reseedGrokDraft = useCallback(async () => {
-    try {
-      const fresh = await acpListAgents()
-      setAgents(fresh)
-      const grok = fresh.find((a) => a.agent_type === "grok")
-      if (grok) {
-        setDrafts((prev) => ({ ...prev, grok: buildAgentDraft(grok) }))
-      }
-    } catch (err) {
-      // Non-fatal: the save already committed, and the agents-updated
-      // subscription will resync shortly — never surface this as a save failure.
-      console.error("[Settings] reseed grok draft failed:", err)
-    }
-  }, [])
+  const reseedGrokDraft = useCallback(
+    async () => refreshEditableConfig("grok"),
+    [refreshEditableConfig]
+  )
 
   const runBinaryAction = useCallback(
     async (
@@ -4968,7 +5116,7 @@ export function AcpAgentSettings() {
     ? checkState[selectedAgent.agent_type]
     : undefined
   const selectedDraft = selectedAgent
-    ? (drafts[selectedAgent.agent_type] ?? buildAgentDraft(selectedAgent))
+    ? (drafts[selectedAgent.agent_type] ?? null)
     : null
   const selectedConfigError = selectedAgent
     ? (configErrors[selectedAgent.agent_type] ?? null)
@@ -5916,15 +6064,7 @@ export function AcpAgentSettings() {
                 baseUrl: providerOption?.needsBaseUrl ? draft.apiBaseUrl : null,
               }
         )
-        await refreshAgents()
-        // Drop the draft so it rebuilds from the freshly-persisted projection —
-        // otherwise the *other* mode (structured fields vs. raw config.yaml)
-        // keeps stale content and a later save could overwrite this one.
-        setDrafts((prev) => {
-          const next = { ...prev }
-          delete next[agentType]
-          return next
-        })
+        await refreshEditableConfig(agentType)
         toast.success(t("toasts.hermesSaved"), {
           description: t("toasts.configSavedHint"),
         })
@@ -5937,7 +6077,7 @@ export function AcpAgentSettings() {
         setSavingConfig((prev) => ({ ...prev, [agentType]: false }))
       }
     },
-    [selectedAgent, selectedDraft, refreshAgents, t]
+    [selectedAgent, selectedDraft, refreshEditableConfig, t]
   )
 
   // Hermes's interactive setup (`--setup` / `hermes model`) needs a real TTY +
@@ -7137,7 +7277,6 @@ export function AcpAgentSettings() {
             {sortedAgents.map((agent) => {
               const current = checkState[agent.agent_type]
               const isChecking = Boolean(checking[agent.agent_type])
-              const draft = drafts[agent.agent_type] ?? buildAgentDraft(agent)
               const allChecks = getAgentChecks(agent, current)
               const summary = summarizeChecks(allChecks)
               const displaySummary: CheckStatus | "unchecked" | "checking" =
@@ -7148,7 +7287,7 @@ export function AcpAgentSettings() {
                   : displaySummary === "checking"
                     ? "Checking"
                     : displaySummary.toUpperCase()
-              const statusToneClass = !draft.enabled
+              const statusToneClass = !agent.enabled
                 ? "border-muted-foreground/30 bg-muted/30 text-muted-foreground"
                 : displaySummary === "pass"
                   ? "border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400"
@@ -7209,7 +7348,7 @@ export function AcpAgentSettings() {
                         <span className="text-sm font-medium truncate">
                           {agent.name}
                         </span>
-                        {draft.enabled && (
+                        {agent.enabled && (
                           <span
                             className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"
                             aria-label={t("status.agentEnabledAria", {
@@ -7266,7 +7405,9 @@ export function AcpAgentSettings() {
         </div>
 
         <div className="min-h-0 min-w-0 rounded-lg border bg-card">
-          {selectedAgent && selectedDraft ? (
+          {selectedEditorPanelState === "editor" &&
+          selectedAgent &&
+          selectedDraft ? (
             <div className="h-full flex flex-col">
               <div className="border-b px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
@@ -7282,7 +7423,7 @@ export function AcpAgentSettings() {
                       {selectedAgent.distribution_type}
                     </Badge>
                   </div>
-                  <div className="flex items-center shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
                       role="switch"
@@ -7350,6 +7491,12 @@ export function AcpAgentSettings() {
                 </p>
               </div>
 
+              <AgentDiagnosticsDialog
+                open={diagnosticsOpen}
+                onOpenChange={setDiagnosticsOpen}
+                agentType={selectedAgent.agent_type}
+              />
+
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 <div className="space-y-2">
                   {selectedCurrent?.error && (
@@ -7358,9 +7505,20 @@ export function AcpAgentSettings() {
                       <span className="break-all">{selectedCurrent.error}</span>
                     </div>
                   )}
-                  <div className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    {t("preflight.count", { count: selectedChecks.length })}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      {t("preflight.count", { count: selectedChecks.length })}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      onClick={() => setDiagnosticsOpen(true)}
+                    >
+                      <Stethoscope className="h-3.5 w-3.5" />
+                      {t("actions.diagnose")}
+                    </Button>
                   </div>
                   {selectedChecks.length > 0 ? (
                     selectedChecks.map((check) =>
@@ -9690,7 +9848,7 @@ supports_websockets = true`}
                 ) : selectedAgent.agent_type === "kimi_code" ? (
                   <KimiCodeConfigPanel
                     agent={selectedAgent}
-                    onSaved={refreshAgents}
+                    onSaved={() => refreshEditableConfig("kimi_code")}
                   />
                 ) : selectedAgent.agent_type === "pi" ? (
                   <PiConfigPanel
@@ -9704,7 +9862,7 @@ supports_websockets = true`}
                         selectedAgent.model_provider_id
                       )
                     }
-                    onSaved={refreshAgents}
+                    onSaved={() => refreshEditableConfig("pi")}
                   />
                 ) : selectedAgent.agent_type === "cursor" ? (
                   <CursorConfigPanel
@@ -9718,7 +9876,7 @@ supports_websockets = true`}
                         selectedAgent.model_provider_id
                       )
                     }
-                    onSaved={refreshAgents}
+                    onSaved={() => refreshEditableConfig("cursor")}
                     onAffectedSessions={reportAffectedSessions}
                   />
                 ) : selectedAgent.agent_type === "grok" ? (
@@ -10796,6 +10954,34 @@ supports_websockets = true`}
                   </div>
                 )}
               </div>
+            </div>
+          ) : selectedEditorPanelState === "error" &&
+            selectedEditorLoadError &&
+            selectedAgentSummary ? (
+            <div className="h-full flex items-center justify-center gap-2 px-4 text-xs text-destructive">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 truncate">
+                {selectedEditorLoadError}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                title={t("actions.refreshCheck")}
+                aria-label={t("actions.refreshCheckAgent", {
+                  name: selectedAgentSummary.name,
+                })}
+                onClick={() =>
+                  retryEditableConfigLoad(selectedAgentSummary.agent_type)
+                }
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : selectedEditorPanelState === "loading" ? (
+            <div className="h-full flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t("loadingAgents")}
             </div>
           ) : (
             <div className="h-full flex items-center justify-center text-xs text-muted-foreground">

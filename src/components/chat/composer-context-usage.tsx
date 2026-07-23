@@ -3,8 +3,9 @@
 import { useCallback, useSyncExternalStore } from "react"
 import { Coins } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useSessionStats } from "@/contexts/session-stats-context"
 import { useConnectionStore } from "@/contexts/acp-connections-context"
+import { useTabStore } from "@/contexts/tab-context"
+import { useConversationRuntimeStore } from "@/stores/conversation-runtime-store"
 import { AGENT_LABELS, type AgentType, type TurnUsage } from "@/lib/types"
 import {
   formatNormalizedPercent,
@@ -27,7 +28,7 @@ type ContextUsageSource = "live" | "history"
 type ContextMaxDisplaySource = "configured" | "live" | "history" | "unknown"
 type ContextHealth = "unknown" | "normal" | "high" | "critical"
 
-interface StatusBarTokenViewModelInput {
+interface ComposerContextUsageViewModelInput {
   agentType: AgentType | null
   liveUsed: number | null
   liveSize: number | null
@@ -39,7 +40,7 @@ interface StatusBarTokenViewModelInput {
   totalTokens: number | null
 }
 
-export interface StatusBarTokenViewModel {
+export interface ComposerContextUsageViewModel {
   contextUsed: number | null
   contextMax: number | null
   contextPercent: number | null
@@ -56,9 +57,9 @@ export interface StatusBarTokenViewModel {
   management: ContextManagementState | null
 }
 
-export function buildStatusBarTokenViewModel(
-  input: StatusBarTokenViewModelInput
-): StatusBarTokenViewModel {
+export function buildComposerContextUsageViewModel(
+  input: ComposerContextUsageViewModelInput
+): ComposerContextUsageViewModel {
   const liveContextUsed =
     input.liveUsed != null && input.liveUsed > 0 ? input.liveUsed : null
   const liveContextMax =
@@ -97,7 +98,7 @@ export function buildStatusBarTokenViewModel(
           ? "history"
           : "unknown"
 
-  const tokenRows: StatusBarTokenViewModel["tokenRows"] = []
+  const tokenRows: ComposerContextUsageViewModel["tokenRows"] = []
   if (input.usage) {
     tokenRows.push(
       { key: "input", value: input.usage.input_tokens },
@@ -149,49 +150,51 @@ function DetailRow({
   )
 }
 
-export function StatusBarTokens() {
+/**
+ * Context usage and management shown below each composer. The tab ID is the
+ * connection key, while historical stats are scoped to that tab's own runtime
+ * conversation, so tiled composers cannot read the active tab's values.
+ */
+export function ComposerContextUsage({ tabId }: { tabId: string | null }) {
   const t = useTranslations("Folder.statusBar.tokens")
   const store = useConnectionStore()
-  const { sessionStats } = useSessionStats()
-  const usage = sessionStats?.total_usage ?? null
-
-  const subscribeActiveKey = useCallback(
-    (callback: () => void) => store.subscribeActiveKey(callback),
-    [store]
-  )
-  const getActiveKey = useCallback(() => store.getActiveKey(), [store])
-  const activeKey = useSyncExternalStore(
-    subscribeActiveKey,
-    getActiveKey,
-    getActiveKey
+  const runtimeConversationId = useTabStore((s) => {
+    const tab = s.tabs.find((x) => x.id === tabId)
+    if (!tab || tab.kind !== "conversation") return null
+    return tab.runtimeConversationId ?? tab.conversationId ?? null
+  })
+  const sessionStats = useConversationRuntimeStore((s) =>
+    runtimeConversationId != null
+      ? (s.byConversationId.get(runtimeConversationId)?.sessionStats ?? null)
+      : null
   )
 
-  const subscribeConnection = useCallback(
+  const subscribeConn = useCallback(
     (callback: () => void) => {
-      if (!activeKey) return () => {}
-      return store.subscribeKey(activeKey, callback)
+      if (!tabId) return () => {}
+      return store.subscribeKey(tabId, callback)
     },
-    [activeKey, store]
+    [store, tabId]
   )
-  const getConnectionSnapshot = useCallback(
-    () => (activeKey ? store.getConnection(activeKey) : undefined),
-    [activeKey, store]
+  const getConnSnapshot = useCallback(
+    () => (tabId ? store.getConnection(tabId) : undefined),
+    [store, tabId]
   )
-  const activeConnection = useSyncExternalStore(
-    subscribeConnection,
-    getConnectionSnapshot,
-    getConnectionSnapshot
+  const conn = useSyncExternalStore(
+    subscribeConn,
+    getConnSnapshot,
+    getConnSnapshot
   )
 
-  const view = buildStatusBarTokenViewModel({
-    agentType: activeConnection?.agentType ?? null,
-    liveUsed: activeConnection?.usage?.used ?? null,
-    liveSize: activeConnection?.usage?.size ?? null,
+  const view = buildComposerContextUsageViewModel({
+    agentType: conn?.agentType ?? null,
+    liveUsed: conn?.usage?.used ?? null,
+    liveSize: conn?.usage?.size ?? null,
     historicalUsed: sessionStats?.context_window_used_tokens ?? null,
     historicalSize: sessionStats?.context_window_max_tokens ?? null,
     historicalPercent: sessionStats?.context_window_usage_percent ?? null,
-    management: activeConnection?.contextManagement ?? null,
-    usage,
+    management: conn?.contextManagement ?? null,
+    usage: sessionStats?.total_usage ?? null,
     totalTokens: sessionStats?.total_tokens ?? null,
   })
 
@@ -213,11 +216,20 @@ export function StatusBarTokens() {
   const autoCompactionEnabled = view.management?.autoCompactionEnabled ?? null
   const autoCompactionThreshold =
     view.management?.autoCompactionThreshold ?? null
+  const total = view.tokenRows.find((row) => row.key === "total")?.value ?? 0
+
+  const triggerTitle = hasContext
+    ? view.contextUsed != null && view.contextMax != null
+      ? `${t("contextWindow")}: ${formatContextWindowPercent(view.contextPercent)} (${formatTokenCount(view.contextUsed)} / ${formatTokenCount(view.contextMax)})`
+      : `${t("contextWindow")}: ${formatContextWindowPercent(view.contextPercent)}`
+    : `${t("tokenUsage")}: ${formatTokenCount(total)}`
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
+          type="button"
+          title={triggerTitle}
           className={`flex items-center gap-1 transition-colors hover:text-foreground ${
             view.contextHealth === "critical"
               ? "text-destructive"
@@ -264,16 +276,16 @@ export function StatusBarTokens() {
           ) : (
             <>
               <Coins className="size-3.5" />
-              <span>
-                {formatTokenCount(
-                  view.tokenRows.find((row) => row.key === "total")?.value ?? 0
-                )}
-              </span>
+              <span>{formatTokenCount(total)}</span>
             </>
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="end" className="w-72 gap-2 p-3 text-xs">
+      <PopoverContent
+        side="top"
+        align="end"
+        className="w-72 max-w-[calc(100vw-1rem)] gap-2 p-3 text-xs"
+      >
         {hasContext ? (
           <section
             className={`space-y-1.5 ${

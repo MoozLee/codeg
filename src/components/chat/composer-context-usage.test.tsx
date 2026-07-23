@@ -1,11 +1,11 @@
 import type { ReactNode } from "react"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
-  StatusBarTokens,
-  buildStatusBarTokenViewModel,
-} from "./status-bar-tokens"
+  ComposerContextUsage,
+  buildComposerContextUsageViewModel,
+} from "./composer-context-usage"
 import { DEFAULT_CONTEXT_MANAGEMENT } from "@/lib/acp-context-management"
 import type { ContextManagementState } from "@/lib/acp-context-management"
 import type {
@@ -15,25 +15,49 @@ import type {
 } from "@/lib/types"
 
 const h = vi.hoisted(() => ({
-  connection: null as {
-    agentType: AgentType
-    usage: SessionUsageUpdateInfo
-    contextManagement: ContextManagementState
-  } | null,
-  sessionStats: null as SessionStats | null,
+  connections: new Map<
+    string,
+    {
+      agentType: AgentType
+      usage: SessionUsageUpdateInfo
+      contextManagement: ContextManagementState
+    }
+  >(),
+  sessionStats: new Map<number, SessionStats | null>(),
+  tabs: [] as Array<{
+    id: string
+    kind: "conversation"
+    conversationId: number | null
+    runtimeConversationId: number | null
+  }>,
 }))
 
 vi.mock("@/contexts/acp-connections-context", () => ({
   useConnectionStore: () => ({
-    getActiveKey: () => "active",
-    subscribeActiveKey: () => () => {},
-    getConnection: () => h.connection,
+    getConnection: (tabId: string) => h.connections.get(tabId),
     subscribeKey: () => () => {},
   }),
 }))
 
-vi.mock("@/contexts/session-stats-context", () => ({
-  useSessionStats: () => ({ sessionStats: h.sessionStats }),
+vi.mock("@/contexts/tab-context", () => ({
+  useTabStore: (selector: (state: { tabs: typeof h.tabs }) => unknown) =>
+    selector({ tabs: h.tabs }),
+}))
+
+vi.mock("@/stores/conversation-runtime-store", () => ({
+  useConversationRuntimeStore: (
+    selector: (state: {
+      byConversationId: Map<number, { sessionStats: SessionStats | null }>
+    }) => unknown
+  ) =>
+    selector({
+      byConversationId: new Map(
+        [...h.sessionStats.entries()].map(([id, sessionStats]) => [
+          id,
+          { sessionStats },
+        ])
+      ),
+    }),
 }))
 
 const messages: Record<string, string> = {
@@ -49,6 +73,8 @@ const messages: Record<string, string> = {
   "maxSource.history": "History stats",
   "maxSource.unknown": "Unknown",
   "contextLevel.normal": "Context usage is normal.",
+  "contextLevel.high": "Context usage is high.",
+  "contextLevel.critical": "Context usage is critical.",
   contextManagement: "Context Management",
   agentType: "Agent",
   configuredModel: "Configured model",
@@ -85,28 +111,28 @@ vi.mock("@/components/ui/popover", () => ({
   ),
 }))
 
-function fixtureManagement() {
+function fixtureManagement(): ContextManagementState {
   return {
     ...DEFAULT_CONTEXT_MANAGEMENT,
     configuredModel: "gpt-5.6-terra",
-    configuredModelSource: "agent_env" as const,
+    configuredModelSource: "agent_env",
     runtimeModel: "opus",
     configuredContextWindowMaxTokens: 1_000_000,
-    contextWindowMaxSource: "agent_env" as const,
+    contextWindowMaxSource: "agent_env",
     runtimeContextWindowMaxTokens: 1_000_000,
     autoCompactionEnabled: true,
     autoCompactionThreshold: 35,
-    compactionSupport: "native_managed" as const,
-    compactionStatus: "idle" as const,
+    compactionSupport: "native_managed",
+    compactionStatus: "idle",
     runtimeConfig: {
-      agentType: "claude_code" as const,
+      agentType: "claude_code",
       connectionId: "connection",
       sessionId: "session",
       agentConfig: {
         configured_model: "gpt-5.6-terra",
-        configured_model_source: "agent_env" as const,
+        configured_model_source: "agent_env",
         configured_context_window_max_tokens: 1_000_000,
-        context_window_max_source: "agent_env" as const,
+        context_window_max_source: "agent_env",
         auto_compaction_enabled: true,
         auto_compaction_threshold: 35,
         native_auto_compact_window: 1_000_000,
@@ -116,9 +142,24 @@ function fixtureManagement() {
   }
 }
 
-describe("StatusBarTokens", () => {
+function seedTab(tabId: string, runtimeConversationId: number) {
+  h.tabs.push({
+    id: tabId,
+    kind: "conversation",
+    conversationId: runtimeConversationId,
+    runtimeConversationId,
+  })
+}
+
+beforeEach(() => {
+  h.connections.clear()
+  h.sessionStats.clear()
+  h.tabs.splice(0)
+})
+
+describe("ComposerContextUsage", () => {
   it("builds configured-window context values in the 0..100 percent domain", () => {
-    const view = buildStatusBarTokenViewModel({
+    const view = buildComposerContextUsageViewModel({
       agentType: "claude_code",
       liveUsed: 274_000,
       liveSize: 1_000_000,
@@ -137,13 +178,14 @@ describe("StatusBarTokens", () => {
     expect(view.contextMaxSource).toBe("configured")
   })
 
-  it("renders the acceptance fixture, including 35% without double scaling", () => {
-    h.connection = {
+  it("renders context management for its own composer tab", () => {
+    seedTab("tab-a", 71)
+    h.connections.set("tab-a", {
       agentType: "claude_code",
       usage: { used: 274_000, size: 1_000_000 },
       contextManagement: fixtureManagement(),
-    }
-    h.sessionStats = {
+    })
+    h.sessionStats.set(71, {
       total_usage: {
         input_tokens: 12_000,
         output_tokens: 3_000,
@@ -152,9 +194,9 @@ describe("StatusBarTokens", () => {
       },
       total_tokens: 20_000,
       total_duration_ms: 1_000,
-    }
+    })
 
-    render(<StatusBarTokens />)
+    render(<ComposerContextUsage tabId="tab-a" />)
 
     expect(screen.getAllByText("27.4%").length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText("274K / 1M")).toBeInTheDocument()
@@ -166,5 +208,30 @@ describe("StatusBarTokens", () => {
     expect(screen.getByText("opus")).toBeInTheDocument()
     expect(screen.getByText("12K")).toBeInTheDocument()
     expect(screen.getByText("20K")).toBeInTheDocument()
+  })
+
+  it("keeps tiled composer context scoped to each tab", () => {
+    seedTab("tab-a", 71)
+    seedTab("tab-b", 72)
+    h.connections.set("tab-a", {
+      agentType: "claude_code",
+      usage: { used: 100_000, size: 1_000_000 },
+      contextManagement: fixtureManagement(),
+    })
+    h.connections.set("tab-b", {
+      agentType: "claude_code",
+      usage: { used: 900_000, size: 1_000_000 },
+      contextManagement: fixtureManagement(),
+    })
+
+    render(
+      <>
+        <ComposerContextUsage tabId="tab-a" />
+        <ComposerContextUsage tabId="tab-b" />
+      </>
+    )
+
+    expect(screen.getAllByText("10.0%").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText("90.0%").length).toBeGreaterThanOrEqual(1)
   })
 })

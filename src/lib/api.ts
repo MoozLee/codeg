@@ -30,8 +30,10 @@ import type {
   LiveSessionSnapshot,
   FeedbackItem,
   QuestionAnswer,
+  AcpAgentEditableConfig,
   AcpAgentInfo,
   AcpAgentStatus,
+  AgentDiagnosticsReport,
   MaintenanceCommand,
   MaintenanceCommandResult,
   GrokStructuredConfig,
@@ -346,10 +348,23 @@ export async function acpListAgents(): Promise<AcpAgentInfo[]> {
   return getTransport().call("acp_list_agents")
 }
 
+export async function acpGetAgentEditableConfig(
+  agentType: AgentType
+): Promise<AcpAgentEditableConfig> {
+  return getTransport().call("acp_get_agent_editable_config", { agentType })
+}
+
 export async function acpGetAgentStatus(
   agentType: AgentType
 ): Promise<AcpAgentStatus> {
   return getTransport().call("acp_get_agent_status", { agentType })
+}
+
+// Run environment diagnostics for an agent (or a base env report when omitted).
+export async function acpEnvDiagnostics(
+  agentType?: AgentType
+): Promise<AgentDiagnosticsReport> {
+  return getTransport().call("acp_env_diagnostics", { agentType })
 }
 
 export async function acpClearBinaryCache(agentType: AgentType): Promise<void> {

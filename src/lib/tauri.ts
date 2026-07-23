@@ -10,6 +10,7 @@ import type {
   AgentStats,
   SidebarData,
   ConnectionInfo,
+  AcpAgentEditableConfig,
   AcpAgentInfo,
   AcpAgentStatus,
   MaintenanceCommand,
@@ -195,6 +196,12 @@ export async function acpListConnections(): Promise<ConnectionInfo[]> {
 
 export async function acpListAgents(): Promise<AcpAgentInfo[]> {
   return invoke("acp_list_agents")
+}
+
+export async function acpGetAgentEditableConfig(
+  agentType: AgentType
+): Promise<AcpAgentEditableConfig> {
+  return invoke("acp_get_agent_editable_config", { agentType })
 }
 
 export async function acpGetAgentStatus(

@@ -4141,10 +4141,9 @@ mod tests {
             result.is_err(),
             "should error when folder_id is not provided for a new conversation row"
         );
-        let err_str = result.unwrap_err().to_string();
-        assert!(
-            err_str.contains("folder_id"),
-            "error should mention missing folder_id, got: {err_str}"
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Agent operation failed. Check Agent Settings and diagnostics."
         );
     }
 
@@ -5393,9 +5392,9 @@ mod tests {
             .await
             .expect_err("fork against a missing row must error");
         let _ = join.await;
-        assert!(
-            err.to_string().contains("not found"),
-            "error should mention the missing row, got: {err}"
+        assert_eq!(
+            err.to_string(),
+            "Agent operation failed. Check Agent Settings and diagnostics."
         );
 
         // No orphan: the failed transaction rolled back, so the DB holds zero
@@ -5442,9 +5441,9 @@ mod tests {
             .await
             .expect_err("fork against a soft-deleted row must error");
         let _ = join.await;
-        assert!(
-            err.to_string().contains("not found") || err.to_string().contains("deleted"),
-            "error should mention the missing/deleted row, got: {err}"
+        assert_eq!(
+            err.to_string(),
+            "Agent operation failed. Check Agent Settings and diagnostics."
         );
 
         // No resurrection: exactly the original row remains, still soft-deleted,
@@ -5487,9 +5486,9 @@ mod tests {
             .fork_session(&db, "c-unbound", None, None)
             .await
             .expect_err("unbound fork must error");
-        assert!(
-            err.to_string().contains("linked conversation row"),
-            "error should mention missing linkage, got: {err}"
+        assert_eq!(
+            err.to_string(),
+            "Agent operation failed. Check Agent Settings and diagnostics."
         );
     }
 
