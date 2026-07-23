@@ -1524,7 +1524,57 @@
         "output": "出力",
         "cacheRead": "キャッシュ読み取り",
         "cacheWrite": "キャッシュ書き込み",
-        "total": "合計"
+        "total": "合計",
+        "contextSource": "使用量ソース",
+        "contextMaxSource": "上限ソース",
+        "source": {
+          "live": "ライブ使用量",
+          "history": "履歴統計"
+        },
+        "maxSource": {
+          "live": "Agent 報告上限",
+          "configured": "設定済み自動圧縮ウィンドウ",
+          "history": "履歴統計",
+          "unknown": "不明"
+        },
+        "contextLevel": {
+          "unknown": "コンテキスト使用量は不明です。",
+          "normal": "コンテキスト使用量は正常です。",
+          "high": "コンテキスト使用量が高くなっています。",
+          "critical": "コンテキストウィンドウが上限に近づいています。"
+        },
+        "contextManagement": "コンテキスト管理",
+        "agentType": "Agent",
+        "configuredModel": "設定モデル",
+        "selectorModel": "ACP セレクターモデル",
+        "unknown": "不明",
+        "enabled": "有効",
+        "disabled": "無効",
+        "autoCompaction": "自動圧縮",
+        "autoCompactionThreshold": "トリガーしきい値",
+        "configuredContextWindowMax": "設定済み自動圧縮ウィンドウ",
+        "runtimeContextWindowMax": "ランタイム報告ウィンドウ",
+        "contextWindowClampedWarning": "設定は {configured} ですが、ランタイムは {runtime} のみを報告しています。ランタイム/モデル制限により実効ウィンドウが下がる可能性があります。",
+        "compactionSupport": "圧縮サポート",
+        "compactionStatus": "圧縮状態",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "設定環境変数",
+          "agent_config_env": "config.env",
+          "agent_root_config": "ルート設定"
+        },
+        "compactionSupportState": {
+          "unknown": "不明",
+          "unsupported": "未対応",
+          "agent_managed": "Agent 管理",
+          "native_managed": "Claude Code ネイティブ管理"
+        },
+        "compactionStatusState": {
+          "idle": "アイドル",
+          "triggered": "トリガー済み",
+          "running": "実行中",
+          "completed": "完了",
+          "failed": "失敗"
+        }
       }
     },
     "auxPanel": {

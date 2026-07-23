@@ -215,7 +215,7 @@ interface MessageInputProps {
   configOptionsLoading?: boolean
   selectedModeId?: string | null
   onModeChange?: (modeId: string) => void
-  onConfigOptionChange?: (configId: string, valueId: string) => void
+  onConfigOptionChange?: (configId: string, value: string | boolean) => void
   agentType?: AgentType | null
   availableCommands?: AvailableCommandInfo[] | null
   promptCapabilities: PromptCapabilitiesInfo
@@ -525,6 +525,7 @@ export function MessageInput({
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
   const tQueue = useTranslations("Folder.chat.messageQueue")
+  const tStatusTokens = useTranslations("Folder.statusBar.tokens")
   // Kept as a separate binding from `t` so its call sites — exclusively
   // upload / attachment toasts — read as a single coherent group when
   // scanning the file. Same namespace, no extra runtime cost.
@@ -2737,7 +2738,19 @@ export function MessageInput({
     const result: SessionSelectorSetting[] = []
     if (hasConfigOptions) {
       for (const option of availableConfigOptions) {
-        if (option.kind.type !== "select") continue
+        if (option.kind.type === "boolean") {
+          result.push({
+            type: "boolean",
+            key: `config:${option.id}`,
+            title: option.name,
+            currentValue: option.kind.current_value,
+            currentLabel: option.kind.current_value
+              ? tStatusTokens("enabled")
+              : tStatusTokens("disabled"),
+            onSelect: (value) => onConfigOptionChange?.(option.id, value),
+          })
+          continue
+        }
         const kind = option.kind
         // Model values that carry a `provider/` prefix group by provider; every
         // other option keeps its server groups or stays flat (`null` derived).
@@ -2835,6 +2848,7 @@ export function MessageInput({
     onConfigOptionChange,
     handleModeSelect,
     t,
+    tStatusTokens,
   ])
 
   const actionButtons = isEditingQueueItem ? (

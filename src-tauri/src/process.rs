@@ -153,7 +153,7 @@ pub fn ensure_node_in_path() {
 
     if let Some(bin_dir) = find_node_bin_dir(home.as_deref()) {
         prepend_to_path(&bin_dir);
-        tracing::info!("[PATH] node not in PATH, prepended {}", bin_dir.display());
+        tracing::info!("[PATH] node not in PATH; prepended a version-manager directory");
     }
 }
 
@@ -161,7 +161,7 @@ pub fn ensure_node_in_path() {
 /// within each manager, WITHOUT checking which actually contains a `node`
 /// binary — the caller decides. Read-only: never mutates PATH. Used by
 /// [`find_node_bin_dir`] (which takes the first candidate that has `node`) and
-/// by env diagnostics (which reports every candidate + whether it has `node`).
+/// by env diagnostics (which reports only aggregate candidate counts).
 ///
 /// `home` may be `None` in minimal environments (Docker, systemd without HOME).
 /// When `None`, only version managers whose location is determined by an
@@ -587,8 +587,7 @@ mod tests {
         // `next_line()` loop would abort here and drop "third"; this must not.
         let data = b"first\n\xff\xfe garbage\nthird\n".to_vec();
         let mut seen: Vec<String> = Vec::new();
-        let collected =
-            collect_lines_lossy(Cursor::new(data), |l| seen.push(l.to_string())).await;
+        let collected = collect_lines_lossy(Cursor::new(data), |l| seen.push(l.to_string())).await;
 
         assert_eq!(seen.len(), 3, "all three lines emitted: {seen:?}");
         assert_eq!(seen[0], "first");
@@ -608,8 +607,7 @@ mod tests {
         // newline is still emitted (then EOF stops the loop).
         let data = b"a\r\nb\r\nno-newline".to_vec();
         let mut seen: Vec<String> = Vec::new();
-        let collected =
-            collect_lines_lossy(Cursor::new(data), |l| seen.push(l.to_string())).await;
+        let collected = collect_lines_lossy(Cursor::new(data), |l| seen.push(l.to_string())).await;
 
         assert_eq!(seen, vec!["a", "b", "no-newline"]);
         assert_eq!(collected, "a\nb\nno-newline");
@@ -619,8 +617,7 @@ mod tests {
     async fn collect_lines_lossy_empty_input_yields_nothing() {
         let mut seen: Vec<String> = Vec::new();
         let collected =
-            collect_lines_lossy(Cursor::new(Vec::<u8>::new()), |l| seen.push(l.to_string()))
-                .await;
+            collect_lines_lossy(Cursor::new(Vec::<u8>::new()), |l| seen.push(l.to_string())).await;
 
         assert!(seen.is_empty());
         assert!(collected.is_empty());

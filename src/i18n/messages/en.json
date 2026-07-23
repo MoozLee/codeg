@@ -1524,7 +1524,57 @@
         "output": "Output",
         "cacheRead": "Cache Read",
         "cacheWrite": "Cache Write",
-        "total": "Total"
+        "total": "Total",
+        "contextSource": "Usage source",
+        "contextMaxSource": "Max source",
+        "source": {
+          "live": "Live usage",
+          "history": "History stats"
+        },
+        "maxSource": {
+          "live": "Agent reported max",
+          "configured": "Configured auto-compact window",
+          "history": "History stats",
+          "unknown": "Unknown"
+        },
+        "contextLevel": {
+          "unknown": "Context usage is unknown.",
+          "normal": "Context usage is normal.",
+          "high": "Context usage is high. Consider compacting soon.",
+          "critical": "Context window is near the limit."
+        },
+        "contextManagement": "Context Management",
+        "agentType": "Agent",
+        "configuredModel": "Configured model",
+        "selectorModel": "ACP selector model",
+        "unknown": "Unknown",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "autoCompaction": "Auto-compaction",
+        "autoCompactionThreshold": "Trigger threshold",
+        "configuredContextWindowMax": "Configured auto-compact window",
+        "runtimeContextWindowMax": "Runtime reported window",
+        "contextWindowClampedWarning": "Configured {configured}, but runtime reports only {runtime}. The runtime/model limit may cap the active window.",
+        "compactionSupport": "Compaction support",
+        "compactionStatus": "Compaction status",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "Configured env",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root config"
+        },
+        "compactionSupportState": {
+          "unknown": "Unknown",
+          "unsupported": "Unsupported",
+          "agent_managed": "Agent-managed",
+          "native_managed": "Claude Code native"
+        },
+        "compactionStatusState": {
+          "idle": "Idle",
+          "triggered": "Triggered",
+          "running": "Running",
+          "completed": "Completed",
+          "failed": "Failed"
+        }
       }
     },
     "auxPanel": {

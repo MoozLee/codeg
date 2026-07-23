@@ -167,4 +167,23 @@ describe("InlineSessionConfigSelector — model grouping", () => {
     // No provider headers for an ungroupable flat list.
     expect(screen.queryByText("anthropic")).toBeNull()
   })
+
+  it("renders boolean config as a toggle and emits a boolean", async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(
+      <InlineSessionConfigSelector
+        option={{
+          id: "auto_compact",
+          name: "Auto compact",
+          category: null,
+          kind: { type: "boolean", current_value: false },
+        }}
+        onSelect={onSelect}
+      />
+    )
+
+    await user.click(screen.getByRole("switch", { name: "Auto compact" }))
+    expect(onSelect).toHaveBeenCalledWith("auto_compact", true)
+  })
 })
