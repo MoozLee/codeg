@@ -871,8 +871,9 @@ export const HERMES_PROVIDERS: HermesProviderOption[] = [
 ]
 
 /**
- * Normalized Hermes config projection returned in `AcpAgentInfo.config_json`
- * for `agent_type === "hermes"` (parsed from ~/.hermes/.env + config.yaml).
+ * Normalized Hermes config projection returned in
+ * `AcpAgentEditableConfig.config_json` for `agent_type === "hermes"` (parsed
+ * from ~/.hermes/.env + config.yaml).
  */
 export interface HermesLocalConfig {
   provider?: string
@@ -1031,7 +1032,13 @@ export interface SessionConfigSelectInfo {
   groups: SessionConfigSelectGroupInfo[]
 }
 
-export type SessionConfigKindInfo = { type: "select" } & SessionConfigSelectInfo
+export interface SessionConfigBooleanInfo {
+  current_value: boolean
+}
+
+export type SessionConfigKindInfo =
+  | ({ type: "select" } & SessionConfigSelectInfo)
+  | ({ type: "boolean" } & SessionConfigBooleanInfo)
 
 export interface SessionConfigOptionInfo {
   id: string
@@ -1674,7 +1681,9 @@ export interface ConversationConnectionInfo {
   event_seq: number
 }
 
-// ACP agent info returned by acp_list_agents
+// Safe ACP agent metadata returned by acp_list_agents. The list is shared by
+// chat, sidebar, and skills surfaces, so editable configuration is fetched only
+// after explicit selection in ACP Settings.
 export interface AcpAgentInfo {
   agent_type: AgentType
   registry_id: string
@@ -1686,30 +1695,25 @@ export interface AcpAgentInfo {
   enabled: boolean
   sort_order: number
   installed_version: string | null
+  pi_uses_custom_agent_dir: boolean
+  model_provider_id: number | null
+}
+
+// Editable native and saved configuration returned only by
+// acp_get_agent_editable_config for the currently selected settings agent.
+export interface AcpAgentEditableConfig {
+  agent_type: AgentType
   env: Record<string, string>
   config_json: string | null
-  config_file_path: string | null
   opencode_auth_json: string | null
   codex_auth_json: string | null
   codex_config_toml: string | null
-  /** Compact structured codex model-catalog source (the custom-model list),
-   *  round-tripped into the settings editor. Codex + api-key mode only. */
   codex_model_catalog: string | null
-  cline_secrets_json: string | null
-  /** Raw ~/.hermes/config.yaml text, for the Hermes panel's advanced editor. */
   hermes_config_yaml: string | null
-  /** Raw ~/.grok/config.toml text, for the Grok panel's config-file editor. */
   grok_config_toml: string | null
-  /** Parsed scalar settings backing the Grok panel's structured controls. Only
-   * populated for the Grok agent; derived from grok_config_toml. */
   grok_settings: GrokSettings | null
-  /** Raw ~/.cursor/cli-config.json text, for the Cursor panel's advanced view. */
   cursor_cli_config_json: string | null
-  /** Parsed scalar settings backing the Cursor panel's structured controls
-   * (sandbox / permission rules; the Run Everything permission mode is a
-   * launch flag, not a config key). Cursor agent only. */
   cursor_settings: CursorSettings | null
-  model_provider_id: number | null
 }
 
 /** Parsed keys from ~/.grok/config.toml. `null` means the key is absent.
@@ -1801,12 +1805,52 @@ export interface CursorModelsResult {
   error: string | null
 }
 
-// Lightweight agent status returned by acp_get_agent_status
+export type ConfiguredModelSource =
+  | "agent_env"
+  | "agent_config_env"
+  | "agent_root_config"
+
+export type ContextWindowMaxSource =
+  | "agent_env"
+  | "agent_config_env"
+  | "agent_root_config"
+
+/** Backend-owned allowlist of context-management runtime settings. */
+export interface ContextRuntimeConfigInfo {
+  configured_model: string | null
+  configured_model_source: ConfiguredModelSource | null
+  configured_context_window_max_tokens: number | null
+  context_window_max_source: ContextWindowMaxSource | null
+  auto_compaction_enabled: boolean | null
+  auto_compaction_threshold: number | null
+  native_auto_compact_window: number | null
+}
+
+// Lightweight agent status returned by acp_get_agent_status. Raw environment
+// variables and native config documents are intentionally absent.
 export interface AcpAgentStatus {
   agent_type: AgentType
   available: boolean
   enabled: boolean
   installed_version: string | null
+  context_runtime_config: ContextRuntimeConfigInfo
+}
+
+export type MaintenanceCommand = "/compact" | "/summarize"
+
+export type MaintenanceCommandOutcome =
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "stale"
+
+export interface MaintenanceCommandResult {
+  operation_id: string
+  connection_id: string
+  session_id: string
+  stop_reason: string | null
+  outcome: MaintenanceCommandOutcome
+  error: string | null
 }
 
 // Environment diagnostics (returned by acp_env_diagnostics). Mirrors the Rust

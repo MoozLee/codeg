@@ -185,6 +185,40 @@ describe("MessageInput (RichComposer integration)", () => {
     expect(card.className).toContain("codeg-composer-chrome")
     expect(fireEvent.mouseDown(card)).toBe(false)
   })
+
+  it("keeps reserved maintenance commands out of slash autocomplete", async () => {
+    renderInput({
+      availableCommands: [
+        { name: "compact", description: "Compact context", input_hint: null },
+        {
+          name: "summarize",
+          description: "Summarize context",
+          input_hint: null,
+        },
+        { name: "commit", description: "Create a commit", input_hint: null },
+      ],
+    })
+    await waitFor(
+      () => expect(composerHandle.current?.getEditor()).toBeTruthy(),
+      { timeout: 5000 }
+    )
+
+    act(() => {
+      composerHandle.current?.getEditor().commands.insertContent("/")
+    })
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /\/commit/ })
+      ).toBeInTheDocument()
+    )
+    expect(
+      screen.queryByRole("button", { name: /\/compact/ })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /\/summarize/ })
+    ).not.toBeInTheDocument()
+  })
 })
 
 describe("MessageInput attach-to-chat insertion position", () => {
@@ -413,6 +447,34 @@ describe("MessageInput collapsed selectors popover", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: settingsLabel })).toBeNull()
     )
+  })
+
+  it("toggles a boolean config option from the cog Popover", async () => {
+    const user = userEvent.setup()
+    const onConfigOptionChange = vi.fn()
+    const autoCompact: SessionConfigOptionInfo = {
+      id: "auto_compact",
+      name: "Auto compact",
+      description: null,
+      category: null,
+      kind: { type: "boolean", current_value: false },
+    }
+    const { container } = renderInput({
+      configOptions: [autoCompact],
+      onConfigOptionChange,
+    })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+
+    const settingsLabel = enMessages.Folder.chat.messageInput.agentSettings
+    await user.click(screen.getByRole("button", { name: settingsLabel }))
+    const popover = await screen.findByRole("dialog", { name: settingsLabel })
+    await user.click(
+      within(popover).getByRole("switch", { name: "Auto compact" })
+    )
+
+    expect(onConfigOptionChange).toHaveBeenCalledWith("auto_compact", true)
   })
 
   it("groups model values by their provider prefix in the cog Popover", async () => {
