@@ -10,11 +10,14 @@ use sea_orm::{
     TransactionTrait,
 };
 
-use crate::acp::connection::{spawn_agent_connection, AgentConnection, ConnectionCommand};
+use crate::acp::connection::{
+    spawn_agent_connection, AgentConnection, ConnectionCommand, MaintenancePromptOrigin,
+    PromptOrigin, SessionConfigCommandValue,
+};
 use crate::acp::error::AcpError;
 use crate::acp::feedback::{
-    bounded_feedback_batch, FeedbackItem, FeedbackStatus, PendingFeedback,
-    SessionFeedbackAccess, MAX_FEEDBACK_CHARS, MAX_FEEDBACK_RESPONSE_BYTES,
+    bounded_feedback_batch, FeedbackItem, FeedbackStatus, PendingFeedback, SessionFeedbackAccess,
+    MAX_FEEDBACK_CHARS, MAX_FEEDBACK_RESPONSE_BYTES,
 };
 use crate::acp::question::{
     build_outcome, QuestionAnswer, QuestionOutcome, QuestionSpec, RegisteredQuestion,
@@ -22,7 +25,7 @@ use crate::acp::question::{
 };
 use crate::acp::types::{
     AcpEvent, AgentOptionsSnapshot, ConfigStaleKind, ConnectionInfo, ConnectionStatus,
-    ForkResultInfo, PromptInputBlock,
+    ForkResultInfo, MaintenanceCommandOutcome, MaintenanceCommandResult, PromptInputBlock,
 };
 use crate::db::entities::conversation::{self, ConversationKind, ConversationStatus};
 use crate::db::service::conversation_service;
@@ -101,6 +104,40 @@ fn delegation_child_title_seed(blocks: &[PromptInputBlock]) -> Option<String> {
         None
     } else {
         Some(crate::parsers::title_from_user_text(trimmed))
+    }
+}
+
+fn normalize_maintenance_command(command: &str) -> Option<String> {
+    let name = command.trim().trim_start_matches('/').to_ascii_lowercase();
+    matches!(name.as_str(), "compact" | "summarize").then(|| format!("/{name}"))
+}
+
+/// Only the internal maintenance path may send an exact standalone command.
+/// User prompts with arguments remain normal agent prompts.
+fn is_reserved_maintenance_user_prompt(blocks: &[PromptInputBlock]) -> bool {
+    let [PromptInputBlock::Text { text }] = blocks else {
+        return false;
+    };
+    let command = text.trim();
+    normalize_maintenance_command(command)
+        .is_some_and(|normalized| normalized.eq_ignore_ascii_case(command))
+}
+
+fn maintenance_result(
+    operation_id: &str,
+    connection_id: &str,
+    session_id: &str,
+    outcome: MaintenanceCommandOutcome,
+    stop_reason: Option<String>,
+    error: Option<&str>,
+) -> MaintenanceCommandResult {
+    MaintenanceCommandResult {
+        operation_id: operation_id.to_string(),
+        connection_id: connection_id.to_string(),
+        session_id: session_id.to_string(),
+        stop_reason,
+        outcome,
+        error: error.map(str::to_string),
     }
 }
 
@@ -425,7 +462,9 @@ impl ConnectionManager {
         let connection_id = uuid::Uuid::new_v4().to_string();
         tracing::info!(
             "[ACP] spawning connection id={} owner_window={} agent={:?}",
-            connection_id, owner_window_label, agent_type
+            connection_id,
+            owner_window_label,
+            agent_type
         );
 
         // `spawn_agent_connection` inserts the entry into `self.connections`,
@@ -593,7 +632,12 @@ impl ConnectionManager {
             }
         }
         for (state, emitter, stale) in targets {
-            emit_with_state(&state, &emitter, AcpEvent::SessionConfigStale { stale, kind }).await;
+            emit_with_state(
+                &state,
+                &emitter,
+                AcpEvent::SessionConfigStale { stale, kind },
+            )
+            .await;
         }
         stale_count
     }
@@ -656,6 +700,7 @@ impl ConnectionManager {
         conn_id: &str,
         blocks: Vec<PromptInputBlock>,
         user_message: Option<(String, Vec<crate::acp::UserMessageBlock>)>,
+        origin: PromptOrigin,
     ) -> Result<(), AcpError> {
         // Reject an empty prompt BEFORE touching the concurrency gate. An empty
         // prompt produces no turn — and thus no `TurnComplete` to clear the gate
@@ -666,6 +711,11 @@ impl ConnectionManager {
         if blocks.is_empty() {
             return Err(AcpError::protocol(
                 "prompt must contain at least one content block".to_string(),
+            ));
+        }
+        if matches!(&origin, PromptOrigin::User) && is_reserved_maintenance_user_prompt(&blocks) {
+            return Err(AcpError::protocol(
+                "Standalone context maintenance commands are reserved".to_string(),
             ));
         }
         let (cmd_tx, state_arc) = {
@@ -695,6 +745,25 @@ impl ConnectionManager {
             .map_err(|_| AcpError::ProcessExited)?;
         {
             let mut s = state_arc.write().await;
+            if let PromptOrigin::Maintenance(maintenance) = &origin {
+                let command_matches_blocks = matches!(
+                    blocks.as_slice(),
+                    [PromptInputBlock::Text { text }] if text == &maintenance.command
+                );
+                let command_is_advertised = s.available_commands.iter().any(|candidate| {
+                    normalize_maintenance_command(&candidate.name).as_deref()
+                        == Some(maintenance.command.as_str())
+                });
+                if s.external_id.as_deref() != Some(maintenance.session_id.as_str())
+                    || s.status != ConnectionStatus::Connected
+                    || !command_is_advertised
+                    || !command_matches_blocks
+                {
+                    return Err(AcpError::protocol(
+                        "Maintenance session changed before command start".to_string(),
+                    ));
+                }
+            }
             if s.turn_in_flight {
                 return Err(AcpError::TurnInProgress);
             }
@@ -703,6 +772,7 @@ impl ConnectionManager {
         permit.send(ConnectionCommand::Prompt {
             blocks,
             user_message,
+            origin,
         });
         Ok(())
     }
@@ -728,7 +798,150 @@ impl ConnectionManager {
     ) -> Result<(), AcpError> {
         let prompt_lock = self.clone_prompt_lock(conn_id).await?;
         let _guard = prompt_lock.lock_owned().await;
-        self.send_prompt_inner(conn_id, blocks, None).await
+        self.send_prompt_inner(conn_id, blocks, None, PromptOrigin::User)
+            .await
+    }
+
+    /// Run one allowlisted slash command as an internal maintenance turn. This
+    /// bypasses conversation linking and user-message events, and waits for the
+    /// connection loop's operation-correlated stop outcome.
+    pub async fn run_maintenance_command(
+        &self,
+        db: &AppDatabase,
+        connection_id: String,
+        session_id: String,
+        operation_id: String,
+        command: String,
+    ) -> Result<MaintenanceCommandResult, AcpError> {
+        let fail = |message: &'static str| {
+            maintenance_result(
+                &operation_id,
+                &connection_id,
+                &session_id,
+                MaintenanceCommandOutcome::Failed,
+                None,
+                Some(message),
+            )
+        };
+        if operation_id.trim().is_empty() {
+            return Ok(fail("Maintenance operation id is required"));
+        }
+        if session_id.trim().is_empty() {
+            return Ok(fail("Maintenance session id is required"));
+        }
+        let Some(command) = normalize_maintenance_command(&command) else {
+            return Ok(fail("Unsupported maintenance command"));
+        };
+
+        let prompt_lock = match self.clone_prompt_lock(&connection_id).await {
+            Ok(lock) => lock,
+            Err(_) => return Ok(fail("Maintenance connection was not found")),
+        };
+        let prompt_guard = prompt_lock.lock_owned().await;
+
+        let conversation_id = {
+            let connections = self.connections.lock().await;
+            let Some(connection) = connections.get(&connection_id) else {
+                return Ok(fail("Maintenance connection was not found"));
+            };
+            let snapshot = connection.state.read().await;
+            if snapshot.external_id.as_deref() != Some(session_id.as_str()) {
+                return Ok(fail(
+                    "Maintenance session does not match the active connection",
+                ));
+            }
+            if snapshot.status != ConnectionStatus::Connected || snapshot.turn_in_flight {
+                return Ok(fail("Maintenance connection is not ready"));
+            }
+            let command_is_advertised = snapshot.available_commands.iter().any(|candidate| {
+                normalize_maintenance_command(&candidate.name).as_deref() == Some(command.as_str())
+            });
+            if !command_is_advertised {
+                return Ok(fail("Maintenance command was not advertised by the agent"));
+            }
+            snapshot.conversation_id
+        };
+
+        let Some(conversation_id) = conversation_id else {
+            return Ok(fail(
+                "Maintenance connection is not bound to a conversation",
+            ));
+        };
+        let conversation = conversation::Entity::find_by_id(conversation_id)
+            .one(&db.conn)
+            .await
+            .map_err(|_| AcpError::protocol("Unable to validate maintenance session"))?;
+        let Some(conversation) = conversation else {
+            return Ok(fail("Maintenance conversation was not found"));
+        };
+        if conversation.parent_id.is_some() || conversation.kind == ConversationKind::Delegate {
+            return Ok(fail(
+                "Maintenance commands are disabled for delegation sessions",
+            ));
+        }
+
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+        let origin = PromptOrigin::Maintenance(MaintenancePromptOrigin {
+            operation_id: operation_id.clone(),
+            session_id: session_id.clone(),
+            command: command.clone(),
+            completion_tx,
+        });
+        let blocks = vec![PromptInputBlock::Text { text: command }];
+        if self
+            .send_prompt_inner(&connection_id, blocks, None, origin)
+            .await
+            .is_err()
+        {
+            return Ok(fail("Maintenance command could not be started"));
+        }
+        drop(prompt_guard);
+
+        let completion = completion_rx.await.ok();
+        let identity_is_current = {
+            let connections = self.connections.lock().await;
+            match connections.get(&connection_id) {
+                Some(connection) => {
+                    let current = connection.state.read().await;
+                    current.external_id.as_deref() == Some(session_id.as_str())
+                }
+                None => false,
+            }
+        };
+        if !identity_is_current {
+            return Ok(maintenance_result(
+                &operation_id,
+                &connection_id,
+                &session_id,
+                MaintenanceCommandOutcome::Stale,
+                None,
+                None,
+            ));
+        }
+
+        let Some(completion) = completion else {
+            return Ok(fail(
+                "Maintenance command did not return a completion result",
+            ));
+        };
+        if completion.operation_id != operation_id || completion.session_id != session_id {
+            return Ok(maintenance_result(
+                &operation_id,
+                &connection_id,
+                &session_id,
+                MaintenanceCommandOutcome::Stale,
+                None,
+                None,
+            ));
+        }
+        Ok(maintenance_result(
+            &operation_id,
+            &connection_id,
+            &session_id,
+            completion.outcome,
+            completion.stop_reason,
+            completion.error.as_deref(),
+        ))
     }
 
     /// Send a prompt while ensuring a `Conversation` DB row is bound to this
@@ -798,6 +1011,11 @@ impl ConnectionManager {
         if blocks.is_empty() {
             return Err(AcpError::protocol(
                 "prompt must contain at least one content block".to_string(),
+            ));
+        }
+        if is_reserved_maintenance_user_prompt(&blocks) {
+            return Err(AcpError::protocol(
+                "Standalone context maintenance commands are reserved".to_string(),
             ));
         }
         // Caller-supplied conversation_id requires folder_id (we include it in
@@ -1071,7 +1289,10 @@ impl ConnectionManager {
         // for a prompt that never reached the agent, so without this the
         // lifecycle subscriber's PendingReview write also never fires and the
         // row would be stuck until a follow-up `send_prompt_linked` re-flipped it.
-        match self.send_prompt_inner(conn_id, blocks, user_message).await {
+        match self
+            .send_prompt_inner(conn_id, blocks, user_message, PromptOrigin::User)
+            .await
+        {
             Ok(()) => {
                 // The prompt reached the agent: surface it to the chat-channel
                 // "user message" event feed. Notification-only — never gates the
@@ -1139,20 +1360,29 @@ impl ConnectionManager {
         &self,
         conn_id: &str,
         config_id: String,
-        value_id: String,
+        value: SessionConfigCommandValue,
     ) -> Result<(), AcpError> {
-        let cmd_tx = {
+        let (cmd_tx, state) = {
             let connections = self.connections.lock().await;
             let conn = connections
                 .get(conn_id)
                 .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
-            conn.cmd_tx.clone()
+            (conn.cmd_tx.clone(), Arc::clone(&conn.state))
         };
+        let advertised = state
+            .read()
+            .await
+            .config_options
+            .as_ref()
+            .and_then(|options| options.iter().find(|option| option.id == config_id))
+            .is_some_and(|option| value.is_advertised_by(option));
+        if !advertised {
+            return Err(AcpError::protocol(format!(
+                "Invalid or unadvertised session config option '{config_id}'"
+            )));
+        }
         cmd_tx
-            .send(ConnectionCommand::SetConfigOption {
-                config_id,
-                value_id,
-            })
+            .send(ConnectionCommand::SetConfigOption { config_id, value })
             .await
             .map_err(|_| AcpError::ProcessExited)
     }
@@ -1401,7 +1631,9 @@ impl ConnectionManager {
             // Surface failures even when the caller is gone (the detached task's
             // Result would otherwise be dropped silently).
             if let Err(ref e) = outcome {
-                tracing::error!("[ACP][ERROR] fork persistence failed (conn={conn_id_for_task}): {e}");
+                tracing::error!(
+                    "[ACP][ERROR] fork persistence failed (conn={conn_id_for_task}): {e}"
+                );
             }
             outcome
         });
@@ -1778,7 +2010,8 @@ impl ConnectionManager {
         }
         tracing::info!(
             "[ACP] disconnect by owner window owner_window={} count={}",
-            owner_window_label, disconnected
+            owner_window_label,
+            disconnected
         );
         disconnected
     }
@@ -1820,8 +2053,7 @@ impl ConnectionManager {
         let mut out = Vec::new();
         for (id, conn) in connections.iter() {
             let state = conn.state.read().await;
-            let (Some(conversation_id), Some(folder_id)) =
-                (state.conversation_id, state.folder_id)
+            let (Some(conversation_id), Some(folder_id)) = (state.conversation_id, state.folder_id)
             else {
                 continue;
             };
@@ -1920,11 +2152,8 @@ impl ConnectionManager {
         if !state.read().await.feedback_tool_available {
             return Err(AcpError::FeedbackDisabled);
         }
-        let item = FeedbackItem::new_pending(
-            uuid::Uuid::new_v4().to_string(),
-            text,
-            chrono::Utc::now(),
-        );
+        let item =
+            FeedbackItem::new_pending(uuid::Uuid::new_v4().to_string(), text, chrono::Utc::now());
         // Gate on `turn_in_flight` and append in ONE critical section (via the
         // gated emit): a `TurnComplete` (flips the flag) or `UserMessage`
         // (clears `feedback`) can't slip between the gate and the append+seq, so
@@ -2106,7 +2335,12 @@ impl ConnectionManager {
         state: &std::sync::Arc<tokio::sync::RwLock<crate::acp::SessionState>>,
         emitter: &EventEmitter,
     ) -> bool {
-        if self.pending_questions.lock().await.contains_key(question_id) {
+        if self
+            .pending_questions
+            .lock()
+            .await
+            .contains_key(question_id)
+        {
             return false;
         }
         emit_with_state(
@@ -2144,7 +2378,9 @@ impl ConnectionManager {
         // (peer-close) at the same instant; the resolved-event below still clears
         // the card.
         let _ = entry.sender.send(outcome);
-        if let Some((state, emitter)) = self.get_state_and_emitter(&entry.parent_connection_id).await
+        if let Some((state, emitter)) = self
+            .get_state_and_emitter(&entry.parent_connection_id)
+            .await
         {
             emit_with_state(
                 &state,
@@ -2169,7 +2405,9 @@ impl ConnectionManager {
         let Some(entry) = removed else {
             return;
         };
-        if let Some((state, emitter)) = self.get_state_and_emitter(&entry.parent_connection_id).await
+        if let Some((state, emitter)) = self
+            .get_state_and_emitter(&entry.parent_connection_id)
+            .await
         {
             emit_with_state(
                 &state,
@@ -2487,10 +2725,7 @@ pub struct ConnectionManagerFeedbackLookup {
 
 #[async_trait::async_trait]
 impl SessionFeedbackAccess for ConnectionManagerFeedbackLookup {
-    async fn read_pending_feedback(
-        &self,
-        parent_connection_id: &str,
-    ) -> Vec<PendingFeedback> {
+    async fn read_pending_feedback(&self, parent_connection_id: &str) -> Vec<PendingFeedback> {
         self.manager
             .read_pending_feedback(parent_connection_id)
             .await
@@ -2550,6 +2785,41 @@ mod tests {
     use tokio::sync::{broadcast, mpsc, RwLock};
 
     #[test]
+    fn maintenance_command_normalization_is_strictly_allowlisted() {
+        assert_eq!(
+            normalize_maintenance_command("/compact").as_deref(),
+            Some("/compact")
+        );
+        assert_eq!(
+            normalize_maintenance_command(" SUMMARIZE ").as_deref(),
+            Some("/summarize")
+        );
+        assert_eq!(normalize_maintenance_command("/login"), None);
+        assert_eq!(normalize_maintenance_command("/compact now"), None);
+        assert_eq!(normalize_maintenance_command(""), None);
+    }
+
+    #[test]
+    fn reserves_only_exact_standalone_maintenance_user_commands() {
+        let text = |text: &str| vec![PromptInputBlock::Text { text: text.into() }];
+
+        assert!(is_reserved_maintenance_user_prompt(&text(" /COMPACT ")));
+        assert!(is_reserved_maintenance_user_prompt(&text("/summarize")));
+        assert!(!is_reserved_maintenance_user_prompt(&text("compact")));
+        assert!(!is_reserved_maintenance_user_prompt(&text(
+            "/compact this text"
+        )));
+        assert!(!is_reserved_maintenance_user_prompt(&[
+            PromptInputBlock::Text {
+                text: "/compact".into(),
+            },
+            PromptInputBlock::Text {
+                text: "more".into(),
+            },
+        ]));
+    }
+
+    #[test]
     fn is_reserved_turn_id_matches_only_the_parser_namespace() {
         // Rejected: the parsers' `turn-<digits>` ids (an untrusted client id of
         // this shape would collide with a persisted transcript turn).
@@ -2588,6 +2858,326 @@ mod tests {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn maintenance_command_rejections_return_safe_failed_results() {
+        use crate::db::test_helpers;
+
+        let db = test_helpers::fresh_in_memory_db().await;
+        let manager = ConnectionManager::new();
+
+        let unsupported = manager
+            .run_maintenance_command(
+                &db,
+                "missing".to_string(),
+                "session".to_string(),
+                "operation".to_string(),
+                "/login".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unsupported.outcome, MaintenanceCommandOutcome::Failed);
+        assert_eq!(
+            unsupported.error.as_deref(),
+            Some("Unsupported maintenance command")
+        );
+
+        let missing = manager
+            .run_maintenance_command(
+                &db,
+                "missing".to_string(),
+                "session".to_string(),
+                "operation".to_string(),
+                "/compact".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing.outcome, MaintenanceCommandOutcome::Failed);
+        assert_eq!(
+            missing.error.as_deref(),
+            Some("Maintenance connection was not found")
+        );
+
+        let connection = fake_connection("connection", None);
+        connection.state.write().await.external_id = Some("active-session".to_string());
+        manager
+            .connections
+            .lock()
+            .await
+            .insert("connection".to_string(), connection);
+
+        let wrong_session = manager
+            .run_maintenance_command(
+                &db,
+                "connection".to_string(),
+                "stale-session".to_string(),
+                "operation".to_string(),
+                "/compact".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrong_session.outcome, MaintenanceCommandOutcome::Failed);
+        assert_eq!(
+            wrong_session.error.as_deref(),
+            Some("Maintenance session does not match the active connection")
+        );
+
+        let state = manager.get_state("connection").await.unwrap();
+        state.write().await.status = ConnectionStatus::Prompting;
+        let not_ready = manager
+            .run_maintenance_command(
+                &db,
+                "connection".to_string(),
+                "active-session".to_string(),
+                "operation".to_string(),
+                "/compact".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(not_ready.outcome, MaintenanceCommandOutcome::Failed);
+        assert_eq!(
+            not_ready.error.as_deref(),
+            Some("Maintenance connection is not ready")
+        );
+        state.write().await.status = ConnectionStatus::Connected;
+
+        let unadvertised = manager
+            .run_maintenance_command(
+                &db,
+                "connection".to_string(),
+                "active-session".to_string(),
+                "operation".to_string(),
+                "/compact".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unadvertised.outcome, MaintenanceCommandOutcome::Failed);
+        assert_eq!(
+            unadvertised.error.as_deref(),
+            Some("Maintenance command was not advertised by the agent")
+        );
+
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/maintenance-child").await;
+        let parent_id =
+            test_helpers::seed_conversation(&db, folder_id, AgentType::ClaudeCode).await;
+        let child = conversation_service::create_with_delegation(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            None,
+            None,
+            Some(crate::acp::delegation::spawner::DelegationLink {
+                parent_conversation_id: parent_id,
+                parent_tool_use_id: "tool-use".to_string(),
+                delegation_call_id: "delegation-call".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        let state = manager.get_state("connection").await.unwrap();
+        {
+            let mut state = state.write().await;
+            state.conversation_id = Some(child.id);
+            state.available_commands = vec![crate::acp::types::AvailableCommandInfo {
+                name: "compact".to_string(),
+                description: "Compact context".to_string(),
+                input_hint: None,
+            }];
+        }
+        let delegated = manager
+            .run_maintenance_command(
+                &db,
+                "connection".to_string(),
+                "active-session".to_string(),
+                "operation".to_string(),
+                "/compact".to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delegated.outcome, MaintenanceCommandOutcome::Failed);
+        assert_eq!(
+            delegated.error.as_deref(),
+            Some("Maintenance commands are disabled for delegation sessions")
+        );
+    }
+
+    #[tokio::test]
+    async fn maintenance_command_enqueues_private_correlated_prompt() {
+        use crate::acp::connection::MaintenanceTurnCompletion;
+        use crate::acp::types::AvailableCommandInfo;
+        use crate::db::test_helpers;
+
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/maintenance-root").await;
+        let conversation_id =
+            test_helpers::seed_conversation(&db, folder_id, AgentType::ClaudeCode).await;
+        let manager = ConnectionManager::new();
+        let mut cmd_rx = insert_live_connection(
+            &manager,
+            "connection",
+            AgentType::ClaudeCode,
+            Some(PathBuf::from("/tmp/maintenance-root")),
+        )
+        .await;
+        let state = manager.get_state("connection").await.unwrap();
+        {
+            let mut state = state.write().await;
+            state.external_id = Some("session".to_string());
+            state.conversation_id = Some(conversation_id);
+            state.available_commands = vec![AvailableCommandInfo {
+                name: "compact".to_string(),
+                description: "Compact context".to_string(),
+                input_hint: None,
+            }];
+        }
+
+        let mut run = Box::pin(manager.run_maintenance_command(
+            &db,
+            "connection".to_string(),
+            "session".to_string(),
+            "operation".to_string(),
+            "/compact".to_string(),
+        ));
+        let command = tokio::select! {
+            command = cmd_rx.recv() => command.expect("maintenance prompt enqueued"),
+            result = &mut run => panic!("maintenance returned before completion: {result:?}"),
+        };
+        let ConnectionCommand::Prompt {
+            blocks,
+            user_message,
+            origin,
+        } = command
+        else {
+            panic!("expected maintenance prompt");
+        };
+        assert!(user_message.is_none());
+        assert!(matches!(
+            blocks.as_slice(),
+            [PromptInputBlock::Text { text }] if text == "/compact"
+        ));
+        let PromptOrigin::Maintenance(origin) = origin else {
+            panic!("maintenance prompt must carry maintenance origin");
+        };
+        assert_eq!(origin.operation_id, "operation");
+        assert_eq!(origin.session_id, "session");
+        assert_eq!(origin.command, "/compact");
+        origin
+            .completion_tx
+            .send(MaintenanceTurnCompletion {
+                operation_id: "operation".to_string(),
+                session_id: "session".to_string(),
+                stop_reason: Some("end_turn".to_string()),
+                outcome: MaintenanceCommandOutcome::Completed,
+                error: None,
+            })
+            .expect("completion receiver remains live");
+
+        let result = run.await.unwrap();
+        assert_eq!(result.operation_id, "operation");
+        assert_eq!(result.connection_id, "connection");
+        assert_eq!(result.session_id, "session");
+        assert_eq!(result.stop_reason.as_deref(), Some("end_turn"));
+        assert_eq!(result.outcome, MaintenanceCommandOutcome::Completed);
+        assert_eq!(result.error, None);
+    }
+
+    #[tokio::test]
+    async fn maintenance_enqueue_rechecks_session_identity_atomically() {
+        use crate::acp::types::AvailableCommandInfo;
+
+        let manager = ConnectionManager::new();
+        let mut cmd_rx = insert_live_connection(
+            &manager,
+            "connection",
+            AgentType::ClaudeCode,
+            Some(PathBuf::from("/tmp/maintenance-root")),
+        )
+        .await;
+        let state = manager.get_state("connection").await.unwrap();
+        {
+            let mut state = state.write().await;
+            state.external_id = Some("replacement-session".to_string());
+            state.available_commands = vec![AvailableCommandInfo {
+                name: "compact".to_string(),
+                description: "Compact context".to_string(),
+                input_hint: None,
+            }];
+        }
+        let (completion_tx, _completion_rx) = tokio::sync::oneshot::channel();
+
+        let result = manager
+            .send_prompt_inner(
+                "connection",
+                vec![PromptInputBlock::Text {
+                    text: "/compact".to_string(),
+                }],
+                None,
+                PromptOrigin::Maintenance(MaintenancePromptOrigin {
+                    operation_id: "operation".to_string(),
+                    session_id: "stale-session".to_string(),
+                    command: "/compact".to_string(),
+                    completion_tx,
+                }),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            cmd_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(!state.read().await.turn_in_flight);
+    }
+
+    #[tokio::test]
+    async fn user_prompt_cannot_enqueue_reserved_maintenance_command() {
+        let manager = ConnectionManager::new();
+        let mut cmd_rx = insert_live_connection(
+            &manager,
+            "connection",
+            AgentType::ClaudeCode,
+            Some(PathBuf::from("/tmp/maintenance-root")),
+        )
+        .await;
+        let state = manager.get_state("connection").await.unwrap();
+
+        let rejected = manager
+            .send_prompt_inner(
+                "connection",
+                vec![PromptInputBlock::Text {
+                    text: "/compact".to_string(),
+                }],
+                None,
+                PromptOrigin::User,
+            )
+            .await;
+
+        assert!(matches!(rejected, Err(AcpError::Protocol(_))));
+        assert!(matches!(
+            cmd_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(!state.read().await.turn_in_flight);
+
+        let accepted = manager
+            .send_prompt_inner(
+                "connection",
+                vec![PromptInputBlock::Text {
+                    text: "/compact this text".to_string(),
+                }],
+                None,
+                PromptOrigin::User,
+            )
+            .await;
+        assert!(accepted.is_ok());
+        assert!(matches!(
+            cmd_rx.recv().await,
+            Some(ConnectionCommand::Prompt {
+                origin: PromptOrigin::User,
+                ..
+            })
+        ));
     }
 
     /// Build a broadcaster + subscribed receiver. Subscribing here (not lazily
@@ -2940,6 +3530,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_prompt_linked_rejects_reserved_maintenance_without_side_effects() {
+        // The user-facing linked path must reject the private maintenance
+        // protocol before it creates a conversation, marks it InProgress, or
+        // emits/enqueues any user turn. A parameterized command stays user text.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/um-reserved").await;
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-um-reserved";
+        let mut cmd_rx = insert_live_connection(
+            &mgr,
+            conn_id,
+            AgentType::ClaudeCode,
+            Some(PathBuf::from("/tmp/um-reserved")),
+        )
+        .await;
+
+        let rows_before = count_conversation_rows(&db).await;
+        let reserved = mgr
+            .send_prompt_linked(
+                &db,
+                conn_id,
+                vec![PromptInputBlock::Text {
+                    text: "/compact".into(),
+                }],
+                Some(folder_id),
+                None,
+                None,
+            )
+            .await;
+        assert!(matches!(reserved, Err(AcpError::Protocol(_))));
+        assert_eq!(
+            count_conversation_rows(&db).await,
+            rows_before,
+            "a reserved command must not create or link a conversation row"
+        );
+        assert!(matches!(
+            cmd_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(
+            !mgr.get_state(conn_id)
+                .await
+                .unwrap()
+                .read()
+                .await
+                .turn_in_flight,
+            "a reserved command must not set the concurrency gate"
+        );
+
+        let parameterized = mgr
+            .send_prompt_linked(
+                &db,
+                conn_id,
+                vec![PromptInputBlock::Text {
+                    text: "/compact this text".into(),
+                }],
+                Some(folder_id),
+                None,
+                None,
+            )
+            .await;
+        assert!(parameterized.is_ok());
+        assert_eq!(
+            drain_prompt_user_messages(&mut cmd_rx).len(),
+            1,
+            "the parameterized user prompt must reach the connection loop"
+        );
+    }
+
+    #[tokio::test]
     async fn send_prompt_returns_turn_in_progress_when_busy() {
         // The non-linked `send_prompt` path (used by the chat channel) must
         // surface `TurnInProgress` — NOT a connection-loss error — when a turn
@@ -3190,6 +3851,7 @@ mod tests {
                     text: "filler".into(),
                 }],
                 user_message: None,
+                origin: PromptOrigin::User,
             })
             .await
             .unwrap();
@@ -3202,6 +3864,7 @@ mod tests {
                 text: "blocked".into(),
             }],
             None,
+            PromptOrigin::User,
         );
         let res = tokio::time::timeout(std::time::Duration::from_millis(50), fut).await;
         assert!(
@@ -3426,10 +4089,10 @@ mod tests {
         // Empty / whitespace / image-only prompts seed no title (stays NULL,
         // backfilled on first detail load as before).
         assert!(delegation_child_title_seed(&[]).is_none());
-        assert!(
-            delegation_child_title_seed(&[PromptInputBlock::Text { text: "  \n ".into() }])
-                .is_none()
-        );
+        assert!(delegation_child_title_seed(&[PromptInputBlock::Text {
+            text: "  \n ".into()
+        }])
+        .is_none());
         let img = vec![PromptInputBlock::Image {
             data: "x".into(),
             mime_type: "image/png".into(),
@@ -3640,10 +4303,9 @@ mod tests {
             result.is_err(),
             "should error when folder_id is not provided for a new conversation row"
         );
-        let err_str = result.unwrap_err().to_string();
-        assert!(
-            err_str.contains("folder_id"),
-            "error should mention missing folder_id, got: {err_str}"
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Agent operation failed. Check Agent Settings and diagnostics."
         );
     }
 
@@ -4758,7 +5420,10 @@ mod tests {
         .unwrap();
         let (mgr, join) =
             manager_with_fake_fork("c-restack", pre.id, "session-S2", "session-S1").await;
-        let result = mgr.fork_session(&db, "c-restack", None, None).await.unwrap();
+        let result = mgr
+            .fork_session(&db, "c-restack", None, None)
+            .await
+            .unwrap();
         let _ = join.await;
 
         let current = conversation_service::get_by_id(&db.conn, pre.id)
@@ -4889,9 +5554,9 @@ mod tests {
             .await
             .expect_err("fork against a missing row must error");
         let _ = join.await;
-        assert!(
-            err.to_string().contains("not found"),
-            "error should mention the missing row, got: {err}"
+        assert_eq!(
+            err.to_string(),
+            "Agent operation failed. Check Agent Settings and diagnostics."
         );
 
         // No orphan: the failed transaction rolled back, so the DB holds zero
@@ -4938,9 +5603,9 @@ mod tests {
             .await
             .expect_err("fork against a soft-deleted row must error");
         let _ = join.await;
-        assert!(
-            err.to_string().contains("not found") || err.to_string().contains("deleted"),
-            "error should mention the missing/deleted row, got: {err}"
+        assert_eq!(
+            err.to_string(),
+            "Agent operation failed. Check Agent Settings and diagnostics."
         );
 
         // No resurrection: exactly the original row remains, still soft-deleted,
@@ -4983,9 +5648,9 @@ mod tests {
             .fork_session(&db, "c-unbound", None, None)
             .await
             .expect_err("unbound fork must error");
-        assert!(
-            err.to_string().contains("linked conversation row"),
-            "error should mention missing linkage, got: {err}"
+        assert_eq!(
+            err.to_string(),
+            "Agent operation failed. Check Agent Settings and diagnostics."
         );
     }
 
@@ -5370,7 +6035,11 @@ mod tests {
         let at_bound = "y".repeat(MAX_FEEDBACK_CHARS);
         assert!(mgr.submit_feedback("c1", at_bound).await.is_ok());
         let state = mgr.get_state("c1").await.unwrap();
-        assert_eq!(state.read().await.feedback.len(), 1, "only the valid note stuck");
+        assert_eq!(
+            state.read().await.feedback.len(),
+            1,
+            "only the valid note stuck"
+        );
     }
 
     // --- ask_user_question: register / answer / cancel -------------------
@@ -5581,7 +6250,12 @@ mod tests {
         // The first is still the pending one and still answerable.
         let state = mgr.get_state("cc2").await.unwrap();
         assert_eq!(
-            state.read().await.pending_question.as_ref().map(|p| p.question_id.clone()),
+            state
+                .read()
+                .await
+                .pending_question
+                .as_ref()
+                .map(|p| p.question_id.clone()),
             Some(first.question_id.clone())
         );
         mgr.answer_question(
@@ -5617,12 +6291,7 @@ mod tests {
         assert_eq!(texts, vec!["a", "b"]);
         // A second read still returns them — read is non-destructive, so an
         // abandoned (peer-closed) call leaves the notes retryable.
-        assert_eq!(
-            mgr.read_pending_feedback("c1")
-                .await
-                .len(),
-            2
-        );
+        assert_eq!(mgr.read_pending_feedback("c1").await.len(), 2);
         {
             let state = mgr.get_state("c1").await.unwrap();
             assert!(state
@@ -5637,10 +6306,7 @@ mod tests {
         mgr.commit_feedback_delivered("c1", vec![a.id.clone(), b.id.clone()])
             .await;
         // Now READ returns nothing (delivered notes are filtered out).
-        assert!(mgr
-            .read_pending_feedback("c1")
-            .await
-            .is_empty());
+        assert!(mgr.read_pending_feedback("c1").await.is_empty());
         let state = mgr.get_state("c1").await.unwrap();
         assert!(state
             .read()
@@ -5656,12 +6322,9 @@ mod tests {
     #[tokio::test]
     async fn read_pending_missing_connection_returns_empty() {
         let mgr = ConnectionManager::new();
-        assert!(mgr
-            .read_pending_feedback("nope")
-            .await
-            .is_empty());
+        assert!(mgr.read_pending_feedback("nope").await.is_empty());
         // Commit on a missing connection is a safe no-op.
-        mgr.commit_feedback_delivered("nope", vec!["x".into()]).await;
+        mgr.commit_feedback_delivered("nope", vec!["x".into()])
+            .await;
     }
-
 }

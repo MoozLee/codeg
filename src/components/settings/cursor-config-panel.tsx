@@ -41,7 +41,11 @@ import {
   acpCursorListModels,
   acpUpdateAgentConfig,
 } from "@/lib/api"
-import type { AcpAgentInfo, CursorAuthStatus } from "@/lib/types"
+import type {
+  AcpAgentEditableConfig,
+  AcpAgentInfo,
+  CursorAuthStatus,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const CURSOR_API_KEY_ENV = "CURSOR_API_KEY"
@@ -222,10 +226,10 @@ export function CursorConfigPanel({
   onSaved,
   onAffectedSessions,
 }: {
-  agent: AcpAgentInfo
+  agent: AcpAgentInfo & AcpAgentEditableConfig
   saving: boolean
   onSaveEnv: (env: Record<string, string>, enabled: boolean) => Promise<unknown>
-  onSaved: () => void
+  onSaved: () => Promise<void>
   /** Reports how many running sessions a cli-config.json write marked
    * restart-required (the env step reports its own count internally). */
   onAffectedSessions: (count: number) => void
@@ -426,8 +430,8 @@ export function CursorConfigPanel({
         await onSaveEnv(prevEnv, agent.enabled).catch(() => {})
         throw e
       }
+      await onSaved()
       toast.success(t("toasts.cursorSaved"))
-      onSaved()
     } catch (e) {
       toast.error(
         `${t("toasts.saveCursorConfigFailed")}: ${
@@ -461,8 +465,8 @@ export function CursorConfigPanel({
         cursor_cli_config_json: rawConfig,
       })
       onAffectedSessions(affected)
+      await onSaved()
       toast.success(t("toasts.cursorSaved"))
-      onSaved()
     } catch (e) {
       toast.error(
         `${t("toasts.saveCursorConfigFailed")}: ${

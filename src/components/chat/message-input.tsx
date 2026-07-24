@@ -149,6 +149,7 @@ import {
   saveMessageInputDraftV2,
 } from "@/lib/message-input-draft"
 import { rankByTextMatch } from "@/lib/fuzzy-text-match"
+import { isMaintenanceCommandName } from "@/lib/acp-context-management"
 import {
   RichComposer,
   type RichComposerHandle,
@@ -215,7 +216,7 @@ interface MessageInputProps {
   configOptionsLoading?: boolean
   selectedModeId?: string | null
   onModeChange?: (modeId: string) => void
-  onConfigOptionChange?: (configId: string, valueId: string) => void
+  onConfigOptionChange?: (configId: string, value: string | boolean) => void
   agentType?: AgentType | null
   availableCommands?: AvailableCommandInfo[] | null
   promptCapabilities: PromptCapabilitiesInfo
@@ -525,6 +526,7 @@ export function MessageInput({
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
   const tQueue = useTranslations("Folder.chat.messageQueue")
+  const tStatusTokens = useTranslations("Folder.statusBar.tokens")
   // Kept as a separate binding from `t` so its call sites — exclusively
   // upload / attachment toasts — read as a single coherent group when
   // scanning the file. Same namespace, no extra runtime cost.
@@ -996,11 +998,9 @@ export function MessageInput({
 
   // ── Slash command autocomplete ──
   //
-  // The slash list shows the agent's own `availableCommands` verbatim —
-  // experts are advertised as commands and now appear here alongside the
-  // rest. Codex additionally gets a `$`-triggered skills list (experts are
-  // symlinked skills, so they surface there) because its native command set
-  // is very small.
+  // Keep application-owned maintenance commands private. All other agent
+  // commands, including experts, remain available here. Codex additionally gets a
+  // `$`-triggered skills list because its native command set is very small.
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   // The trigger char (`/` for agent commands, `$` for Codex skills) and the
@@ -1011,7 +1011,10 @@ export function MessageInput({
   )
   const [slashFilter, setSlashFilter] = useState("")
   const slashCommands = useMemo(
-    () => availableCommands ?? [],
+    () =>
+      (availableCommands ?? []).filter(
+        (command) => !isMaintenanceCommandName(command.name)
+      ),
     [availableCommands]
   )
   const [slashDropdownOpen, setSlashDropdownOpen] = useState(false)
@@ -2737,7 +2740,19 @@ export function MessageInput({
     const result: SessionSelectorSetting[] = []
     if (hasConfigOptions) {
       for (const option of availableConfigOptions) {
-        if (option.kind.type !== "select") continue
+        if (option.kind.type === "boolean") {
+          result.push({
+            type: "boolean",
+            key: `config:${option.id}`,
+            title: option.name,
+            currentValue: option.kind.current_value,
+            currentLabel: option.kind.current_value
+              ? tStatusTokens("enabled")
+              : tStatusTokens("disabled"),
+            onSelect: (value) => onConfigOptionChange?.(option.id, value),
+          })
+          continue
+        }
         const kind = option.kind
         // Model values that carry a `provider/` prefix group by provider; every
         // other option keeps its server groups or stays flat (`null` derived).
@@ -2835,6 +2850,7 @@ export function MessageInput({
     onConfigOptionChange,
     handleModeSelect,
     t,
+    tStatusTokens,
   ])
 
   const actionButtons = isEditingQueueItem ? (

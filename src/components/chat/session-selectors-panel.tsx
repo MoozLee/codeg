@@ -5,6 +5,7 @@ import { Check } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DropdownRadioItemContent } from "@/components/chat/dropdown-radio-item-content"
 import { ModelOptionList } from "@/components/chat/model-option-list"
+import { Switch } from "@/components/ui/switch"
 
 // One selectable value within a setting (e.g. a single model or mode).
 export interface SessionSelectorOption {
@@ -29,18 +30,32 @@ export interface SessionSelectorSearch {
   empty: string
 }
 
-// One setting shown in the left rail (a config option, or the mode picker).
-export interface SessionSelectorSetting {
+interface SessionSelectorSettingBase {
   key: string
   title: string
-  currentValue: string
   currentLabel: string
+}
+
+// One select setting shown in the left rail (a config option, or the mode picker).
+export interface SessionSelectorSelectSetting extends SessionSelectorSettingBase {
+  type?: "select"
+  currentValue: string
   groups: SessionSelectorGroup[]
   onSelect: (value: string) => void
   /** When set, the detail pane renders a searchable + virtualized list instead
    *  of the plain button list — used for long model lists that otherwise jank. */
   search?: SessionSelectorSearch
 }
+
+export interface SessionSelectorBooleanSetting extends SessionSelectorSettingBase {
+  type: "boolean"
+  currentValue: boolean
+  onSelect: (value: boolean) => void
+}
+
+export type SessionSelectorSetting =
+  | SessionSelectorSelectSetting
+  | SessionSelectorBooleanSetting
 
 interface SessionSelectorsPanelProps {
   settings: SessionSelectorSetting[]
@@ -123,7 +138,23 @@ export function SessionSelectorsPanel({
           the bug we're fixing. So: plain buttons (full native Tab/Enter/Space
           operability) with `aria-current` marking the chosen value — the same,
           honest pattern as the left rail. */}
-      {active.search ? (
+      {active.type === "boolean" ? (
+        <div
+          role="group"
+          aria-label={active.title}
+          className="flex min-w-0 flex-1 items-start justify-between gap-3 px-3 py-2"
+        >
+          <span className="min-w-0 text-sm font-medium">{active.title}</span>
+          <Switch
+            checked={active.currentValue}
+            onCheckedChange={(value) => {
+              active.onSelect(value)
+              onAfterSelect?.()
+            }}
+            aria-label={active.title}
+          />
+        </div>
+      ) : active.search ? (
         // Long model lists: a searchable + virtualized list (its own scroller),
         // so no surrounding `overflow-y-auto` wrapper here.
         <div className="flex min-w-0 flex-1 flex-col pl-1">
