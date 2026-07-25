@@ -118,8 +118,17 @@ mod tests {
         let desktop_endpoint = config
             .pointer("/plugins/updater/endpoints/0")
             .and_then(serde_json::Value::as_str);
+        let updater_pubkey = config
+            .pointer("/plugins/updater/pubkey")
+            .and_then(serde_json::Value::as_str);
 
         assert_eq!(desktop_endpoint, Some(UPDATE_MANIFEST_URL));
+        assert_eq!(
+            updater_pubkey,
+            Some(
+                "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ1RDg5QzNGOTQ1NDA3MDcKUldRSEIxU1VQNXpZUllJa1NzRnR4dW1jODAvZmcyMnhPNU5CZG1Td1Bwb09MNWtLQnNHQWdHc2sK"
+            )
+        );
         assert_eq!(
             UPDATE_MANIFEST_URL.strip_suffix("/latest.json"),
             Some(RELEASE_DOWNLOAD_BASE)
