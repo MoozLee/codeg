@@ -1529,7 +1529,57 @@
         "output": "Sortie",
         "cacheRead": "Lecture cache",
         "cacheWrite": "Écriture cache",
-        "total": "Total des tokens"
+        "total": "Total des tokens",
+        "contextSource": "Source d’utilisation",
+        "contextMaxSource": "Source du maximum",
+        "source": {
+          "live": "Utilisation en direct",
+          "history": "Statistiques historiques"
+        },
+        "maxSource": {
+          "live": "Maximum signalé par l’Agent",
+          "configured": "Fenêtre d’auto-compactage configurée",
+          "history": "Statistiques historiques",
+          "unknown": "Inconnu"
+        },
+        "contextLevel": {
+          "unknown": "L'utilisation du contexte est inconnue.",
+          "normal": "L'utilisation du contexte est normale.",
+          "high": "L'utilisation du contexte est élevée.",
+          "critical": "La fenêtre de contexte est proche de la limite."
+        },
+        "contextManagement": "Gestion du contexte",
+        "agentType": "Agent",
+        "configuredModel": "Modèle configuré",
+        "selectorModel": "Modèle du sélecteur ACP",
+        "unknown": "Inconnu",
+        "enabled": "Activé",
+        "disabled": "Désactivé",
+        "autoCompaction": "Compactage automatique",
+        "autoCompactionThreshold": "Seuil de déclenchement",
+        "configuredContextWindowMax": "Fenêtre d’auto-compactage configurée",
+        "runtimeContextWindowMax": "Fenêtre signalée par le runtime",
+        "contextWindowClampedWarning": "Configuré à {configured}, mais le runtime ne signale que {runtime}. La limite du runtime/modèle peut réduire la fenêtre active.",
+        "compactionSupport": "Prise en charge du compactage",
+        "compactionStatus": "État du compactage",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "Environnement configuré",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Configuration racine"
+        },
+        "compactionSupportState": {
+          "unknown": "Inconnu",
+          "unsupported": "Non pris en charge",
+          "agent_managed": "Géré par Agent",
+          "native_managed": "Gestion native de Claude Code"
+        },
+        "compactionStatusState": {
+          "idle": "Inactif",
+          "triggered": "Déclenché",
+          "running": "En cours",
+          "completed": "Terminé",
+          "failed": "Échec"
+        }
       }
     },
     "auxPanel": {

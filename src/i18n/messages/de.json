@@ -1529,7 +1529,57 @@
         "output": "Ausgabe",
         "cacheRead": "Cache lesen",
         "cacheWrite": "Cache schreiben",
-        "total": "Gesamt"
+        "total": "Gesamt",
+        "contextSource": "Nutzungsquelle",
+        "contextMaxSource": "Maximalwertquelle",
+        "source": {
+          "live": "Live-Nutzung",
+          "history": "Verlaufsstatistik"
+        },
+        "maxSource": {
+          "live": "Vom Agent gemeldetes Maximum",
+          "configured": "Konfiguriertes Auto-Compact-Fenster",
+          "history": "Verlaufsstatistik",
+          "unknown": "Unbekannt"
+        },
+        "contextLevel": {
+          "unknown": "Kontextnutzung ist unbekannt.",
+          "normal": "Kontextnutzung ist normal.",
+          "high": "Kontextnutzung ist hoch.",
+          "critical": "Das Kontextfenster ist nahe am Limit."
+        },
+        "contextManagement": "Kontextverwaltung",
+        "agentType": "Agent",
+        "configuredModel": "Konfiguriertes Modell",
+        "selectorModel": "ACP-Auswahlmodell",
+        "unknown": "Unbekannt",
+        "enabled": "Aktiviert",
+        "disabled": "Deaktiviert",
+        "autoCompaction": "Automatische Kompaktierung",
+        "autoCompactionThreshold": "Auslöseschwelle",
+        "configuredContextWindowMax": "Konfiguriertes Auto-Compact-Fenster",
+        "runtimeContextWindowMax": "Vom Runtime gemeldetes Fenster",
+        "contextWindowClampedWarning": "Konfiguriert sind {configured}, aber die Runtime meldet nur {runtime}. Das Runtime-/Modelllimit kann das aktive Fenster begrenzen.",
+        "compactionSupport": "Kompaktierungsunterstützung",
+        "compactionStatus": "Kompaktierungsstatus",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "Konfigurierte Umgebung",
+          "agent_config_env": "config.env",
+          "agent_root_config": "Root-Konfiguration"
+        },
+        "compactionSupportState": {
+          "unknown": "Unbekannt",
+          "unsupported": "Nicht unterstützt",
+          "agent_managed": "Agent-verwaltet",
+          "native_managed": "Nativ von Claude Code verwaltet"
+        },
+        "compactionStatusState": {
+          "idle": "Leerlauf",
+          "triggered": "Ausgelöst",
+          "running": "Läuft",
+          "completed": "Abgeschlossen",
+          "failed": "Fehlgeschlagen"
+        }
       }
     },
     "auxPanel": {

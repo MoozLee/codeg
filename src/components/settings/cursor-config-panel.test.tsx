@@ -14,7 +14,7 @@ import {
   acpCursorListModels,
   acpUpdateAgentConfig,
 } from "@/lib/api"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentEditableConfig, AcpAgentInfo } from "@/lib/types"
 import enMessages from "@/i18n/messages/en.json"
 
 vi.mock("@/lib/api", () => ({
@@ -135,12 +135,12 @@ describe("CursorConfigPanel", () => {
     onAffectedSessions?: ReturnType<typeof vi.fn>
   }) {
     const onSaveEnv = overrides?.onSaveEnv ?? vi.fn().mockResolvedValue(0)
-    const onSaved = overrides?.onSaved ?? vi.fn()
+    const onSaved = overrides?.onSaved ?? vi.fn().mockResolvedValue(undefined)
     const onAffectedSessions = overrides?.onAffectedSessions ?? vi.fn()
     const agent = {
       ...baseAgent,
       env: overrides?.env ?? baseAgent.env,
-    } as unknown as AcpAgentInfo
+    } as unknown as AcpAgentInfo & AcpAgentEditableConfig
     render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
         <CursorConfigPanel
@@ -267,6 +267,29 @@ describe("CursorConfigPanel", () => {
       CURSOR_AUTH_MODE: "subscription",
       CURSOR_FORCE: "1",
     })
+  })
+
+  it("keeps save controls disabled until the selected editor cache refreshes", async () => {
+    let completeRefresh = () => {}
+    const onSaved = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          completeRefresh = resolve
+        })
+    )
+    renderPanel({ onSaved })
+    await screen.findByText(enMessages.AcpAgentSettings.cursor.authNotInstalled)
+
+    const saveButton = screen.getByRole("button", {
+      name: enMessages.AcpAgentSettings.cursor.saveConfig,
+    })
+    fireEvent.click(saveButton)
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+    expect(saveButton).toBeDisabled()
+
+    completeRefresh()
+    await waitFor(() => expect(saveButton).not.toBeDisabled())
   })
 
   it("respects an explicit CURSOR_FORCE=0 (Ask before running) instead of defaulting on", async () => {

@@ -1,13 +1,15 @@
 use serde::Serialize;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(thiserror::Error)]
 pub enum AcpError {
-    #[error("agent process failed to spawn: {0}")]
+    #[error("Agent process could not be started. Check Agent Settings and diagnostics.")]
     SpawnFailed(String),
-    #[error("connection not found: {0}")]
+    #[error("Connection was not found.")]
     ConnectionNotFound(String),
-    #[error("ACP protocol error: {0}")]
+    #[error("Agent operation failed. Check Agent Settings and diagnostics.")]
     Protocol(String),
+    #[error("Agent is disabled in settings.")]
+    AgentDisabled,
     #[error("agent process exited unexpectedly")]
     ProcessExited,
     /// A prompt arrived while this connection already had a turn in flight.
@@ -34,13 +36,13 @@ pub enum AcpError {
     /// The submitted feedback note is empty or exceeds the per-note size bound.
     /// The full text rides in the broadcast event + snapshot + MCP response, so
     /// a sanity bound keeps a single pathological note from bloating them.
-    #[error("invalid feedback: {0}")]
+    #[error("Feedback is invalid.")]
     InvalidFeedback(String),
-    #[error("binary download failed: {0}")]
+    #[error("Agent download failed. Check Agent Settings and diagnostics.")]
     DownloadFailed(String),
-    #[error("platform not supported: {0}")]
+    #[error("This agent is not supported on the current platform.")]
     PlatformNotSupported(String),
-    #[error("{0}")]
+    #[error("Agent runtime is not installed. Install it from Agent Settings.")]
     SdkNotInstalled(String),
     #[error("Agent did not respond to Initialize within 60 seconds. The cached binary may be outdated or incompatible. Try upgrading it from Agent Settings.")]
     InitializeTimeout,
@@ -48,31 +50,38 @@ pub enum AcpError {
     ProbeTimedOut,
 }
 
+impl std::fmt::Debug for AcpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AcpError")
+            .field("code", &self.code())
+            .field("message", &self.to_string())
+            .finish()
+    }
+}
+
 impl AcpError {
+    /// Convert arbitrary protocol text to a safe, stable message. Agent stderr,
+    /// file paths, and provider responses must not enter API errors or logs.
     pub fn protocol(raw: impl Into<String>) -> Self {
         let raw = raw.into();
-        let sanitized = sanitize_protocol_message(&raw);
-
-        if is_executable_format_error(&sanitized) {
-            return Self::Protocol(
-                "Agent executable appears incompatible or corrupted. Please retry to re-download it."
-                    .into(),
-            );
-        }
-
-        Self::Protocol(sanitized)
+        let message = if is_executable_format_error(&raw) {
+            "Agent executable appears incompatible or corrupted. Please retry to re-download it."
+        } else {
+            "Agent operation failed. Check Agent Settings and diagnostics."
+        };
+        Self::Protocol(message.into())
     }
 
     /// Stable machine-readable identifier for this error kind.
     ///
-    /// Returned to the frontend alongside the human-readable message so
-    /// the UI can render a localized message based on the code instead
-    /// of parsing English text. `None` means "no stable code — show the
-    /// raw message as a fallback".
+    /// Returned to the frontend alongside the human-readable message so the UI
+    /// can render a localized message based on the code instead of parsing
+    /// English text.
     pub fn code(&self) -> Option<&'static str> {
         match self {
             Self::SdkNotInstalled(_) => Some("sdk_not_installed"),
             Self::PlatformNotSupported(_) => Some("platform_not_supported"),
+            Self::AgentDisabled => Some("agent_disabled"),
             Self::InitializeTimeout => Some("initialize_timeout"),
             Self::ProbeTimedOut => Some("probe_timed_out"),
             Self::ProcessExited => Some("process_exited"),
@@ -83,7 +92,7 @@ impl AcpError {
             Self::SpawnFailed(_) => Some("spawn_failed"),
             Self::DownloadFailed(_) => Some("download_failed"),
             Self::ConnectionNotFound(_) => Some("connection_not_found"),
-            Self::Protocol(_) => None,
+            Self::Protocol(_) => Some("protocol_error"),
         }
     }
 }
@@ -97,26 +106,6 @@ impl Serialize for AcpError {
     }
 }
 
-fn sanitize_protocol_message(raw: &str) -> String {
-    let without_spawned_at = regex::Regex::new(r#"\s*,?\s*"spawned_at"\s*:\s*"[^"]*"\s*,?"#)
-        .ok()
-        .map(|re| re.replace_all(raw, "").into_owned())
-        .unwrap_or_else(|| raw.to_string());
-
-    let without_dangling_comma = regex::Regex::new(r#",\s*([}\]])"#)
-        .ok()
-        .map(|re| re.replace_all(&without_spawned_at, "$1").into_owned())
-        .unwrap_or(without_spawned_at);
-
-    regex::Regex::new(r#"/(?:Users|home)/[^"\s]+"#)
-        .ok()
-        .map(|re| {
-            re.replace_all(&without_dangling_comma, "<local-path>")
-                .into_owned()
-        })
-        .unwrap_or(without_dangling_comma)
-}
-
 fn is_executable_format_error(message: &str) -> bool {
     let lowered = message.to_lowercase();
     lowered.contains("malformed mach-o file")
@@ -124,4 +113,32 @@ fn is_executable_format_error(message: &str) -> bool {
         || lowered.contains("bad cpu type in executable")
         || lowered.contains("not a valid win32 application")
         || lowered.contains("is not a valid application for this os platform")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_error_forms_exclude_dynamic_details() {
+        let path = "/Users/diagnostics-sensitive/private/config.json";
+        let token = "diagnostics-token-secret";
+        let errors = [
+            AcpError::protocol(format!("agent stderr at {path}: {token}")),
+            AcpError::SpawnFailed(format!("failed to spawn {path}: {token}")),
+            AcpError::DownloadFailed(format!("download {token} to {path}")),
+            AcpError::InvalidFeedback(format!("feedback: {token}")),
+            AcpError::AgentDisabled,
+        ];
+
+        for error in errors {
+            let serialized = serde_json::to_string(&error).unwrap();
+            let debug = format!("{error:?}");
+            for sensitive in [path, token] {
+                assert!(!error.to_string().contains(sensitive));
+                assert!(!serialized.contains(sensitive));
+                assert!(!debug.contains(sensitive));
+            }
+        }
+    }
 }
