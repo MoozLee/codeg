@@ -2,18 +2,25 @@ import { describe, expect, it } from "vitest"
 
 import {
   applyClaudeProviderToConfigText,
+  applyConfigSaveToEditableConfig,
   buildGrokSaveOptions,
   buildGrokStructuredConfig,
   buildMergeConfigPayload,
   buildVersionCheck,
   configTextForClaudeSave,
   getAgentChecks,
+  getSelectedEditorPanelState,
   inferGrokMode,
   materializeClaudeHardeningFlags,
   patchImportantConfigText,
   setClaudeEnvFlagInConfigText,
 } from "./acp-agent-settings"
-import type { AcpAgentInfo, AgentType, PreflightResult } from "@/lib/types"
+import type {
+  AcpAgentEditableConfig,
+  AcpAgentInfo,
+  AgentType,
+  PreflightResult,
+} from "@/lib/types"
 
 function makeAgent(overrides: Partial<AcpAgentInfo>): AcpAgentInfo {
   return {
@@ -27,23 +34,106 @@ function makeAgent(overrides: Partial<AcpAgentInfo>): AcpAgentInfo {
     enabled: true,
     sort_order: 0,
     installed_version: null,
-    env: {},
-    config_json: null,
-    config_file_path: null,
-    opencode_auth_json: null,
-    codex_auth_json: null,
-    cline_secrets_json: null,
-    codex_config_toml: null,
-    codex_model_catalog: null,
-    grok_config_toml: null,
-    grok_settings: null,
-    hermes_config_yaml: null,
-    cursor_cli_config_json: null,
-    cursor_settings: null,
+    pi_uses_custom_agent_dir: false,
     model_provider_id: null,
     ...overrides,
   }
 }
+
+function makeEditableConfig(
+  overrides: Partial<AcpAgentEditableConfig> = {}
+): AcpAgentEditableConfig {
+  return {
+    agent_type: "codex",
+    env: { EXISTING: "value" },
+    config_json: '{"existing":true}',
+    opencode_auth_json: null,
+    codex_auth_json: '{"mode":"old"}',
+    codex_config_toml: 'model = "old"',
+    codex_model_catalog: "old catalog",
+    hermes_config_yaml: null,
+    grok_config_toml: null,
+    grok_settings: null,
+    cursor_cli_config_json: null,
+    cursor_settings: null,
+    ...overrides,
+  }
+}
+
+describe("applyConfigSaveToEditableConfig — selected editor cache", () => {
+  it("uses each successful save as the next merge baseline", () => {
+    const afterFirstSave = applyConfigSaveToEditableConfig(
+      makeEditableConfig(),
+      '{"first":true}',
+      {
+        codexAuthJsonText: '{"mode":"new"}',
+        codexConfigTomlText: 'model = "new"',
+        codexModelCatalog: "new catalog",
+      }
+    )
+    const afterSecondSave = applyConfigSaveToEditableConfig(
+      afterFirstSave,
+      '{"second":true}'
+    )
+
+    expect(afterFirstSave).toMatchObject({
+      config_json: '{"first":true}',
+      codex_auth_json: '{"mode":"new"}',
+      codex_config_toml: 'model = "new"',
+      codex_model_catalog: "new catalog",
+    })
+    expect(afterSecondSave).toMatchObject({
+      config_json: '{"second":true}',
+      codex_auth_json: '{"mode":"new"}',
+      codex_config_toml: 'model = "new"',
+      codex_model_catalog: "new catalog",
+    })
+  })
+
+  it("projects structured Grok settings without changing unrelated fields", () => {
+    const editable = makeEditableConfig({
+      agent_type: "grok",
+      grok_config_toml: "[session]",
+    })
+    const updated = applyConfigSaveToEditableConfig(editable, "", {
+      grokConfigTomlText: "[session]\nauto_compact_threshold_percent = 80",
+      grokStructured: {
+        defaultReasoningEffort: "high",
+        permissionMode: "ask",
+        customModelId: null,
+        customBaseUrl: null,
+        customApiKey: null,
+        customApiBackend: null,
+        customContextWindow: null,
+        autoCompactThresholdPercent: 80,
+      },
+    })
+
+    expect(updated).toMatchObject({
+      config_json: null,
+      codex_auth_json: '{"mode":"old"}',
+      grok_config_toml: "[session]\nauto_compact_threshold_percent = 80",
+      grok_settings: {
+        default_reasoning_effort: "high",
+        permission_mode: "ask",
+        auto_compact_threshold_percent: 80,
+      },
+    })
+  })
+})
+
+describe("getSelectedEditorPanelState — lazy editor loading", () => {
+  it("shows a retryable error rather than an indefinite spinner after a failed load", () => {
+    expect(getSelectedEditorPanelState(true, false, null)).toBe("loading")
+    expect(getSelectedEditorPanelState(true, false, "request failed")).toBe(
+      "error"
+    )
+    expect(getSelectedEditorPanelState(true, true, "request failed")).toBe(
+      "editor"
+    )
+    expect(getSelectedEditorPanelState(false, false, null)).toBe("empty")
+  })
+})
 
 // `disabled` lives only on the frontend-synthesized fix variant, not on the
 // backend FixAction member of the union — narrow before reading it.

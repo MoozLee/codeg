@@ -8,15 +8,19 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
 use crate::acp::binary_cache;
+#[cfg(feature = "tauri-runtime")]
+use crate::acp::connection::SessionConfigCommandValue;
 use crate::acp::error::AcpError;
 use crate::acp::manager::ConnectionManager;
 use crate::acp::opencode_plugins::{self, PluginCheckSummary};
 use crate::acp::preflight::{self, PreflightResult};
 use crate::acp::registry;
 use crate::acp::types::{
-    AcpAgentInfo, AgentDiagnosticsReport, AgentSkillContent, AgentSkillItem, AgentSkillLayout,
-    AgentSkillLocation, AgentSkillScope, AgentSkillsListResult, ConfigStaleKind, ConnectionStatus,
-    DiagCheck, DiagLevel, DiagSection, DiagnosticsVerdict, GrokSettings, GrokStructuredConfig,
+    AcpAgentEditableConfig, AcpAgentInfo, AgentDiagnosticsReport, AgentSkillContent,
+    AgentSkillItem, AgentSkillLayout, AgentSkillLocation, AgentSkillScope, AgentSkillsListResult,
+    ConfigStaleKind, ConfiguredModelSource, ConnectionStatus, ContextRuntimeConfigInfo,
+    ContextWindowMaxSource, DiagCheck, DiagLevel, DiagSection, DiagnosticsVerdict, GrokSettings,
+    GrokStructuredConfig, MaintenanceCommandResult,
 };
 #[cfg(feature = "tauri-runtime")]
 use crate::acp::types::{ConnectionInfo, ForkResultInfo, PromptInputBlock};
@@ -228,7 +232,10 @@ pub(crate) fn resolve_uvx_command() -> Option<PathBuf> {
     }
     let exe = if cfg!(windows) { "uvx.exe" } else { "uvx" };
     let home = home_dir_or_default();
-    for dir in [home.join(".local").join("bin"), home.join(".cargo").join("bin")] {
+    for dir in [
+        home.join(".local").join("bin"),
+        home.join(".cargo").join("bin"),
+    ] {
         let cand = dir.join(exe);
         if cand.is_file() {
             return Some(cand);
@@ -620,54 +627,14 @@ async fn detect_local_version(agent_type: AgentType) -> Option<String> {
 // Runs a set of READ-ONLY probes IN THE APP PROCESS (so they reflect the PATH
 // the GUI app actually sees — which differs from the user's terminal PATH and
 // is the root of most "installed but shows not-installed" reports). Never
-// mutates PATH; never dumps arbitrary env (only a safe whitelist, redacted).
-// Split into an impure `collect_diag_inputs` and a pure `build_report` so the
-// verdict heuristic and rendering are unit-testable without shelling out.
+// mutates PATH. Raw paths and logs remain internal inputs; the report exposes
+// only versions, presence, timing, and counts. Split into an impure
+// `collect_diag_inputs` and a pure `build_report` so the verdict heuristic and
+// rendering are unit-testable without shelling out.
 // ============================================================================
 
 /// Per-probe timeout for the external commands diagnostics runs.
 const DIAG_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Env var keys whose *values* are safe to surface in a copyable report. Chosen
-/// so none carry credentials; still run through [`redact_secret`] defensively.
-const DIAG_SAFE_ENV_KEYS: &[&str] = &[
-    "SHELL",
-    "NVM_DIR",
-    "FNM_DIR",
-    "FNM_MULTISHELL_PATH",
-    "VOLTA_HOME",
-    "ASDF_DATA_DIR",
-    "MISE_DATA_DIR",
-    "N_PREFIX",
-    "HOMEBREW_PREFIX",
-    "npm_config_prefix",
-    "LANG",
-];
-
-/// Mask a value that may contain a secret, keyed on the env var *name*. If the
-/// name looks credential-bearing the value is partially masked; otherwise it is
-/// returned verbatim. Multibyte-safe (masks by `char`, mirroring the approach in
-/// `models::model_provider::mask_api_key`) so it never panics on a UTF-8 value.
-fn redact_secret(key: &str, value: &str) -> String {
-    let lower = key.to_ascii_lowercase();
-    let secretish = ["key", "token", "secret", "password", "passwd", "auth", "credential"]
-        .iter()
-        .any(|needle| lower.contains(needle));
-    if !secretish {
-        return value.to_string();
-    }
-    let chars: Vec<char> = value.chars().collect();
-    let len = chars.len();
-    if len == 0 {
-        return String::new();
-    }
-    if len <= 8 {
-        return "•".repeat(len);
-    }
-    let first: String = chars[..2].iter().collect();
-    let last: String = chars[len - 2..].iter().collect();
-    format!("{first}{}{last}", "•".repeat(len.saturating_sub(4).min(16)))
-}
 
 /// npm places a package's bin as `<cmd>.cmd` on Windows, bare `<cmd>` elsewhere.
 fn diag_exe_name(cmd: &str) -> String {
@@ -746,7 +713,6 @@ struct DiagInputs {
     /// (candidate bin dir, whether it contains a `node` binary).
     node_candidates: Vec<(String, bool)>,
     selected_node_dir: Option<String>,
-    safe_env: Vec<(String, String)>,
     agent: Option<AgentDiag>,
     terminal: TerminalProbe,
 }
@@ -781,7 +747,12 @@ async fn diag_cmd_probe(cmd: &str, version_args: &[&str]) -> CmdProbe {
 
 /// Major version from `v20.11.1` / `20.11.1`.
 fn parse_node_major(v: &str) -> Option<u64> {
-    v.trim().trim_start_matches('v').split('.').next()?.parse().ok()
+    v.trim()
+        .trim_start_matches('v')
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// Compare the user's login-shell PATH against the app PATH. Unix-only; on
@@ -820,7 +791,8 @@ async fn diag_terminal_probe(cmd: &str, app_path: &[String]) -> TerminalProbe {
         }
     }
     if let Some(tp) = term_path {
-        let app_set: std::collections::HashSet<&str> = app_path.iter().map(String::as_str).collect();
+        let app_set: std::collections::HashSet<&str> =
+            app_path.iter().map(String::as_str).collect();
         let mut seen = std::collections::HashSet::new();
         probe.extra_dirs = tp
             .split(':')
@@ -889,10 +861,12 @@ async fn collect_agent_diag(
                 cand.is_file().then(|| cand.to_string_lossy().to_string())
             });
             diag.homebrew_bin = if cfg!(target_os = "macos") {
-                ["/opt/homebrew/bin", "/usr/local/bin"].iter().find_map(|d| {
-                    let cand = Path::new(d).join(diag_exe_name(cmd));
-                    cand.is_file().then(|| cand.to_string_lossy().to_string())
-                })
+                ["/opt/homebrew/bin", "/usr/local/bin"]
+                    .iter()
+                    .find_map(|d| {
+                        let cand = Path::new(d).join(diag_exe_name(cmd));
+                        cand.is_file().then(|| cand.to_string_lossy().to_string())
+                    })
             } else {
                 None
             };
@@ -999,14 +973,6 @@ async fn collect_diag_inputs(db: &AppDatabase, agent_type: Option<AgentType>) ->
             inp.selected_node_dir = Some(dir_str.clone());
         }
         inp.node_candidates.push((dir_str, has_node));
-    }
-
-    for &key in DIAG_SAFE_ENV_KEYS {
-        if let Ok(val) = std::env::var(key) {
-            if !val.trim().is_empty() {
-                inp.safe_env.push((key.to_string(), redact_secret(key, &val)));
-            }
-        }
     }
 
     if let Some(at) = agent_type {
@@ -1175,34 +1141,58 @@ fn build_report(
     let verdict = compute_verdict(inp);
     let mut sections: Vec<DiagSection> = Vec::new();
 
-    // 1. Runtime
-    let mut runtime = vec![
-        diag_check("os / arch", &format!("{} / {}", inp.os, inp.arch), DiagLevel::Info, None),
+    // 1. Runtime. Keep raw PATH/env values inside the backend; only surface
+    // coarse signals useful for diagnosing a GUI/terminal environment mismatch.
+    let fix_failed = inp
+        .path_logs
+        .iter()
+        .any(|line| line.contains("fix_path_env failed"));
+    let runtime = vec![
+        diag_check(
+            "os / arch",
+            &format!("{} / {}", inp.os, inp.arch),
+            DiagLevel::Info,
+            None,
+        ),
         diag_check("app version", &inp.app_version, DiagLevel::Info, None),
+        diag_check(
+            "fix_path_env",
+            if fix_failed {
+                "startup failure recorded"
+            } else {
+                "no startup failure recorded"
+            },
+            if fix_failed {
+                DiagLevel::Warn
+            } else {
+                DiagLevel::Info
+            },
+            Some("the app imports the login-shell PATH at startup"),
+        ),
+        diag_check(
+            "app PATH",
+            &format!("{} directory entries", inp.app_path.len()),
+            DiagLevel::Info,
+            None,
+        ),
     ];
-    let fix_failed = inp.path_logs.iter().any(|l| l.contains("fix_path_env failed"));
-    runtime.push(diag_check(
-        "fix_path_env",
-        if fix_failed { "failed at startup" } else { "no failure logged" },
-        if fix_failed { DiagLevel::Warn } else { DiagLevel::Info },
-        Some("app imports the login-shell PATH at startup; a failure leaves a narrow GUI PATH"),
-    ));
-    for (k, v) in &inp.safe_env {
-        runtime.push(diag_check(k, v, DiagLevel::Info, None));
-    }
-    runtime.push(diag_check(
-        "PATH",
-        &format!("{} entries (full list in copied text)", inp.app_path.len()),
-        DiagLevel::Info,
-        None,
-    ));
-    sections.push(DiagSection { title: "Runtime".to_string(), checks: runtime });
+    sections.push(DiagSection {
+        title: "Runtime".to_string(),
+        checks: runtime,
+    });
 
-    // 2. Node / npm / npx
-    let node_status = |p: &CmdProbe| if p.path.is_some() { DiagLevel::Ok } else { DiagLevel::Fail };
+    // 2. Node / npm / npx. The probe paths remain internal; public diagnostics
+    // expose only presence and version.
+    let node_status = |p: &CmdProbe| {
+        if p.path.is_some() {
+            DiagLevel::Ok
+        } else {
+            DiagLevel::Fail
+        }
+    };
     let cmd_value = |p: &CmdProbe| match (&p.path, &p.version) {
-        (Some(path), Some(ver)) => format!("{ver}  ({path})"),
-        (Some(path), None) => path.clone(),
+        (Some(_), Some(version)) => format!("found ({version})"),
+        (Some(_), None) => "found".to_string(),
         _ => "NOT FOUND".to_string(),
     };
     sections.push(DiagSection {
@@ -1214,29 +1204,51 @@ fn build_report(
         ],
     });
 
-    // 3. npm global prefix
+    // 3. npm global prefix. Prefix locations can identify local directories, so
+    // report availability/timing only.
     let prefix_slow = inp.npm_prefix_g_ms > NPM_PREFIX_TIMEOUT.as_millis();
+    let availability = |value: &Option<String>| {
+        if value.is_some() {
+            "available"
+        } else {
+            "unavailable"
+        }
+    };
     sections.push(DiagSection {
         title: "npm global prefix".to_string(),
         checks: vec![
             diag_check(
                 "npm prefix -g",
                 &format!(
-                    "{}  ({} ms)",
-                    inp.npm_prefix_g.as_deref().unwrap_or("N/A"),
+                    "{} ({} ms)",
+                    availability(&inp.npm_prefix_g),
                     inp.npm_prefix_g_ms
                 ),
-                if prefix_slow { DiagLevel::Warn } else { DiagLevel::Info },
+                if prefix_slow {
+                    DiagLevel::Warn
+                } else {
+                    DiagLevel::Info
+                },
                 prefix_slow.then_some("exceeds the 1.5s gate used at detection time"),
             ),
-            diag_check("npm root -g", inp.npm_root_g.as_deref().unwrap_or("N/A"), DiagLevel::Info, None),
             diag_check(
-                "npm config get prefix",
-                inp.npm_config_prefix.as_deref().unwrap_or("N/A"),
+                "npm root -g",
+                availability(&inp.npm_root_g),
                 DiagLevel::Info,
                 None,
             ),
-            diag_check("cached prefix", inp.cached_prefix.as_deref().unwrap_or("N/A"), DiagLevel::Info, None),
+            diag_check(
+                "npm config get prefix",
+                availability(&inp.npm_config_prefix),
+                DiagLevel::Info,
+                None,
+            ),
+            diag_check(
+                "cached prefix",
+                availability(&inp.cached_prefix),
+                DiagLevel::Info,
+                None,
+            ),
         ],
     });
 
@@ -1249,40 +1261,75 @@ fn build_report(
         };
         let mut checks = vec![diag_check(
             &launch_label,
-            a.launchable.as_deref().unwrap_or("NOT RESOLVED"),
-            if a.launchable.is_some() { DiagLevel::Ok } else { DiagLevel::Fail },
+            if a.launchable.is_some() {
+                "resolved"
+            } else {
+                "NOT RESOLVED"
+            },
+            if a.launchable.is_some() {
+                DiagLevel::Ok
+            } else {
+                DiagLevel::Fail
+            },
             (a.distribution == "npx").then_some("this is exactly what the new-session page checks"),
         )];
         if let Some(p) = &a.package {
             checks.push(diag_check("package", p, DiagLevel::Info, None));
         }
-        // npm-prefix detail only applies to npx agents.
+        // npm-prefix detail only applies to npx agents. Keep locations internal
+        // and reveal only whether each resolution path found an executable.
         if a.distribution == "npx" {
             checks.push(diag_check(
-                "<npm prefix -g>/bin/<cmd>",
-                a.system_prefix_bin.as_deref().unwrap_or("absent"),
-                if a.system_prefix_bin.is_some() { DiagLevel::Ok } else { DiagLevel::Info },
+                "global npm executable",
+                if a.system_prefix_bin.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                },
+                if a.system_prefix_bin.is_some() {
+                    DiagLevel::Ok
+                } else {
+                    DiagLevel::Info
+                },
                 None,
             ));
             checks.push(diag_check(
-                "~/.codeg/npm-global/bin/<cmd>",
-                a.user_prefix_bin.as_deref().unwrap_or("absent"),
-                if a.user_prefix_bin.is_some() { DiagLevel::Warn } else { DiagLevel::Info },
-                a.user_prefix_bin.as_ref().map(|_| "EACCES fallback dir — reached by the connect gate only if it's on PATH"),
+                "fallback npm executable",
+                if a.user_prefix_bin.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                },
+                if a.user_prefix_bin.is_some() {
+                    DiagLevel::Warn
+                } else {
+                    DiagLevel::Info
+                },
+                a.user_prefix_bin
+                    .as_ref()
+                    .map(|_| "fallback install location is not on the app PATH"),
             ));
             if cfg!(target_os = "macos") {
                 checks.push(diag_check(
-                    "homebrew bin/<cmd>",
-                    a.homebrew_bin.as_deref().unwrap_or("absent"),
-                    if a.homebrew_bin.is_some() { DiagLevel::Warn } else { DiagLevel::Info },
+                    "Homebrew executable",
+                    if a.homebrew_bin.is_some() {
+                        "present"
+                    } else {
+                        "absent"
+                    },
+                    if a.homebrew_bin.is_some() {
+                        DiagLevel::Warn
+                    } else {
+                        DiagLevel::Info
+                    },
                     None,
                 ));
             }
             checks.push(diag_check(
-                "detect_npm_global_version",
+                "detected global version",
                 a.detected_version.as_deref().unwrap_or("none"),
                 DiagLevel::Info,
-                Some("covers both prefixes — what the Settings badge uses"),
+                Some("covers both global installation locations"),
             ));
         }
         checks.push(diag_check(
@@ -1313,46 +1360,53 @@ fn build_report(
         });
     }
 
-    // 5. Node version managers (candidate bin dirs)
+    // 5. Node version managers. Candidate directories are local paths, so retain
+    // only the number probed and the number that contain a Node.js executable.
     if !inp.node_candidates.is_empty() {
-        let checks = inp
+        let node_count = inp
             .node_candidates
             .iter()
-            .map(|(dir, has)| {
-                let selected = inp.selected_node_dir.as_deref() == Some(dir.as_str());
-                diag_check(
-                    "candidate",
-                    dir,
-                    if *has { DiagLevel::Ok } else { DiagLevel::Info },
-                    selected.then_some("← selected (first with a node binary)"),
-                )
-            })
-            .collect();
+            .filter(|(_, has_node)| *has_node)
+            .count();
         sections.push(DiagSection {
             title: "Node version-manager candidates".to_string(),
-            checks,
+            checks: vec![diag_check(
+                "candidate directories",
+                &format!(
+                    "{} checked; {node_count} contain Node.js",
+                    inp.node_candidates.len()
+                ),
+                DiagLevel::Info,
+                (node_count > 0)
+                    .then_some("the first matching directory was added to the app PATH"),
+            )],
         });
     }
 
-    // 6. Terminal comparison
+    // 6. Terminal comparison. The terminal probe still uses its raw PATH
+    // internally, but exposes only the mismatch count and command availability.
     let term_checks = if inp.terminal.ran {
         vec![
             diag_check(
-                "command -v <cmd> (login shell)",
-                inp.terminal.cmd_resolved.as_deref().unwrap_or("not found"),
+                "command available in login shell",
+                if inp.terminal.cmd_resolved.is_some() {
+                    "found"
+                } else {
+                    "not found"
+                },
                 DiagLevel::Info,
                 None,
             ),
             diag_check(
-                "PATH dirs in terminal but not app",
-                &if inp.terminal.extra_dirs.is_empty() {
-                    "none".to_string()
+                "PATH directories visible only in terminal",
+                &format!("{}", inp.terminal.extra_dirs.len()),
+                if inp.terminal.extra_dirs.is_empty() {
+                    DiagLevel::Ok
                 } else {
-                    format!("{} (see copied text)", inp.terminal.extra_dirs.len())
+                    DiagLevel::Warn
                 },
-                if inp.terminal.extra_dirs.is_empty() { DiagLevel::Ok } else { DiagLevel::Warn },
                 (!inp.terminal.extra_dirs.is_empty())
-                    .then_some("the app can't see these dirs — the likely GUI PATH gap"),
+                    .then_some("the app cannot see one or more terminal PATH directories"),
             ),
         ]
     } else {
@@ -1363,9 +1417,12 @@ fn build_report(
             None,
         )]
     };
-    sections.push(DiagSection { title: "Terminal comparison".to_string(), checks: term_checks });
+    sections.push(DiagSection {
+        title: "Terminal comparison".to_string(),
+        checks: term_checks,
+    });
 
-    let plain_text = render_plain_text(inp, &verdict, &sections, &generated_at, agent_type);
+    let plain_text = render_plain_text(&verdict, &sections, &generated_at, agent_type);
 
     AgentDiagnosticsReport {
         generated_at,
@@ -1376,10 +1433,8 @@ fn build_report(
     }
 }
 
-/// Pure: render a copyable text report (structured checks + verbose appendices
-/// that are summarized in the UI).
+/// Pure: render a copyable report from the already-sanitized structured checks.
 fn render_plain_text(
-    inp: &DiagInputs,
     verdict: &DiagnosticsVerdict,
     sections: &[DiagSection],
     generated_at: &str,
@@ -1397,31 +1452,22 @@ fn render_plain_text(
     if let Some(at) = agent_type {
         out.push_str(&format!("agent: {at:?}\n"));
     }
-    out.push_str(&format!("verdict [{}]: {}\n", verdict.code, verdict.summary));
+    out.push_str(&format!(
+        "verdict [{}]: {}\n",
+        verdict.code, verdict.summary
+    ));
     for sec in sections {
         out.push_str(&format!("\n## {}\n", sec.title));
         for c in &sec.checks {
-            out.push_str(&format!("  [{}] {}: {}\n", glyph(c.status), c.label, c.value));
+            out.push_str(&format!(
+                "  [{}] {}: {}\n",
+                glyph(c.status),
+                c.label,
+                c.value
+            ));
             if let Some(h) = &c.hint {
                 out.push_str(&format!("        ↳ {h}\n"));
             }
-        }
-    }
-    // Appendices (verbose lists shown only summarized in the UI).
-    out.push_str("\n## PATH (app process, in order)\n");
-    for d in &inp.app_path {
-        out.push_str(&format!("  {d}\n"));
-    }
-    if !inp.terminal.extra_dirs.is_empty() {
-        out.push_str("\n## PATH dirs in terminal but NOT in app\n");
-        for d in &inp.terminal.extra_dirs {
-            out.push_str(&format!("  {d}\n"));
-        }
-    }
-    if !inp.path_logs.is_empty() {
-        out.push_str("\n## recent [PATH] logs\n");
-        for l in &inp.path_logs {
-            out.push_str(&format!("  {l}\n"));
         }
     }
     out.push_str("===== end =====\n");
@@ -1435,7 +1481,9 @@ pub(crate) async fn acp_env_diagnostics_core(
     agent_type: Option<AgentType>,
 ) -> Result<AgentDiagnosticsReport, AcpError> {
     let inputs = collect_diag_inputs(db, agent_type).await;
-    let generated_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %z").to_string();
+    let generated_at = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M:%S %z")
+        .to_string();
     Ok(build_report(&inputs, generated_at, agent_type))
 }
 
@@ -1477,14 +1525,46 @@ mod diagnostics_tests {
     }
 
     #[test]
-    fn redact_only_masks_secretish_keys() {
-        assert_eq!(redact_secret("NVM_DIR", "/home/u/.nvm"), "/home/u/.nvm");
-        assert_eq!(redact_secret("SHELL", "/bin/zsh"), "/bin/zsh");
-        // secret-ish key → masked, and multibyte-safe (no panic / no split).
-        let masked = redact_secret("XAI_API_KEY", "sk-测试secret-1234567890");
-        assert!(masked.contains('•'));
-        assert!(!masked.contains("secret"));
-        assert_eq!(redact_secret("MY_TOKEN", "abcd"), "••••");
+    fn report_never_serializes_raw_paths_or_probe_values() {
+        let sensitive_path = "/Users/diagnostics-sensitive/private/bin";
+        let sensitive_value = "diagnostics-token-secret";
+        let mut inp = base_inputs();
+        inp.app_path = vec![sensitive_path.to_string()];
+        inp.path_logs = vec![format!("[PATH] {sensitive_value}")];
+        inp.node.path = Some(sensitive_path.to_string());
+        inp.npm.path = Some(sensitive_path.to_string());
+        inp.npx.path = Some(sensitive_path.to_string());
+        inp.npm_prefix_g = Some(sensitive_path.to_string());
+        inp.npm_root_g = Some(sensitive_path.to_string());
+        inp.npm_config_prefix = Some(sensitive_path.to_string());
+        inp.cached_prefix = Some(sensitive_path.to_string());
+        inp.node_candidates = vec![(sensitive_path.to_string(), true)];
+        inp.selected_node_dir = Some(sensitive_path.to_string());
+        inp.terminal = TerminalProbe {
+            ran: true,
+            extra_dirs: vec![sensitive_path.to_string()],
+            cmd_resolved: Some(sensitive_path.to_string()),
+            ..Default::default()
+        };
+        inp.agent = Some(AgentDiag {
+            name: "Test agent".to_string(),
+            cmd: "test-agent".to_string(),
+            distribution: "npx",
+            launchable: Some(sensitive_path.to_string()),
+            resolve_npx: Some(sensitive_path.to_string()),
+            system_prefix_bin: Some(sensitive_path.to_string()),
+            user_prefix_bin: Some(sensitive_path.to_string()),
+            homebrew_bin: Some(sensitive_path.to_string()),
+            ..Default::default()
+        });
+
+        let report = build_report(&inp, "FIXED-TS".to_string(), None);
+        let serialized = serde_json::to_string(&report).unwrap();
+        for sensitive in [sensitive_path, sensitive_value] {
+            assert!(!serialized.contains(sensitive));
+            assert!(!report.plain_text.contains(sensitive));
+        }
+        assert!(!report.plain_text.contains("## PATH"));
     }
 
     #[test]
@@ -1524,7 +1604,8 @@ mod diagnostics_tests {
         let mut a = agent_installed_unresolved();
         a.detected_version = Some("1.1.2".to_string());
         inp.agent = Some(a);
-        inp.terminal.cmd_resolved = Some("/Users/u/.nvm/versions/node/v20/bin/codex-acp".to_string());
+        inp.terminal.cmd_resolved =
+            Some("/Users/u/.nvm/versions/node/v20/bin/codex-acp".to_string());
         assert_eq!(compute_verdict(&inp).code, "terminal_only_path");
     }
 
@@ -1780,7 +1861,13 @@ async fn install_npm_global_package_streaming(
     );
 
     let (success, stderr) = run_npm_streaming(
-        &["install", "-g", NPM_INCLUDE_OPTIONAL, &registry_arg, package],
+        &[
+            "install",
+            "-g",
+            NPM_INCLUDE_OPTIONAL,
+            &registry_arg,
+            package,
+        ],
         task_id,
         emitter,
     )
@@ -2185,10 +2272,6 @@ fn cline_global_state_path() -> PathBuf {
 
 fn cline_secrets_path() -> PathBuf {
     cline_data_dir().join("secrets.json")
-}
-
-fn load_cline_secrets_json_raw() -> Option<String> {
-    fs::read_to_string(cline_secrets_path()).ok()
 }
 
 /// Cline provider → secrets.json field name for the API key.
@@ -3096,8 +3179,16 @@ fn apply_grok_custom_model(
                 let tbl = grok_model_table_mut(doc, id)?;
                 // `model` is the id sent to the API; always kept in sync with <id>.
                 grok_tbl_set_str(tbl, "model", Some(id));
-                grok_tbl_set_str(tbl, "base_url", trimmed_opt(settings.custom_base_url.as_deref()));
-                grok_tbl_set_str(tbl, "api_key", trimmed_opt(settings.custom_api_key.as_deref()));
+                grok_tbl_set_str(
+                    tbl,
+                    "base_url",
+                    trimmed_opt(settings.custom_base_url.as_deref()),
+                );
+                grok_tbl_set_str(
+                    tbl,
+                    "api_key",
+                    trimmed_opt(settings.custom_api_key.as_deref()),
+                );
                 grok_tbl_set_str(
                     tbl,
                     "api_backend",
@@ -3240,7 +3331,9 @@ fn set_or_remove_grok_key(
             }
         }
         None => {
-            if let Some(table) = doc.get_mut(section).and_then(|item| item.as_table_like_mut())
+            if let Some(table) = doc
+                .get_mut(section)
+                .and_then(|item| item.as_table_like_mut())
             {
                 table.remove(key);
             }
@@ -3274,7 +3367,9 @@ fn set_or_remove_grok_number(
             }
         }
         None => {
-            if let Some(table) = doc.get_mut(section).and_then(|item| item.as_table_like_mut())
+            if let Some(table) = doc
+                .get_mut(section)
+                .and_then(|item| item.as_table_like_mut())
             {
                 table.remove(key);
             }
@@ -3421,10 +3516,20 @@ fn apply_kimi_managed_block(
                 "type".to_string(),
                 toml::Value::String(spec.interface_type.clone()),
             );
-            if let Some(url) = spec.base_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(url) = spec
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 provider_table.insert("base_url".to_string(), toml::Value::String(url.to_string()));
             }
-            if let Some(key) = spec.api_key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(key) = spec
+                .api_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 provider_table.insert("api_key".to_string(), toml::Value::String(key.to_string()));
             }
             if !spec.env.is_empty() {
@@ -3477,8 +3582,9 @@ fn apply_kimi_managed_block(
             );
         }
         None => {
-            let providers_empty = if let Some(providers) =
-                table.get_mut("providers").and_then(toml::Value::as_table_mut)
+            let providers_empty = if let Some(providers) = table
+                .get_mut("providers")
+                .and_then(toml::Value::as_table_mut)
             {
                 providers.remove(KIMI_MANAGED_PROVIDER);
                 providers.is_empty()
@@ -3488,18 +3594,18 @@ fn apply_kimi_managed_block(
             if providers_empty {
                 table.remove("providers");
             }
-            let models_empty = if let Some(models) =
-                table.get_mut("models").and_then(toml::Value::as_table_mut)
-            {
-                models.remove(KIMI_MANAGED_MODEL_ALIAS);
-                models.is_empty()
-            } else {
-                false
-            };
+            let models_empty =
+                if let Some(models) = table.get_mut("models").and_then(toml::Value::as_table_mut) {
+                    models.remove(KIMI_MANAGED_MODEL_ALIAS);
+                    models.is_empty()
+                } else {
+                    false
+                };
             if models_empty {
                 table.remove("models");
             }
-            if table.get("default_model").and_then(toml::Value::as_str) == Some(KIMI_MANAGED_MODEL_ALIAS)
+            if table.get("default_model").and_then(toml::Value::as_str)
+                == Some(KIMI_MANAGED_MODEL_ALIAS)
             {
                 table.remove("default_model");
             }
@@ -3557,7 +3663,9 @@ fn kimi_token_is_synthetic(token: &serde_json::Value) -> bool {
         .get("_codeg_synthetic")
         .and_then(serde_json::Value::as_bool)
         == Some(true)
-        || token.get("access_token").and_then(serde_json::Value::as_str)
+        || token
+            .get("access_token")
+            .and_then(serde_json::Value::as_str)
             == Some(KIMI_SYNTHETIC_TOKEN_ACCESS)
 }
 
@@ -3573,7 +3681,9 @@ fn kimi_token_has_access(token: &serde_json::Value) -> bool {
 
 /// Whether any usable credential (real or synthetic) is present.
 fn kimi_credential_present() -> bool {
-    read_kimi_token().map(|t| kimi_token_has_access(&t)).unwrap_or(false)
+    read_kimi_token()
+        .map(|t| kimi_token_has_access(&t))
+        .unwrap_or(false)
 }
 
 /// Whether the present credential is codeg's synthetic gate token.
@@ -3671,33 +3781,48 @@ fn project_kimi_managed_config(value: &toml::Value) -> serde_json::Map<String, s
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            merged.insert("key".to_string(), serde_json::Value::String(key.to_string()));
+            merged.insert(
+                "key".to_string(),
+                serde_json::Value::String(key.to_string()),
+            );
             merged.insert(
                 "authType".to_string(),
                 serde_json::Value::String("api_key".to_string()),
             );
         }
         if let Some(env) = provider.get("env").and_then(toml::Value::as_table) {
-            if let Some(project) = env.get("GOOGLE_CLOUD_PROJECT").and_then(toml::Value::as_str) {
+            if let Some(project) = env
+                .get("GOOGLE_CLOUD_PROJECT")
+                .and_then(toml::Value::as_str)
+            {
                 merged.insert(
                     "vertexProject".to_string(),
                     serde_json::Value::String(project.to_string()),
                 );
             }
-            if let Some(location) = env.get("GOOGLE_CLOUD_LOCATION").and_then(toml::Value::as_str) {
+            if let Some(location) = env
+                .get("GOOGLE_CLOUD_LOCATION")
+                .and_then(toml::Value::as_str)
+            {
                 merged.insert(
                     "vertexLocation".to_string(),
                     serde_json::Value::String(location.to_string()),
                 );
             }
-            if let Some(var) = interface_type.as_deref().and_then(kimi_provider_key_env_var) {
+            if let Some(var) = interface_type
+                .as_deref()
+                .and_then(kimi_provider_key_env_var)
+            {
                 if let Some(key) = env
                     .get(var)
                     .and_then(toml::Value::as_str)
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                 {
-                    merged.insert("key".to_string(), serde_json::Value::String(key.to_string()));
+                    merged.insert(
+                        "key".to_string(),
+                        serde_json::Value::String(key.to_string()),
+                    );
                     merged.insert(
                         "authType".to_string(),
                         serde_json::Value::String("env".to_string()),
@@ -3722,7 +3847,10 @@ fn project_kimi_managed_config(value: &toml::Value) -> serde_json::Map<String, s
                 serde_json::Value::String(model_id.to_string()),
             );
         }
-        if let Some(ctx) = model.get("max_context_size").and_then(toml::Value::as_integer) {
+        if let Some(ctx) = model
+            .get("max_context_size")
+            .and_then(toml::Value::as_integer)
+        {
             merged.insert(
                 "maxContextSize".to_string(),
                 serde_json::Value::Number(ctx.into()),
@@ -3731,17 +3859,26 @@ fn project_kimi_managed_config(value: &toml::Value) -> serde_json::Map<String, s
     }
 
     let has_managed = merged.contains_key("interfaceType");
-    merged.insert("hasManagedBlock".to_string(), serde_json::Value::Bool(has_managed));
+    merged.insert(
+        "hasManagedBlock".to_string(),
+        serde_json::Value::Bool(has_managed),
+    );
     merged
 }
 
 fn load_kimi_code_config_json() -> Option<String> {
     let raw = fs::read_to_string(kimi_code_config_toml_path()).ok();
-    let mut merged = match raw.as_deref().and_then(|text| text.parse::<toml::Value>().ok()) {
+    let mut merged = match raw
+        .as_deref()
+        .and_then(|text| text.parse::<toml::Value>().ok())
+    {
         Some(value) => project_kimi_managed_config(&value),
         None => {
             let mut m = serde_json::Map::new();
-            m.insert("hasManagedBlock".to_string(), serde_json::Value::Bool(false));
+            m.insert(
+                "hasManagedBlock".to_string(),
+                serde_json::Value::Bool(false),
+            );
             m
         }
     };
@@ -3785,7 +3922,11 @@ pub(crate) struct KimiCodeConfigUpdate {
 
 /// Validate + resolve a `native`-mode update into the managed block to write.
 fn build_kimi_managed_spec(update: &KimiCodeConfigUpdate) -> Result<KimiManagedSpec, AcpError> {
-    let interface_type = update.interface_type.as_deref().map(str::trim).unwrap_or("");
+    let interface_type = update
+        .interface_type
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("");
     if !KIMI_INTERFACE_TYPES.contains(&interface_type) {
         return Err(AcpError::protocol(format!(
             "unknown kimi interface type: '{interface_type}'"
@@ -3806,7 +3947,9 @@ fn build_kimi_managed_spec(update: &KimiCodeConfigUpdate) -> Result<KimiManagedS
         .map(str::to_string);
     if let Some(url) = &base_url {
         if url.contains(['\n', '\r']) {
-            return Err(AcpError::protocol("kimi base url must not contain newlines"));
+            return Err(AcpError::protocol(
+                "kimi base url must not contain newlines",
+            ));
         }
     }
 
@@ -3945,7 +4088,9 @@ pub(crate) async fn acp_update_kimi_code_config_core(
             (FileAction::Raw(raw.to_string()), CredentialAction::Seed)
         }
         other => {
-            return Err(AcpError::protocol(format!("unknown kimi config mode: '{other}'")));
+            return Err(AcpError::protocol(format!(
+                "unknown kimi config mode: '{other}'"
+            )));
         }
     };
 
@@ -5083,8 +5228,10 @@ fn shell_quote_arg_for(arg: &str, windows: bool) -> String {
     } else {
         "[](){}'\"$&;|<>*?`\\!#~"
     };
-    let needs_quoting =
-        arg.is_empty() || arg.chars().any(|c| c.is_whitespace() || special.contains(c));
+    let needs_quoting = arg.is_empty()
+        || arg
+            .chars()
+            .any(|c| c.is_whitespace() || special.contains(c));
     if !needs_quoting {
         return arg.to_string();
     }
@@ -5952,7 +6099,7 @@ pub(crate) fn skill_storage_spec(agent_type: AgentType) -> Option<SkillStorageSp
         AgentType::KimiCode => Some(SkillStorageSpec {
             kind: SkillStorageKind::SkillDirectoryOnly,
             global_dirs: vec![
-                crate::parsers::kimi_code::resolve_kimi_code_home_dir().join("skills"),
+                crate::parsers::kimi_code::resolve_kimi_code_home_dir().join("skills")
             ],
             project_rel_dirs: vec![".kimi-code/skills"],
         }),
@@ -6554,13 +6701,10 @@ async fn run_cursor_probe(
             cmd.env(key, value);
         }
     }
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        cmd.output(),
-    )
-    .await
-    .map_err(|_| format!("cursor-agent {} timed out", args.join(" ")))?
-    .map_err(|e| format!("failed to run cursor-agent: {e}"))?;
+    let output = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
+        .await
+        .map_err(|_| format!("cursor-agent {} timed out", args.join(" ")))?
+        .map_err(|e| format!("failed to run cursor-agent: {e}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     if !output.status.success() && stdout.trim().is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -6740,7 +6884,15 @@ fn strip_ansi(input: &str) -> String {
 fn truncate_probe_output(s: &str) -> String {
     let t = s.trim();
     if t.len() > 400 {
-        format!("{}…", &t[..t.char_indices().take_while(|(i, _)| *i < 400).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(400)])
+        format!(
+            "{}…",
+            &t[..t
+                .char_indices()
+                .take_while(|(i, _)| *i < 400)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(400)]
+        )
     } else {
         t.to_string()
     }
@@ -6777,7 +6929,11 @@ fn agent_env_keys(agent_type: AgentType) -> (&'static str, &'static str, &'stati
         // Kimi Code does NOT read shell KIMI_API_KEY/OPENAI_API_KEY; the only
         // non-interactive credential path is the `KIMI_MODEL_*` family, which
         // also takes priority over `~/.kimi-code/config.toml`.
-        AgentType::KimiCode => ("KIMI_MODEL_BASE_URL", "KIMI_MODEL_API_KEY", "KIMI_MODEL_NAME"),
+        AgentType::KimiCode => (
+            "KIMI_MODEL_BASE_URL",
+            "KIMI_MODEL_API_KEY",
+            "KIMI_MODEL_NAME",
+        ),
         // Grok's non-interactive credential is `XAI_API_KEY`. Model + endpoint
         // also have working env overrides (verified against the 0.2.94 binary):
         // `GROK_DEFAULT_MODEL` selects the default model and `GROK_XAI_API_BASE_URL`
@@ -6846,6 +7002,225 @@ pub(crate) fn build_runtime_env_from_setting(
     }
 
     merged
+}
+
+fn context_model_env_keys(agent_type: AgentType) -> &'static [&'static str] {
+    match agent_type {
+        AgentType::ClaudeCode => &["ANTHROPIC_MODEL"],
+        AgentType::Gemini => &["GEMINI_MODEL", "GOOGLE_GEMINI_MODEL", "MODEL"],
+        AgentType::KimiCode => &["KIMI_MODEL_NAME"],
+        AgentType::Grok => &["GROK_DEFAULT_MODEL", "MODEL"],
+        _ => &["OPENAI_MODEL", "MODEL", "ANTHROPIC_MODEL", "GEMINI_MODEL"],
+    }
+}
+
+fn first_context_env_string(env: &BTreeMap<String, String>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        env.get(*key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn context_json_object(raw: Option<&str>) -> Option<serde_json::Map<String, serde_json::Value>> {
+    raw.and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .and_then(|value| value.as_object().cloned())
+}
+
+fn first_context_root_string(
+    config: Option<&serde_json::Map<String, serde_json::Value>>,
+    keys: &[&str],
+) -> Option<String> {
+    keys.iter().find_map(|key| {
+        config?
+            .get(*key)?
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn parse_context_positive_integer(value: Option<&serde_json::Value>) -> Option<u64> {
+    match value? {
+        serde_json::Value::Number(number) => number.as_u64().filter(|value| *value > 0),
+        serde_json::Value::String(raw) => raw.trim().parse::<u64>().ok().filter(|value| *value > 0),
+        _ => None,
+    }
+}
+
+fn first_context_root_integer(
+    config: Option<&serde_json::Map<String, serde_json::Value>>,
+    keys: &[&str],
+) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| parse_context_positive_integer(config?.get(*key)))
+}
+
+fn parse_context_percent(value: Option<&serde_json::Value>) -> Option<f64> {
+    let raw = match value? {
+        serde_json::Value::Number(number) => number.as_f64()?,
+        serde_json::Value::String(text) => {
+            let normalized = text.trim();
+            let numeric = normalized.strip_suffix('%').unwrap_or(normalized);
+            if numeric.ends_with('%') {
+                return None;
+            }
+            numeric.parse().ok()?
+        }
+        _ => return None,
+    };
+    if !raw.is_finite() {
+        return None;
+    }
+    let percent = if raw > 0.0 && raw <= 1.0 {
+        raw * 100.0
+    } else {
+        raw
+    };
+    (1.0..=100.0).contains(&percent).then_some(percent)
+}
+
+fn first_context_env_percent(env: &BTreeMap<String, String>, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|key| {
+        env.get(*key)
+            .map(|value| serde_json::Value::String(value.clone()))
+            .as_ref()
+            .and_then(|value| parse_context_percent(Some(value)))
+    })
+}
+
+fn first_context_root_percent(
+    config: Option<&serde_json::Map<String, serde_json::Value>>,
+    keys: &[&str],
+) -> Option<f64> {
+    keys.iter()
+        .find_map(|key| parse_context_percent(config?.get(*key)))
+}
+
+/// Project the effective runtime configuration onto the only context-management
+/// fields the frontend may consume. The raw env/config inputs stay local to this
+/// function and are never retained by the returned DTO.
+pub(crate) fn build_context_runtime_config(
+    agent_type: AgentType,
+    runtime_env: &BTreeMap<String, String>,
+    local_config_json: Option<&str>,
+) -> ContextRuntimeConfigInfo {
+    let config = context_json_object(local_config_json);
+    let config_env = config
+        .as_ref()
+        .and_then(|value| value.get("env"))
+        .and_then(serde_json::Value::as_object);
+    let effective_model = first_context_env_string(runtime_env, context_model_env_keys(agent_type));
+    let config_env_model =
+        first_context_root_string(config_env, context_model_env_keys(agent_type));
+    let root_model = first_context_root_string(config.as_ref(), &["model", "custom_model_id"]);
+    let configured_model = effective_model.clone().or(root_model.clone());
+    let configured_model_source = match configured_model.as_ref() {
+        Some(value) if config_env_model.as_ref() == Some(value) => {
+            Some(ConfiguredModelSource::AgentConfigEnv)
+        }
+        Some(value)
+            if agent_type != AgentType::ClaudeCode && root_model.as_ref() == Some(value) =>
+        {
+            Some(ConfiguredModelSource::AgentRootConfig)
+        }
+        Some(_) if effective_model.is_some() => Some(ConfiguredModelSource::AgentEnv),
+        Some(_) => Some(ConfiguredModelSource::AgentRootConfig),
+        None => None,
+    };
+
+    let claude_env_window = (agent_type == AgentType::ClaudeCode)
+        .then(|| runtime_env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW"))
+        .flatten()
+        .and_then(|value| {
+            parse_context_positive_integer(Some(&serde_json::Value::String(value.clone())))
+        })
+        .filter(|value| (100_000..=1_000_000).contains(value));
+    let claude_config_env_window = (agent_type == AgentType::ClaudeCode)
+        .then(|| first_context_root_integer(config_env, &["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]))
+        .flatten()
+        .filter(|value| (100_000..=1_000_000).contains(value));
+    let claude_root_window = (agent_type == AgentType::ClaudeCode)
+        .then(|| {
+            first_context_root_integer(
+                config.as_ref(),
+                &[
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+                    "claudeCodeAutoCompactWindow",
+                    "claude_code_auto_compact_window",
+                ],
+            )
+        })
+        .flatten()
+        .filter(|value| (100_000..=1_000_000).contains(value));
+    let grok_root_window = (agent_type == AgentType::Grok)
+        .then(|| {
+            first_context_root_integer(
+                config.as_ref(),
+                &["custom_context_window", "customContextWindow"],
+            )
+        })
+        .flatten();
+    let configured_context_window_max_tokens = claude_env_window
+        .or(claude_root_window)
+        .or(grok_root_window);
+    let context_window_max_source = match configured_context_window_max_tokens {
+        Some(value) if claude_config_env_window == Some(value) => {
+            Some(ContextWindowMaxSource::AgentConfigEnv)
+        }
+        Some(_) if claude_env_window.is_some() => Some(ContextWindowMaxSource::AgentEnv),
+        Some(_) if claude_root_window.is_some() || grok_root_window.is_some() => {
+            Some(ContextWindowMaxSource::AgentRootConfig)
+        }
+        _ => None,
+    };
+
+    let claude_threshold = (agent_type == AgentType::ClaudeCode)
+        .then(|| {
+            first_context_env_percent(runtime_env, &["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"]).or_else(
+                || {
+                    first_context_root_percent(
+                        config.as_ref(),
+                        &[
+                            "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+                            "claudeAutocompactPctOverride",
+                            "claude_autocompact_pct_override",
+                        ],
+                    )
+                },
+            )
+        })
+        .flatten();
+    let grok_threshold = (agent_type == AgentType::Grok)
+        .then(|| {
+            first_context_root_percent(
+                config.as_ref(),
+                &[
+                    "auto_compact_threshold_percent",
+                    "autoCompactThresholdPercent",
+                ],
+            )
+        })
+        .flatten();
+    let auto_compaction_threshold = claude_threshold.or(grok_threshold);
+    let native_claude = agent_type == AgentType::ClaudeCode
+        && (configured_context_window_max_tokens.is_some() || claude_threshold.is_some());
+
+    ContextRuntimeConfigInfo {
+        configured_model,
+        configured_model_source,
+        configured_context_window_max_tokens,
+        context_window_max_source,
+        auto_compaction_enabled: (native_claude || grok_threshold.is_some()).then_some(true),
+        auto_compaction_threshold,
+        native_auto_compact_window: if agent_type == AgentType::ClaudeCode {
+            configured_context_window_max_tokens
+        } else {
+            None
+        },
+    }
 }
 
 /// Resolve model provider credentials into runtime env vars if `model_provider_id` is set.
@@ -7293,8 +7668,8 @@ pub async fn acp_preflight(
 
 /// Resolve the full runtime env every ACP spawn should receive — settings
 /// override, model provider credentials, git credential helper, OpenClaw
-/// reset flag. Returns `AcpError::protocol("...disabled in settings")` when
-/// the user has disabled the agent.
+/// reset flag. Returns `AcpError::AgentDisabled` when the user has disabled
+/// the agent.
 ///
 /// This is the **single source of truth** for "what env does an agent
 /// process see". Three call sites depend on it:
@@ -7325,9 +7700,7 @@ pub(crate) async fn build_session_runtime_env(
         .map(|model| !model.enabled)
         .unwrap_or(false);
     if disabled {
-        return Err(AcpError::protocol(format!(
-            "{agent_type} is disabled in settings"
-        )));
+        return Err(AcpError::AgentDisabled);
     }
 
     let local_config_json = load_agent_local_config_json(agent_type);
@@ -7477,7 +7850,14 @@ pub(crate) async fn acp_update_agent_env_and_refresh(
     emitter: &EventEmitter,
 ) -> Result<usize, AcpError> {
     acp_update_agent_env_core(agent_type, enabled, env, model_provider_id, db, emitter).await?;
-    Ok(refresh_config_staleness(manager, db, data_dir, &[agent_type], ConfigStaleKind::AgentConfig).await)
+    Ok(refresh_config_staleness(
+        manager,
+        db,
+        data_dir,
+        &[agent_type],
+        ConfigStaleKind::AgentConfig,
+    )
+    .await)
 }
 
 /// `acp_update_agent_preferences_core` followed by a staleness refresh. Shared
@@ -7509,7 +7889,14 @@ pub(crate) async fn acp_update_agent_preferences_and_refresh(
         emitter,
     )
     .await?;
-    Ok(refresh_config_staleness(manager, db, data_dir, &[agent_type], ConfigStaleKind::AgentConfig).await)
+    Ok(refresh_config_staleness(
+        manager,
+        db,
+        data_dir,
+        &[agent_type],
+        ConfigStaleKind::AgentConfig,
+    )
+    .await)
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -7584,6 +7971,40 @@ pub async fn acp_prompt(
         .map(|_| ())
 }
 
+pub(crate) async fn acp_run_maintenance_command_core(
+    db: &AppDatabase,
+    manager: &ConnectionManager,
+    connection_id: String,
+    session_id: String,
+    operation_id: String,
+    command: String,
+) -> Result<MaintenanceCommandResult, AcpError> {
+    manager
+        .run_maintenance_command(db, connection_id, session_id, operation_id, command)
+        .await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_run_maintenance_command(
+    connection_id: String,
+    session_id: String,
+    operation_id: String,
+    command: String,
+    db: State<'_, AppDatabase>,
+    manager: State<'_, ConnectionManager>,
+) -> Result<MaintenanceCommandResult, AcpError> {
+    acp_run_maintenance_command_core(
+        &db,
+        &manager,
+        connection_id,
+        session_id,
+        operation_id,
+        command,
+    )
+    .await
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_set_mode(
@@ -7599,11 +8020,23 @@ pub async fn acp_set_mode(
 pub async fn acp_set_config_option(
     connection_id: String,
     config_id: String,
-    value_id: String,
+    value_id: Option<String>,
+    value: Option<bool>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
+    let value = match (value_id, value) {
+        (Some(value_id), None) if !value_id.trim().is_empty() => {
+            SessionConfigCommandValue::ValueId(value_id)
+        }
+        (None, Some(value)) => SessionConfigCommandValue::Boolean(value),
+        _ => {
+            return Err(AcpError::protocol(
+                "Exactly one session config option value is required".to_string(),
+            ));
+        }
+    };
     manager
-        .set_config_option(&connection_id, config_id, value_id)
+        .set_config_option(&connection_id, config_id, value)
         .await
 }
 
@@ -7919,11 +8352,25 @@ pub(crate) async fn acp_get_agent_status_core(
         ),
     };
 
+    let local_config_json = if agent_type == AgentType::Grok {
+        load_grok_config_toml_raw()
+            .map(|raw| parse_grok_settings(&raw))
+            .and_then(|settings| serde_json::to_string(&settings).ok())
+    } else {
+        load_agent_local_config_json(agent_type)
+    };
+    let mut runtime_env =
+        build_runtime_env_from_setting(agent_type, setting.as_ref(), local_config_json.as_deref());
+    apply_model_provider_env(agent_type, setting.as_ref(), &mut runtime_env, &db.conn).await;
+    let context_runtime_config =
+        build_context_runtime_config(agent_type, &runtime_env, local_config_json.as_deref());
+
     Ok(crate::acp::types::AcpAgentStatus {
         agent_type,
         available,
-        enabled: setting.map(|m| m.enabled).unwrap_or(true),
+        enabled: setting.as_ref().map(|model| model.enabled).unwrap_or(true),
         installed_version,
+        context_runtime_config,
     })
 }
 
@@ -8004,34 +8451,12 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             ),
         };
 
-        let mut env = setting
-            .and_then(|m| m.env_json.as_deref())
-            .and_then(|s| serde_json::from_str::<BTreeMap<String, String>>(s).ok())
-            .unwrap_or_default();
-        let local_config_json = load_agent_local_config_json(agent_type);
-        if let Some(raw_local_config) = local_config_json.as_deref() {
-            if let Ok(local_cfg) = serde_json::from_str::<AgentRuntimeConfig>(raw_local_config) {
-                for (key, value) in local_cfg.env {
-                    let trimmed = value.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    env.insert(key, trimmed.to_string());
-                }
-                let (api_base_url_key, api_key_key, model_key) = agent_env_keys(agent_type);
-                if let Some(value) = trim_non_empty(local_cfg.api_base_url) {
-                    env.insert(api_base_url_key.to_string(), value);
-                }
-                if let Some(value) = trim_non_empty(local_cfg.api_key) {
-                    env.insert(api_key_key.to_string(), value);
-                }
-                if agent_type != AgentType::ClaudeCode {
-                    if let Some(value) = trim_non_empty(local_cfg.model) {
-                        env.insert(model_key.to_string(), value);
-                    }
-                }
-            }
-        }
+        let pi_uses_custom_agent_dir = agent_type == AgentType::Pi
+            && setting
+                .and_then(|model| model.env_json.as_deref())
+                .and_then(|raw| serde_json::from_str::<BTreeMap<String, String>>(raw).ok())
+                .and_then(|env| env.get("PI_CODING_AGENT_DIR").cloned())
+                .is_some_and(|path| !path.trim().is_empty());
         let sort_order = setting.map(|m| m.sort_order).unwrap_or(idx as i32);
         // Persist detected version to DB for binary agents (npx written during install/upgrade)
         if dist_type == "binary" {
@@ -8042,68 +8467,6 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             )
             .await;
         }
-        let codex_auth_json = if agent_type == AgentType::Codex {
-            load_codex_auth_json_raw()
-        } else {
-            None
-        };
-        let opencode_auth_json = if agent_type == AgentType::OpenCode {
-            load_opencode_auth_json_raw()
-        } else {
-            None
-        };
-        let codex_config_toml = if agent_type == AgentType::Codex {
-            load_codex_config_toml_raw()
-        } else {
-            None
-        };
-        let codex_model_catalog = if agent_type == AgentType::Codex {
-            load_codex_model_catalog_source_raw()
-        } else {
-            None
-        };
-        let cline_secrets_json = if agent_type == AgentType::Cline {
-            load_cline_secrets_json_raw()
-        } else {
-            None
-        };
-        // Hermes is self-managed: project its own ~/.hermes/.env + config.yaml
-        // into config_json (read-only) and attach the raw config.yaml for the
-        // advanced editor. The env-merge block above is skipped because
-        // `load_agent_local_config_json` returns None for Hermes (no codeg
-        // local config path), so no Hermes credential leaks into process env.
-        let (config_json, hermes_config_yaml) = if agent_type == AgentType::Hermes {
-            (
-                load_hermes_local_config_json(),
-                fs::read_to_string(hermes_config_yaml_path()).ok(),
-            )
-        } else {
-            (local_config_json, None)
-        };
-        let grok_config_toml = if agent_type == AgentType::Grok {
-            load_grok_config_toml_raw()
-        } else {
-            None
-        };
-        // Parsed scalar settings backing the Grok panel's structured controls
-        // (mode / reasoning effort). Derived from the same raw text so the
-        // dropdowns and the advanced editor stay in sync.
-        let grok_settings = grok_config_toml.as_deref().map(parse_grok_settings);
-        let cursor_cli_config_json = if agent_type == AgentType::Cursor {
-            load_cursor_cli_config_raw()
-        } else {
-            None
-        };
-        // Parsed scalar settings backing the Cursor panel's structured controls
-        // (approval mode / sandbox / permission rules); an absent config file
-        // still yields defaults so the panel renders its editors.
-        let cursor_settings = if agent_type == AgentType::Cursor {
-            Some(parse_cursor_settings(
-                cursor_cli_config_json.as_deref().unwrap_or(""),
-            ))
-        } else {
-            None
-        };
 
         agents.push(AcpAgentInfo {
             agent_type,
@@ -8116,20 +8479,7 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             enabled: setting.map(|m| m.enabled).unwrap_or(true),
             sort_order,
             installed_version: local_installed_version,
-            env,
-            config_json,
-            config_file_path: agent_local_config_path(agent_type)
-                .map(|path| path.display().to_string()),
-            opencode_auth_json,
-            codex_auth_json,
-            codex_config_toml,
-            codex_model_catalog,
-            cline_secrets_json,
-            hermes_config_yaml,
-            grok_config_toml,
-            grok_settings,
-            cursor_cli_config_json,
-            cursor_settings,
+            pi_uses_custom_agent_dir,
             model_provider_id: setting.and_then(|m| m.model_provider_id),
         });
     }
@@ -8140,6 +8490,77 @@ pub(crate) async fn acp_list_agents_core(db: &AppDatabase) -> Result<Vec<AcpAgen
             .then_with(|| a.name.cmp(&b.name))
     });
     Ok(agents)
+}
+
+/// Load editable configuration for a single agent. Unlike `acp_list_agents`,
+/// this payload can contain credentials and raw native config files, so callers
+/// must invoke it only from the selected ACP Settings editor.
+pub(crate) async fn acp_get_agent_editable_config_core(
+    db: &AppDatabase,
+    agent_type: AgentType,
+) -> Result<AcpAgentEditableConfig, AcpError> {
+    let setting = agent_setting_service::get_by_agent_type(&db.conn, agent_type)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?;
+    let local_config_json = load_agent_local_config_json(agent_type);
+    let env =
+        build_runtime_env_from_setting(agent_type, setting.as_ref(), local_config_json.as_deref());
+
+    let opencode_auth_json = (agent_type == AgentType::OpenCode)
+        .then(load_opencode_auth_json_raw)
+        .flatten();
+    let codex_auth_json = (agent_type == AgentType::Codex)
+        .then(load_codex_auth_json_raw)
+        .flatten();
+    let codex_config_toml = (agent_type == AgentType::Codex)
+        .then(load_codex_config_toml_raw)
+        .flatten();
+    let codex_model_catalog = (agent_type == AgentType::Codex)
+        .then(load_codex_model_catalog_source_raw)
+        .flatten();
+    // Hermes is self-managed: its projection backs structured fields and its
+    // raw YAML backs the advanced editor. Neither belongs in the common list.
+    let (config_json, hermes_config_yaml) = if agent_type == AgentType::Hermes {
+        (
+            load_hermes_local_config_json(),
+            fs::read_to_string(hermes_config_yaml_path()).ok(),
+        )
+    } else {
+        (local_config_json, None)
+    };
+    let grok_config_toml = (agent_type == AgentType::Grok)
+        .then(load_grok_config_toml_raw)
+        .flatten();
+    let grok_settings = grok_config_toml.as_deref().map(parse_grok_settings);
+    let cursor_cli_config_json = (agent_type == AgentType::Cursor)
+        .then(load_cursor_cli_config_raw)
+        .flatten();
+    let cursor_settings = (agent_type == AgentType::Cursor)
+        .then(|| parse_cursor_settings(cursor_cli_config_json.as_deref().unwrap_or("")));
+
+    Ok(AcpAgentEditableConfig {
+        agent_type,
+        env,
+        config_json,
+        opencode_auth_json,
+        codex_auth_json,
+        codex_config_toml,
+        codex_model_catalog,
+        hermes_config_yaml,
+        grok_config_toml,
+        grok_settings,
+        cursor_cli_config_json,
+        cursor_settings,
+    })
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_get_agent_editable_config(
+    agent_type: AgentType,
+    db: tauri::State<'_, AppDatabase>,
+) -> Result<AcpAgentEditableConfig, AcpError> {
+    acp_get_agent_editable_config_core(&db, agent_type).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -8224,10 +8645,7 @@ pub(crate) async fn acp_update_agent_preferences_core(
     }
 
     if agent_type == AgentType::OpenCode {
-        persist_opencode_native_config(
-            opencode_auth_json.as_deref(),
-            config_json.as_deref(),
-        )?;
+        persist_opencode_native_config(opencode_auth_json.as_deref(), config_json.as_deref())?;
         emit_acp_agents_updated(emitter, "preferences_updated", Some(agent_type));
         return Ok(());
     }
@@ -8377,7 +8795,11 @@ pub(crate) async fn acp_update_agent_env_core(
             codex_bound_model = Some(provider.model.clone());
         }
         if agent_type == AgentType::ClaudeCode {
-            claude_local_cascade = Some((provider.api_url.clone(), provider.api_key.clone(), model_env));
+            claude_local_cascade = Some((
+                provider.api_url.clone(),
+                provider.api_key.clone(),
+                model_env,
+            ));
         }
     }
 
@@ -8402,7 +8824,9 @@ pub(crate) async fn acp_update_agent_env_core(
             &CodexModelAction::NoOp,
             None,
         ) {
-            eprintln!("[acp_update_agent_env] cascade_update_agent_config({agent_type}) failed: {e}");
+            eprintln!(
+                "[acp_update_agent_env] cascade_update_agent_config({agent_type}) failed: {e}"
+            );
         }
     }
 
@@ -8679,10 +9103,7 @@ pub(crate) async fn acp_update_agent_config_core(
     }
 
     if agent_type == AgentType::OpenCode {
-        persist_opencode_native_config(
-            opencode_auth_json.as_deref(),
-            config_json.as_deref(),
-        )?;
+        persist_opencode_native_config(opencode_auth_json.as_deref(), config_json.as_deref())?;
         emit_acp_agents_updated(emitter, "config_updated", Some(agent_type));
         return Ok(());
     }
@@ -8742,7 +9163,14 @@ pub(crate) async fn acp_update_agent_config_and_refresh(
         emitter,
     )
     .await?;
-    Ok(refresh_config_staleness(manager, db, data_dir, &[agent_type], ConfigStaleKind::AgentConfig).await)
+    Ok(refresh_config_staleness(
+        manager,
+        db,
+        data_dir,
+        &[agent_type],
+        ConfigStaleKind::AgentConfig,
+    )
+    .await)
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -8966,9 +9394,8 @@ fn open_external_terminal_impl(command: &str, cwd: Option<&str>) -> Result<(), A
         // literal (backslashes first, then double-quotes).
         let shell_cmd = format!("cd {} && {}", shell_single_quote(&dir), command);
         let escaped = shell_cmd.replace('\\', "\\\\").replace('"', "\\\"");
-        let osa = format!(
-            "tell application \"Terminal\"\nactivate\ndo script \"{escaped}\"\nend tell"
-        );
+        let osa =
+            format!("tell application \"Terminal\"\nactivate\ndo script \"{escaped}\"\nend tell");
         Command::new("osascript")
             .arg("-e")
             .arg(osa)
@@ -9017,7 +9444,9 @@ fn open_external_terminal_impl(command: &str, cwd: Option<&str>) -> Result<(), A
     }
 
     #[allow(unreachable_code)]
-    Err(AcpError::protocol("unsupported platform for terminal launch"))
+    Err(AcpError::protocol(
+        "unsupported platform for terminal launch",
+    ))
 }
 
 /// Quote a string for a single-quoted POSIX shell argument.
@@ -9205,10 +9634,7 @@ pub(crate) async fn acp_install_uv_tool_core(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn acp_install_uv_tool(
-    task_id: String,
-    app: tauri::AppHandle,
-) -> Result<(), AcpError> {
+pub async fn acp_install_uv_tool(task_id: String, app: tauri::AppHandle) -> Result<(), AcpError> {
     let emitter = EventEmitter::Tauri(app);
     acp_install_uv_tool_core(task_id, &emitter).await
 }
@@ -9585,10 +10011,7 @@ pub(crate) async fn acp_install_pi_binary_core(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn acp_install_pi_binary(
-    task_id: String,
-    app: tauri::AppHandle,
-) -> Result<(), AcpError> {
+pub async fn acp_install_pi_binary(task_id: String, app: tauri::AppHandle) -> Result<(), AcpError> {
     let emitter = EventEmitter::Tauri(app);
     acp_install_pi_binary_core(task_id, &emitter).await
 }
@@ -10163,6 +10586,229 @@ pub(crate) async fn codex_poll_device_code_core(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::acp::types::AcpAgentStatus;
+
+    fn agent_setting_with_env(
+        env: BTreeMap<String, String>,
+    ) -> crate::db::entities::agent_setting::Model {
+        let now = chrono::Utc::now();
+        crate::db::entities::agent_setting::Model {
+            id: 1,
+            agent_type: "claude_code".to_string(),
+            registry_id: "claude-code".to_string(),
+            enabled: true,
+            sort_order: 0,
+            installed_version: None,
+            env_json: Some(serde_json::to_string(&env).expect("serialize env")),
+            model_provider_id: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn runtime_env_prefers_non_empty_local_values_and_maps_claude_provider_fields() {
+        let setting = agent_setting_with_env(BTreeMap::from([
+            (
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                "1000000".to_string(),
+            ),
+            ("PRESERVED_DB_VALUE".to_string(), "db".to_string()),
+        ]));
+        let local_config = serde_json::json!({
+            "env": {
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000",
+                "PRESERVED_DB_VALUE": "   "
+            },
+            "apiBaseUrl": "https://proxy.example/v1",
+            "apiKey": "test-token",
+            "model": "must-not-be-anthropic-model"
+        })
+        .to_string();
+
+        let runtime = build_runtime_env_from_setting(
+            AgentType::ClaudeCode,
+            Some(&setting),
+            Some(&local_config),
+        );
+
+        assert_eq!(
+            runtime.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW"),
+            Some(&"300000".to_string())
+        );
+        assert_eq!(runtime.get("PRESERVED_DB_VALUE"), Some(&"db".to_string()));
+        assert_eq!(
+            runtime.get("ANTHROPIC_BASE_URL"),
+            Some(&"https://proxy.example/v1".to_string())
+        );
+        assert_eq!(
+            runtime.get("ANTHROPIC_AUTH_TOKEN"),
+            Some(&"test-token".to_string())
+        );
+        assert!(!runtime.contains_key("ANTHROPIC_MODEL"));
+    }
+
+    #[test]
+    fn context_runtime_projection_serializes_only_allowlisted_fields() {
+        let mut runtime_env = BTreeMap::from([
+            ("ANTHROPIC_MODEL".to_string(), "claude-opus".to_string()),
+            (
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                "300000".to_string(),
+            ),
+            (
+                "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE".to_string(),
+                "0.35".to_string(),
+            ),
+            (
+                "ANTHROPIC_API_KEY".to_string(),
+                "credential-value".to_string(),
+            ),
+        ]);
+        runtime_env.insert("AUTH_TOKEN".to_string(), "auth-value".to_string());
+        let config = serde_json::json!({
+            "password": "password-value",
+            "token": "token-value",
+            "env": { "SECRET": "config-secret-value" }
+        })
+        .to_string();
+        let status = AcpAgentStatus {
+            agent_type: AgentType::ClaudeCode,
+            available: true,
+            enabled: true,
+            installed_version: Some("test".to_string()),
+            context_runtime_config: build_context_runtime_config(
+                AgentType::ClaudeCode,
+                &runtime_env,
+                Some(&config),
+            ),
+        };
+
+        let wire = serde_json::to_value(status).expect("status serializes");
+        let top_level = wire.as_object().expect("status is an object");
+        let mut top_keys = top_level.keys().map(String::as_str).collect::<Vec<_>>();
+        top_keys.sort_unstable();
+        assert_eq!(
+            top_keys,
+            vec![
+                "agent_type",
+                "available",
+                "context_runtime_config",
+                "enabled",
+                "installed_version",
+            ]
+        );
+        let context = top_level["context_runtime_config"]
+            .as_object()
+            .expect("context config is an object");
+        let mut context_keys = context.keys().map(String::as_str).collect::<Vec<_>>();
+        context_keys.sort_unstable();
+        assert_eq!(
+            context_keys,
+            vec![
+                "auto_compaction_enabled",
+                "auto_compaction_threshold",
+                "configured_context_window_max_tokens",
+                "configured_model",
+                "configured_model_source",
+                "context_window_max_source",
+                "native_auto_compact_window",
+            ]
+        );
+        let encoded = wire.to_string();
+        for forbidden in [
+            "ANTHROPIC_API_KEY",
+            "credential-value",
+            "AUTH_TOKEN",
+            "auth-value",
+            "password-value",
+            "token-value",
+            "config-secret-value",
+        ] {
+            assert!(!encoded.contains(forbidden), "wire leaked {forbidden}");
+        }
+    }
+
+    #[test]
+    fn context_runtime_projection_preserves_source_and_normalizes_percent() {
+        let runtime_env = BTreeMap::from([
+            ("ANTHROPIC_MODEL".to_string(), "config-model".to_string()),
+            (
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                "400000".to_string(),
+            ),
+            (
+                "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE".to_string(),
+                "35%".to_string(),
+            ),
+        ]);
+        let config = serde_json::json!({
+            "env": {
+                "ANTHROPIC_MODEL": "config-model",
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"
+            }
+        })
+        .to_string();
+
+        let projected =
+            build_context_runtime_config(AgentType::ClaudeCode, &runtime_env, Some(&config));
+        assert_eq!(projected.configured_model.as_deref(), Some("config-model"));
+        assert_eq!(
+            projected.configured_model_source,
+            Some(ConfiguredModelSource::AgentConfigEnv)
+        );
+        assert_eq!(
+            projected.configured_context_window_max_tokens,
+            Some(400_000)
+        );
+        assert_eq!(
+            projected.context_window_max_source,
+            Some(ContextWindowMaxSource::AgentConfigEnv)
+        );
+        assert_eq!(projected.auto_compaction_threshold, Some(35.0));
+        assert_eq!(projected.native_auto_compact_window, Some(400_000));
+    }
+
+    #[test]
+    fn context_runtime_projection_uses_kimi_effective_model_env() {
+        let runtime_env =
+            BTreeMap::from([("KIMI_MODEL_NAME".to_string(), "kimi-for-coding".to_string())]);
+
+        let projected = build_context_runtime_config(AgentType::KimiCode, &runtime_env, None);
+
+        assert_eq!(
+            projected.configured_model.as_deref(),
+            Some("kimi-for-coding")
+        );
+        assert_eq!(
+            projected.configured_model_source,
+            Some(ConfiguredModelSource::AgentEnv)
+        );
+    }
+
+    #[test]
+    fn context_runtime_projection_rejects_invalid_window_and_percent() {
+        let runtime_env = BTreeMap::from([
+            (
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                "99999".to_string(),
+            ),
+            (
+                "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE".to_string(),
+                "101".to_string(),
+            ),
+        ]);
+        let projected = build_context_runtime_config(AgentType::ClaudeCode, &runtime_env, None);
+        assert_eq!(projected.configured_context_window_max_tokens, None);
+        assert_eq!(projected.context_window_max_source, None);
+        assert_eq!(projected.auto_compaction_threshold, None);
+        assert_eq!(projected.native_auto_compact_window, None);
+        assert_eq!(projected.auto_compaction_enabled, None);
+        assert_eq!(
+            parse_context_percent(Some(&serde_json::Value::String("35%%".to_string()))),
+            None
+        );
+    }
 
     #[test]
     fn parse_grok_settings_reads_documented_keys() {
@@ -10178,7 +10824,10 @@ mod tests {
         // codeg's old codeg-invented markers map onto grok's real enum so the
         // dropdown, launch flag, and grok's TUI agree.
         let approve = parse_grok_settings("[ui]\npermission_mode = \"always-approve\"\n");
-        assert_eq!(approve.permission_mode.as_deref(), Some("bypassPermissions"));
+        assert_eq!(
+            approve.permission_mode.as_deref(),
+            Some("bypassPermissions")
+        );
         let ask = parse_grok_settings("[ui]\npermission_mode = \"ask\"\n");
         assert_eq!(ask.permission_mode.as_deref(), Some("default"));
         // A real grok mode is preserved untouched.
@@ -10252,10 +10901,15 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(merged.contains("session_summary"), "inline sibling preserved");
+        assert!(
+            merged.contains("session_summary"),
+            "inline sibling preserved"
+        );
         assert!(merged.contains("grok-4.5"), "inline default preserved");
         assert_eq!(
-            parse_grok_settings(&merged).default_reasoning_effort.as_deref(),
+            parse_grok_settings(&merged)
+                .default_reasoning_effort
+                .as_deref(),
             Some("high")
         );
     }
@@ -10264,8 +10918,7 @@ mod tests {
     fn apply_grok_structured_config_removes_on_none() {
         let base = "[ui]\npermission_mode = \"ask\"\n\n\
                     [models]\ndefault_reasoning_effort = \"high\"\n";
-        let merged =
-            apply_grok_structured_config(base, &GrokStructuredConfig::default()).unwrap();
+        let merged = apply_grok_structured_config(base, &GrokStructuredConfig::default()).unwrap();
         let back = parse_grok_settings(&merged);
         assert!(back.permission_mode.is_none(), "unset removes the key");
         assert!(back.default_reasoning_effort.is_none());
@@ -10357,7 +11010,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(!merged.contains("base_url"), "empty base_url must omit the key");
+        assert!(
+            !merged.contains("base_url"),
+            "empty base_url must omit the key"
+        );
         let back = parse_grok_settings(&merged);
         assert_eq!(back.custom_model_id.as_deref(), Some("foo"));
         assert!(back.custom_base_url.is_none());
@@ -10391,7 +11047,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(!merged.contains("old"), "the stale block + default must be gone");
+        assert!(
+            !merged.contains("old"),
+            "the stale block + default must be gone"
+        );
         let back = parse_grok_settings(&merged);
         assert_eq!(back.custom_model_id.as_deref(), Some("new"));
         assert_eq!(back.custom_base_url.as_deref(), Some("https://new/v1"));
@@ -10400,7 +11059,8 @@ mod tests {
     #[test]
     fn apply_grok_custom_model_update_preserves_unmanaged_block_keys() {
         // Editing a managed block keeps keys codeg doesn't own (e.g. temperature).
-        let base = "[model.foo]\nmodel = \"foo\"\ntemperature = 0.7\nbase_url = \"https://old/v1\"\n\n\
+        let base =
+            "[model.foo]\nmodel = \"foo\"\ntemperature = 0.7\nbase_url = \"https://old/v1\"\n\n\
                     [models]\ndefault = \"foo\"\n";
         let merged = apply_grok_structured_config(
             base,
@@ -10420,8 +11080,7 @@ mod tests {
     fn apply_grok_custom_model_clear_removes_managed_block_and_default() {
         let base = "[model.foo]\nmodel = \"foo\"\nbase_url = \"https://x/v1\"\n\n\
                     [models]\ndefault = \"foo\"\n";
-        let merged =
-            apply_grok_structured_config(base, &GrokStructuredConfig::default()).unwrap();
+        let merged = apply_grok_structured_config(base, &GrokStructuredConfig::default()).unwrap();
         assert!(!merged.contains("[model."), "managed block removed");
         let back = parse_grok_settings(&merged);
         assert!(back.custom_model_id.is_none());
@@ -10432,8 +11091,7 @@ mod tests {
         // Clearing the (empty) custom form must NOT delete a hand-set stock
         // `[models].default` that was never codeg-managed.
         let base = "[models]\ndefault = \"grok-4.5\"\n";
-        let merged =
-            apply_grok_structured_config(base, &GrokStructuredConfig::default()).unwrap();
+        let merged = apply_grok_structured_config(base, &GrokStructuredConfig::default()).unwrap();
         assert!(merged.contains("default = \"grok-4.5\""));
     }
 
@@ -10454,8 +11112,7 @@ mod tests {
         );
         // `None` removes an existing key.
         let base = "[session]\nauto_compact_threshold_percent = 70\n";
-        let cleared =
-            apply_grok_structured_config(base, &GrokStructuredConfig::default()).unwrap();
+        let cleared = apply_grok_structured_config(base, &GrokStructuredConfig::default()).unwrap();
         assert!(parse_grok_settings(&cleared)
             .auto_compact_threshold_percent
             .is_none());
@@ -10755,10 +11412,7 @@ wire_api = "responses"
 base_url = "https://gateway.example/v1"
 wire_api = "chat"
 "#;
-        let other = codeg.replace(
-            "model_provider = \"codeg\"",
-            "model_provider = \"other\"",
-        );
+        let other = codeg.replace("model_provider = \"codeg\"", "model_provider = \"other\"");
 
         let p_codeg = codex_config_projection_from_toml(codeg);
         let p_other = codex_config_projection_from_toml(&other);
@@ -10794,7 +11448,10 @@ wire_api = "chat"
         // behavior; the bare `model` still projects.
         let bare = codex_config_projection_from_toml("model = \"gpt-5-codex\"\n");
         assert!(!bare.contains_key("modelProvider"));
-        assert_eq!(bare.get("model").and_then(|v| v.as_str()), Some("gpt-5-codex"));
+        assert_eq!(
+            bare.get("model").and_then(|v| v.as_str()),
+            Some("gpt-5-codex")
+        );
 
         // Malformed TOML must not panic — yields an empty projection.
         assert!(codex_config_projection_from_toml("model_provider = ").is_empty());
@@ -10886,7 +11543,10 @@ wire_api = "chat"
             out.get("ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"),
             Some(&Some("via gateway".to_string()))
         );
-        assert_eq!(out.get("ANTHROPIC_MODEL"), Some(&Some("gw/opus".to_string())));
+        assert_eq!(
+            out.get("ANTHROPIC_MODEL"),
+            Some(&Some("gw/opus".to_string()))
+        );
 
         // Omitted custom keys are authoritative clears (None => remove from env),
         // matching the five model fields' overwrite semantics.
@@ -10909,7 +11569,10 @@ wire_api = "chat"
 
         // A legacy plain slug passes through as the model.
         let legacy = parse_provider_model(AgentType::Codex, Some("gpt-5.5"));
-        assert_eq!(legacy.get("OPENAI_MODEL"), Some(&Some("gpt-5.5".to_string())));
+        assert_eq!(
+            legacy.get("OPENAI_MODEL"),
+            Some(&Some("gpt-5.5".to_string()))
+        );
 
         // No models → OPENAI_MODEL cleared (None).
         let empty = parse_provider_model(AgentType::Codex, Some(r#"{"models":[]}"#));
@@ -10952,13 +11615,14 @@ wire_api = "chat"
 
     #[test]
     fn fingerprint_config_is_deterministic_and_excludes_volatile_keys() {
-        let agent = AgentType::Codex;
+        // OpenClaw has no native config input, so this generic env-hashing test
+        // stays isolated from live agent settings that parallel tests may edit.
+        let agent = AgentType::OpenClaw;
         let mut env = BTreeMap::new();
         env.insert("OPENAI_BASE_URL".to_string(), "https://a".to_string());
         env.insert("OPENAI_API_KEY".to_string(), "k1".to_string());
 
-        // Same inputs → same fingerprint (the native-config read is identical
-        // across all calls in this test, so only the env varies).
+        // Same inputs produce the same fingerprint.
         let fp1 = fingerprint_config(agent, &env);
         assert_eq!(fp1, fingerprint_config(agent, &env));
 
@@ -11068,7 +11732,10 @@ wire_api = "chat"
             "the legacy approvalMode key is dropped: the CLI never reads it \
              from cli-config.json"
         );
-        assert_eq!(v.pointer("/sandbox/mode"), Some(&serde_json::json!("enabled")));
+        assert_eq!(
+            v.pointer("/sandbox/mode"),
+            Some(&serde_json::json!("enabled"))
+        );
         assert_eq!(
             v.pointer("/permissions/allow"),
             Some(&serde_json::json!(["Shell(npm run build)"]))
@@ -11083,11 +11750,11 @@ wire_api = "chat"
         // API-key mode: the form value wins over saved env and is trimmed; the
         // base URL is always scrubbed to empty (⇒ removed by run_cursor_probe).
         let env = cursor_probe_env(&db, Some("  my-key  ")).await;
-        assert_eq!(env.get("CURSOR_API_KEY").map(String::as_str), Some("my-key"));
         assert_eq!(
-            env.get("CURSOR_API_BASE_URL").map(String::as_str),
-            Some("")
+            env.get("CURSOR_API_KEY").map(String::as_str),
+            Some("my-key")
         );
+        assert_eq!(env.get("CURSOR_API_BASE_URL").map(String::as_str), Some(""));
 
         // Subscription passes an empty key → present but empty, so the probe
         // strips any inherited value instead of leaking it.
@@ -11136,8 +11803,7 @@ wire_api = "chat"
     #[test]
     fn parse_cursor_models_tolerates_ansi_markers_and_bare_ids() {
         // ANSI SGR + a leading list marker + a bare-id line with no label.
-        let stdout =
-            "\u{1b}[1mAvailable models\u{1b}[0m\n- gpt-5.2 - GPT-5.2\ncomposer-2.5\n";
+        let stdout = "\u{1b}[1mAvailable models\u{1b}[0m\n- gpt-5.2 - GPT-5.2\ncomposer-2.5\n";
         let (models, default_model) = parse_cursor_models(stdout);
         assert_eq!(default_model, None);
         assert_eq!(models.len(), 2);
@@ -11571,8 +12237,14 @@ wire_api = "chat"
     fn parse_env_file_ignores_comments_and_strips_quotes() {
         let raw = "# comment\n\nexport OPENROUTER_API_KEY=\"sk-or-123\"\nOPENAI_BASE_URL='https://x.test/v1'\nBARE=plain\n=novalue\n";
         let map = parse_env_file(raw);
-        assert_eq!(map.get("OPENROUTER_API_KEY").map(String::as_str), Some("sk-or-123"));
-        assert_eq!(map.get("OPENAI_BASE_URL").map(String::as_str), Some("https://x.test/v1"));
+        assert_eq!(
+            map.get("OPENROUTER_API_KEY").map(String::as_str),
+            Some("sk-or-123")
+        );
+        assert_eq!(
+            map.get("OPENAI_BASE_URL").map(String::as_str),
+            Some("https://x.test/v1")
+        );
         assert_eq!(map.get("BARE").map(String::as_str), Some("plain"));
         assert!(!map.contains_key(""));
     }
@@ -11582,9 +12254,18 @@ wire_api = "chat"
         let existing = "# secrets\nOPENROUTER_API_KEY=old\n\nOTHER_TOKEN=keep\n";
         let out = patch_env_text(existing, &[("OPENROUTER_API_KEY", "new")]);
         assert!(out.contains("# secrets"), "comment preserved: {out}");
-        assert!(out.contains("OPENROUTER_API_KEY=new"), "key replaced: {out}");
-        assert!(!out.contains("OPENROUTER_API_KEY=old"), "old value gone: {out}");
-        assert!(out.contains("OTHER_TOKEN=keep"), "unrelated key preserved: {out}");
+        assert!(
+            out.contains("OPENROUTER_API_KEY=new"),
+            "key replaced: {out}"
+        );
+        assert!(
+            !out.contains("OPENROUTER_API_KEY=old"),
+            "old value gone: {out}"
+        );
+        assert!(
+            out.contains("OTHER_TOKEN=keep"),
+            "unrelated key preserved: {out}"
+        );
         // Replacement happens in place, not appended at the end.
         assert_eq!(out.matches("OPENROUTER_API_KEY=").count(), 1);
         assert!(out.ends_with('\n'));
@@ -11596,13 +12277,22 @@ wire_api = "chat"
         // last-occurrence-wins, so a stale second line would shadow the update.
         let existing = "OPENAI_API_KEY=old1\nKEEP=1\nOPENAI_API_KEY=old2\n";
         let out = patch_env_text(existing, &[("OPENAI_API_KEY", "new")]);
-        assert_eq!(out.matches("OPENAI_API_KEY=").count(), 1, "single key: {out}");
+        assert_eq!(
+            out.matches("OPENAI_API_KEY=").count(),
+            1,
+            "single key: {out}"
+        );
         assert!(out.contains("OPENAI_API_KEY=new"));
-        assert!(!out.contains("old1") && !out.contains("old2"), "stale gone: {out}");
+        assert!(
+            !out.contains("old1") && !out.contains("old2"),
+            "stale gone: {out}"
+        );
         assert!(out.contains("KEEP=1"));
         // And a reader of the result sees the new value, not a stale shadow.
         assert_eq!(
-            parse_env_file(&out).get("OPENAI_API_KEY").map(String::as_str),
+            parse_env_file(&out)
+                .get("OPENAI_API_KEY")
+                .map(String::as_str),
             Some("new")
         );
     }
@@ -11633,7 +12323,8 @@ wire_api = "chat"
 
     #[test]
     fn merge_hermes_model_config_sets_model_and_keeps_other_keys() {
-        let existing = "terminal:\n  backend: local\nmodel:\n  default: old-model\n  provider: openai\n";
+        let existing =
+            "terminal:\n  backend: local\nmodel:\n  default: old-model\n  provider: openai\n";
         let merged = merge_hermes_model_config(
             Some(existing),
             "openrouter",
@@ -11644,14 +12335,20 @@ wire_api = "chat"
         .expect("merge");
         let value: serde_yaml::Value = serde_yaml::from_str(&merged).expect("parse merged");
         let model = value.get("model").expect("model section");
-        assert_eq!(model.get("provider").and_then(|v| v.as_str()), Some("openrouter"));
+        assert_eq!(
+            model.get("provider").and_then(|v| v.as_str()),
+            Some("openrouter")
+        );
         assert_eq!(
             model.get("default").and_then(|v| v.as_str()),
             Some("moonshotai/kimi-k2")
         );
         // Unrelated top-level keys survive the targeted merge.
         assert_eq!(
-            value.get("terminal").and_then(|t| t.get("backend")).and_then(|v| v.as_str()),
+            value
+                .get("terminal")
+                .and_then(|t| t.get("backend"))
+                .and_then(|v| v.as_str()),
             Some("local")
         );
         // No base_url was requested, so none is written.
@@ -11670,7 +12367,10 @@ wire_api = "chat"
         .expect("merge with base");
         let value: serde_yaml::Value = serde_yaml::from_str(&with_base).expect("parse");
         assert_eq!(
-            value.get("model").and_then(|m| m.get("base_url")).and_then(|v| v.as_str()),
+            value
+                .get("model")
+                .and_then(|m| m.get("base_url"))
+                .and_then(|v| v.as_str()),
             Some("https://api.test/v1")
         );
         // Set("") clears the field (user emptied the API URL input).
@@ -11696,7 +12396,10 @@ wire_api = "chat"
         .expect("merge preserve");
         let value: serde_yaml::Value = serde_yaml::from_str(&kept).expect("parse");
         assert_eq!(
-            value.get("model").and_then(|m| m.get("base_url")).and_then(|v| v.as_str()),
+            value
+                .get("model")
+                .and_then(|m| m.get("base_url"))
+                .and_then(|v| v.as_str()),
             Some("https://api.test/v1")
         );
     }
@@ -11717,8 +12420,14 @@ wire_api = "chat"
         .expect("merge custom");
         let value: serde_yaml::Value = serde_yaml::from_str(&with_key).expect("parse");
         let model = value.get("model").expect("model section");
-        assert_eq!(model.get("provider").and_then(|v| v.as_str()), Some("custom"));
-        assert_eq!(model.get("api_key").and_then(|v| v.as_str()), Some("sk-abc"));
+        assert_eq!(
+            model.get("provider").and_then(|v| v.as_str()),
+            Some("custom")
+        );
+        assert_eq!(
+            model.get("api_key").and_then(|v| v.as_str()),
+            Some("sk-abc")
+        );
         assert_eq!(
             model.get("base_url").and_then(|v| v.as_str()),
             Some("https://endpoint.test/v1")
@@ -11741,7 +12450,8 @@ wire_api = "chat"
 
         // custom→custom re-save with scrub_mode=false preserves a raw-editor
         // `api_mode`; switching in with scrub_mode=true drops it.
-        let with_mode = "model:\n  provider: custom\n  default: m\n  api_mode: anthropic_messages\n";
+        let with_mode =
+            "model:\n  provider: custom\n  default: m\n  api_mode: anthropic_messages\n";
         let resaved = merge_hermes_model_config(
             Some(with_mode),
             "custom",
@@ -11791,15 +12501,22 @@ wire_api = "chat"
         .expect("merge switch");
         let value: serde_yaml::Value = serde_yaml::from_str(&switched).expect("parse");
         let model = value.get("model").expect("model section");
-        assert!(model.get("api_key").is_none(), "stale inline key must be scrubbed");
-        assert!(model.get("api_mode").is_none(), "stale api_mode must be scrubbed");
+        assert!(
+            model.get("api_key").is_none(),
+            "stale inline key must be scrubbed"
+        );
+        assert!(
+            model.get("api_mode").is_none(),
+            "stale api_mode must be scrubbed"
+        );
     }
 
     #[test]
     fn plan_hermes_write_preserves_base_url_for_fixed_endpoint_provider() {
         // Anthropic (needsBaseUrl: false) behind a proxy: a structured save that
         // doesn't touch the hidden API URL field must keep the existing endpoint.
-        let existing = "model:\n  provider: anthropic\n  default: old\n  base_url: https://my-proxy/v1\n";
+        let existing =
+            "model:\n  provider: anthropic\n  default: old\n  base_url: https://my-proxy/v1\n";
         let (yaml, env) = plan_hermes_write(
             "anthropic",
             Some("sk-ant"),
@@ -11811,7 +12528,10 @@ wire_api = "chat"
         .expect("plan");
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("yaml");
         assert_eq!(
-            value.get("model").and_then(|m| m.get("base_url")).and_then(|v| v.as_str()),
+            value
+                .get("model")
+                .and_then(|m| m.get("base_url"))
+                .and_then(|v| v.as_str()),
             Some("https://my-proxy/v1"),
             "out-of-band base_url must survive a structured save"
         );
@@ -11837,7 +12557,10 @@ wire_api = "chat"
         .expect("plan");
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("yaml");
         assert_eq!(
-            value.get("model").and_then(|m| m.get("provider")).and_then(|v| v.as_str()),
+            value
+                .get("model")
+                .and_then(|m| m.get("provider"))
+                .and_then(|v| v.as_str()),
             Some("anthropic")
         );
         assert!(
@@ -11865,8 +12588,8 @@ wire_api = "chat"
             assert!(!env.iter().any(|(k, _)| *k == "OPENROUTER_API_KEY"));
         }
         // A provided key is written alongside the neutralization.
-        let (_, env) = plan_hermes_write("openrouter", Some("sk-or"), "m", None, None, None)
-            .expect("keyed");
+        let (_, env) =
+            plan_hermes_write("openrouter", Some("sk-or"), "m", None, None, None).expect("keyed");
         assert!(env.contains(&("OPENROUTER_API_KEY", "sk-or".to_string())));
         assert!(env.contains(&("OPENAI_API_KEY", String::new())));
     }
@@ -11913,7 +12636,11 @@ wire_api = "chat"
         let inode_before = fs::metadata(&env_path).unwrap().ino();
         write_hermes_secret_file(&env_path, "OPENROUTER_API_KEY=sk-2\n", ".env")
             .expect("rewrite env");
-        assert_eq!(mode_of(&env_path), 0o640, "existing managed mode must be preserved");
+        assert_eq!(
+            mode_of(&env_path),
+            0o640,
+            "existing managed mode must be preserved"
+        );
         assert_eq!(
             fs::metadata(&env_path).unwrap().ino(),
             inode_before,
@@ -11940,7 +12667,10 @@ wire_api = "chat"
         write_hermes_secret_file(&link, "model:\n  provider: anthropic\n", "config.yaml")
             .expect("write through symlink");
         assert!(
-            fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
             "the symlink must be preserved, not replaced by a regular file"
         );
         assert_eq!(
@@ -11960,7 +12690,10 @@ wire_api = "chat"
         let real = dir.join("vault-hermes.env");
         let link = dir.join(".env");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        assert!(fs::metadata(&link).is_err(), "precondition: dangling symlink");
+        assert!(
+            fs::metadata(&link).is_err(),
+            "precondition: dangling symlink"
+        );
 
         write_hermes_secret_file(&link, "OPENROUTER_API_KEY=sk\n", ".env").expect("write");
         // The target is created THROUGH the symlink and is owner-only (0600), not
@@ -11970,9 +12703,15 @@ wire_api = "chat"
             0o600,
             "a freshly created symlink target must be 0600"
         );
-        assert_eq!(fs::read_to_string(&real).unwrap(), "OPENROUTER_API_KEY=sk\n");
+        assert_eq!(
+            fs::read_to_string(&real).unwrap(),
+            "OPENROUTER_API_KEY=sk\n"
+        );
         assert!(
-            fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
             "the symlink itself must be preserved"
         );
     }
@@ -11997,7 +12736,11 @@ wire_api = "chat"
         fs::write(&env_path, "OPENROUTER_API_KEY=old\n").unwrap();
         fs::set_permissions(&env_path, fs::Permissions::from_mode(0o644)).unwrap();
         write_hermes_secret_file(&env_path, "OPENROUTER_API_KEY=new\n", ".env").unwrap();
-        assert_eq!(mode_of(&env_path), 0o600, "a world-readable 0644 secret → 0600");
+        assert_eq!(
+            mode_of(&env_path),
+            0o600,
+            "a world-readable 0644 secret → 0600"
+        );
         assert_eq!(
             fs::read_to_string(&env_path).unwrap(),
             "OPENROUTER_API_KEY=new\n"
@@ -12008,7 +12751,11 @@ wire_api = "chat"
         fs::write(&managed, "K=1\n").unwrap();
         fs::set_permissions(&managed, fs::Permissions::from_mode(0o640)).unwrap();
         write_hermes_secret_file(&managed, "K=2\n", ".env").unwrap();
-        assert_eq!(mode_of(&managed), 0o640, "managed group-shared mode preserved");
+        assert_eq!(
+            mode_of(&managed),
+            0o640,
+            "managed group-shared mode preserved"
+        );
     }
 
     #[cfg(unix)]
@@ -12045,7 +12792,11 @@ wire_api = "chat"
         fs::create_dir_all(&managed).unwrap();
         fs::set_permissions(&managed, fs::Permissions::from_mode(0o755)).unwrap();
         ensure_hermes_home_secure(&managed).expect("ensure managed");
-        assert_eq!(mode_of(&managed), 0o755, "existing hermes home mode preserved");
+        assert_eq!(
+            mode_of(&managed),
+            0o755,
+            "existing hermes home mode preserved"
+        );
     }
 
     // ── Hermes base-URL reconcile (auxiliary/main endpoint parity) ──────────
@@ -12076,11 +12827,19 @@ wire_api = "chat"
     fn plan_hermes_base_url_reconcile_ignores_trailing_slash() {
         // Trailing-slash-only differences must not churn .env (both directions).
         assert_eq!(
-            plan_hermes_base_url_reconcile("openai-api", Some("https://x/v1/"), Some("https://x/v1")),
+            plan_hermes_base_url_reconcile(
+                "openai-api",
+                Some("https://x/v1/"),
+                Some("https://x/v1")
+            ),
             None
         );
         assert_eq!(
-            plan_hermes_base_url_reconcile("openai-api", Some("https://x/v1"), Some("https://x/v1/")),
+            plan_hermes_base_url_reconcile(
+                "openai-api",
+                Some("https://x/v1"),
+                Some("https://x/v1/")
+            ),
             None
         );
     }
@@ -12098,9 +12857,18 @@ wire_api = "chat"
     #[test]
     fn plan_hermes_base_url_reconcile_no_op_when_both_empty() {
         // Absent var and explicitly-empty var both → no-op (no redundant `KEY=`).
-        assert_eq!(plan_hermes_base_url_reconcile("openai-api", None, None), None);
-        assert_eq!(plan_hermes_base_url_reconcile("openai-api", None, Some("")), None);
-        assert_eq!(plan_hermes_base_url_reconcile("openai-api", Some("  "), Some("")), None);
+        assert_eq!(
+            plan_hermes_base_url_reconcile("openai-api", None, None),
+            None
+        );
+        assert_eq!(
+            plan_hermes_base_url_reconcile("openai-api", None, Some("")),
+            None
+        );
+        assert_eq!(
+            plan_hermes_base_url_reconcile("openai-api", Some("  "), Some("")),
+            None
+        );
     }
 
     #[test]
@@ -12131,7 +12899,10 @@ wire_api = "chat"
     fn plan_hermes_base_url_reconcile_openrouter_only_touches_its_own_var() {
         // openrouter never returns an OPENAI_BASE_URL write (that would re-pollute
         // the panel's neutralization); it only reconciles OPENROUTER_BASE_URL.
-        assert_eq!(plan_hermes_base_url_reconcile("openrouter", None, None), None);
+        assert_eq!(
+            plan_hermes_base_url_reconcile("openrouter", None, None),
+            None
+        );
         assert_eq!(
             plan_hermes_base_url_reconcile("openrouter", Some("https://or/api/v1"), None),
             Some(("OPENROUTER_BASE_URL", "https://or/api/v1".to_string()))
@@ -12273,7 +13044,10 @@ wire_api = "chat"
         .unwrap();
         reconcile_hermes_runtime_env_in(home).expect("reconcile");
         let env = fs::read_to_string(home.join(".env")).unwrap();
-        assert!(env.contains("OPENAI_BASE_URL=\n"), "stale base url cleared: {env:?}");
+        assert!(
+            env.contains("OPENAI_BASE_URL=\n"),
+            "stale base url cleared: {env:?}"
+        );
         assert!(env.contains("OPENAI_API_KEY=sk"), "key preserved: {env:?}");
     }
 
@@ -12309,11 +13083,17 @@ wire_api = "chat"
         // either (both an absolute path and a literal `~/…` path are passed as-is).
         let mut abs = BTreeMap::new();
         abs.insert("HERMES_HOME".to_string(), "/tmp/hermes-alt".to_string());
-        assert_eq!(hermes_home_for_launch(&abs), PathBuf::from("/tmp/hermes-alt"));
+        assert_eq!(
+            hermes_home_for_launch(&abs),
+            PathBuf::from("/tmp/hermes-alt")
+        );
 
         let mut tilde = BTreeMap::new();
         tilde.insert("HERMES_HOME".to_string(), "~/alt-hermes".to_string());
-        assert_eq!(hermes_home_for_launch(&tilde), PathBuf::from("~/alt-hermes"));
+        assert_eq!(
+            hermes_home_for_launch(&tilde),
+            PathBuf::from("~/alt-hermes")
+        );
 
         // A blank override REPLACES the parent value in the child, and Hermes then
         // falls back to the default `~/.hermes` — not the parent's HERMES_HOME.
@@ -12388,10 +13168,7 @@ wire_api = "chat"
     fn hermes_skip_chmod_requires_a_non_empty_opt_out() {
         // A non-empty opt-out enables skip.
         temp_env::with_vars(
-            [
-                ("HERMES_SKIP_CHMOD", Some("1")),
-                ("HERMES_CONTAINER", None),
-            ],
+            [("HERMES_SKIP_CHMOD", Some("1")), ("HERMES_CONTAINER", None)],
             || assert!(hermes_skip_chmod(), "non-empty HERMES_SKIP_CHMOD skips"),
         );
         // An EMPTY opt-out must NOT skip (Hermes' Python truthiness treats `` as
@@ -12436,9 +13213,14 @@ wire_api = "chat"
         assert_eq!(openai_api.key_env_var, "OPENAI_API_KEY");
         assert!(openai_api.needs_base_url);
         // Hermes' first-priority key var per provider (auth.py PROVIDER_REGISTRY).
-        assert_eq!(hermes_provider("zai").expect("zai").key_env_var, "GLM_API_KEY");
         assert_eq!(
-            hermes_provider("kimi-coding").expect("kimi-coding").key_env_var,
+            hermes_provider("zai").expect("zai").key_env_var,
+            "GLM_API_KEY"
+        );
+        assert_eq!(
+            hermes_provider("kimi-coding")
+                .expect("kimi-coding")
+                .key_env_var,
             "KIMI_API_KEY"
         );
         // OAuth + AWS providers carry no API-key env var (set via terminal --setup
@@ -12547,7 +13329,10 @@ wire_api = "chat"
         assert_eq!(env, vec![("ANTHROPIC_API_KEY", "sk-ant-1".to_string())]);
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("yaml");
         assert_eq!(
-            value.get("model").and_then(|m| m.get("provider")).and_then(|v| v.as_str()),
+            value
+                .get("model")
+                .and_then(|m| m.get("provider"))
+                .and_then(|v| v.as_str()),
             Some("anthropic")
         );
     }
@@ -12567,9 +13352,18 @@ wire_api = "chat"
         assert!(env.is_empty(), "custom must not write any .env var");
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("yaml");
         let model = value.get("model").expect("model section");
-        assert_eq!(model.get("provider").and_then(|v| v.as_str()), Some("custom"));
-        assert_eq!(model.get("default").and_then(|v| v.as_str()), Some("gpt-5.5"));
-        assert_eq!(model.get("api_key").and_then(|v| v.as_str()), Some("sk-custom-1"));
+        assert_eq!(
+            model.get("provider").and_then(|v| v.as_str()),
+            Some("custom")
+        );
+        assert_eq!(
+            model.get("default").and_then(|v| v.as_str()),
+            Some("gpt-5.5")
+        );
+        assert_eq!(
+            model.get("api_key").and_then(|v| v.as_str()),
+            Some("sk-custom-1")
+        );
         assert_eq!(
             model.get("base_url").and_then(|v| v.as_str()),
             Some("https://endpoint.test/v1")
@@ -12587,7 +13381,8 @@ wire_api = "chat"
 
         // Switching TO custom from another provider that carried an `api_mode`
         // scrubs the stale mode (it must not bleed into the custom endpoint).
-        let prior = "model:\n  provider: openai-api\n  default: gpt\n  api_mode: chat_completions\n";
+        let prior =
+            "model:\n  provider: openai-api\n  default: gpt\n  api_mode: chat_completions\n";
         let (yaml, _env) = plan_hermes_write(
             "custom",
             Some("sk-2"),
@@ -12618,21 +13413,23 @@ wire_api = "chat"
         )
         .expect("plan");
         assert!(env.is_empty(), "raw mode must not write .env");
-        assert!(yaml.contains("anthropic"), "raw yaml written verbatim: {yaml}");
+        assert!(
+            yaml.contains("anthropic"),
+            "raw yaml written verbatim: {yaml}"
+        );
     }
 
     #[test]
     fn plan_hermes_write_oauth_and_blank_key_produce_no_env() {
         // OAuth provider (empty key var) → no .env update.
-        let (_, env) = plan_hermes_write("nous", Some("ignored"), "m", None, None, None)
-            .expect("oauth");
+        let (_, env) =
+            plan_hermes_write("nous", Some("ignored"), "m", None, None, None).expect("oauth");
         assert!(env.is_empty());
         // Blank key on a keyed provider with no base-URL var → nothing touched.
-        let (_, env) = plan_hermes_write("anthropic", Some("   "), "m", None, None, None)
-            .expect("blank");
-        assert!(env.is_empty());
         let (_, env) =
-            plan_hermes_write("anthropic", None, "m", None, None, None).expect("none");
+            plan_hermes_write("anthropic", Some("   "), "m", None, None, None).expect("blank");
+        assert!(env.is_empty());
+        let (_, env) = plan_hermes_write("anthropic", None, "m", None, None, None).expect("none");
         assert!(env.is_empty());
     }
 
@@ -12643,8 +13440,15 @@ wire_api = "chat"
             "newline in key must be rejected"
         );
         assert!(
-            plan_hermes_write("openai-api", None, "m", None, Some("model: [unterminated"), None)
-                .is_err(),
+            plan_hermes_write(
+                "openai-api",
+                None,
+                "m",
+                None,
+                Some("model: [unterminated"),
+                None
+            )
+            .is_err(),
             "invalid raw yaml must be rejected"
         );
     }
@@ -12671,13 +13475,16 @@ wire_api = "chat"
         );
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("yaml");
         assert_eq!(
-            value.get("model").and_then(|m| m.get("base_url")).and_then(|v| v.as_str()),
+            value
+                .get("model")
+                .and_then(|m| m.get("base_url"))
+                .and_then(|v| v.as_str()),
             Some("https://api.test/v1")
         );
         // Clearing the base URL writes an empty override so a stale `.env` value
         // can't shadow the default endpoint.
-        let (_, env) = plan_hermes_write("openai-api", None, "m", None, None, None)
-            .expect("clear base");
+        let (_, env) =
+            plan_hermes_write("openai-api", None, "m", None, None, None).expect("clear base");
         assert_eq!(env, vec![("OPENAI_BASE_URL", String::new())]);
     }
 
@@ -12706,7 +13513,10 @@ wire_api = "chat"
     fn project_hermes_key_and_base_falls_back_to_env_base_url() {
         let mut env = BTreeMap::new();
         env.insert("OPENAI_API_KEY".to_string(), "sk-1".to_string());
-        env.insert("OPENAI_BASE_URL".to_string(), "https://proxy/v1".to_string());
+        env.insert(
+            "OPENAI_BASE_URL".to_string(),
+            "https://proxy/v1".to_string(),
+        );
         // No YAML base_url → the panel still sees the endpoint from `.env`, so a
         // later save won't clear it (regression guard for the dual-write change).
         let (key, base) = project_hermes_key_and_base("openai-api", &env, None, None);
@@ -12829,7 +13639,10 @@ wire_api = "chat"
         let serialized = toml::to_string_pretty(&doc).expect("serialize");
         let reparsed: toml::Value = serialized.parse().expect("valid toml");
         let t = reparsed.as_table().unwrap();
-        assert_eq!(t.get("telemetry").and_then(toml::Value::as_bool), Some(true));
+        assert_eq!(
+            t.get("telemetry").and_then(toml::Value::as_bool),
+            Some(true)
+        );
         assert_eq!(
             t.get("default_model").and_then(toml::Value::as_str),
             Some(KIMI_MANAGED_MODEL_ALIAS)
@@ -12861,7 +13674,9 @@ wire_api = "chat"
             Some("claude-opus-4-7")
         );
         assert_eq!(
-            model.get("max_context_size").and_then(toml::Value::as_integer),
+            model
+                .get("max_context_size")
+                .and_then(toml::Value::as_integer),
             Some(200_000)
         );
     }
@@ -13051,7 +13866,10 @@ max_context_size = 200000
             Some("https://api.anthropic.com")
         );
         assert_eq!(proj.get("key").and_then(|v| v.as_str()), Some("sk-ant"));
-        assert_eq!(proj.get("authType").and_then(|v| v.as_str()), Some("api_key"));
+        assert_eq!(
+            proj.get("authType").and_then(|v| v.as_str()),
+            Some("api_key")
+        );
         assert_eq!(
             proj.get("modelId").and_then(|v| v.as_str()),
             Some("claude-opus-4-7")
@@ -13060,7 +13878,10 @@ max_context_size = 200000
             proj.get("maxContextSize").and_then(|v| v.as_i64()),
             Some(200000)
         );
-        assert_eq!(proj.get("hasManagedBlock"), Some(&serde_json::Value::Bool(true)));
+        assert_eq!(
+            proj.get("hasManagedBlock"),
+            Some(&serde_json::Value::Bool(true))
+        );
         for forbidden in [
             "apiKey",
             "apiBaseUrl",

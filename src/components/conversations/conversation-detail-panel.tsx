@@ -69,6 +69,7 @@ import {
   shouldRejectDuplicateCreate,
 } from "@/lib/queue-flush"
 import { TurnBusyError } from "@/lib/turn-busy"
+import { isReservedMaintenancePromptBlocks } from "@/lib/acp-context-management"
 import {
   getConversationIdByExternalIdFromStore,
   getRuntimeSession,
@@ -868,6 +869,10 @@ const ConversationTabView = memo(function ConversationTabView({
       // re-queues at the TAIL.
       opts?: { fromQueueFlush?: boolean }
     ) => {
+      // Keep old queued drafts and programmatic sends from bypassing the input
+      // guard and creating optimistic state for a backend-reserved command.
+      if (isReservedMaintenancePromptBlocks(draft.blocks)) return
+
       // Capture the tab's chat-draft state + eager scratch dir synchronously,
       // before any await. A folderless chat draft is NOT special-cased here:
       // its first send takes the exact same gated, inline path as a normal new
@@ -1136,6 +1141,8 @@ const ConversationTabView = memo(function ConversationTabView({
     // the draft is NOT lost: it is queued as a normal send (it flushes after any
     // queued items). The same on a fork failure.
     async (draft: PromptDraft, selectedModeIdArg?: string | null) => {
+      if (isReservedMaintenancePromptBlocks(draft.blocks)) return
+
       const connectionId = conn.connectionId
       if (
         !connectionId ||
