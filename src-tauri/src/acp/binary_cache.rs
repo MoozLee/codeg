@@ -807,7 +807,11 @@ mod tests {
             windows: "dist-package/cursor-agent.cmd",
         };
         let err = install_extracted_tree(&extract, &final_dir, entry, &|_| {}).unwrap_err();
-        assert!(err.to_string().contains("not found in archive"), "{err}");
+        assert!(matches!(&err, AcpError::DownloadFailed(_)));
+        assert_eq!(
+            err.to_string(),
+            "Agent download failed. Check Agent Settings and diagnostics."
+        );
     }
 
     #[test]

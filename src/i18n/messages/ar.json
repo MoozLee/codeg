@@ -1557,7 +1557,57 @@
         "output": "إخراج",
         "cacheRead": "قراءة الكاش",
         "cacheWrite": "كتابة الكاش",
-        "total": "الإجمالي"
+        "total": "الإجمالي",
+        "contextSource": "مصدر الاستخدام",
+        "contextMaxSource": "مصدر الحد الأقصى",
+        "source": {
+          "live": "استخدام مباشر",
+          "history": "إحصاءات تاريخية"
+        },
+        "maxSource": {
+          "live": "الحد الذي أبلغ عنه Agent",
+          "configured": "نافذة الضغط التلقائي المكوّنة",
+          "history": "إحصاءات تاريخية",
+          "unknown": "غير معروف"
+        },
+        "contextLevel": {
+          "unknown": "استخدام السياق غير معروف.",
+          "normal": "استخدام السياق طبيعي.",
+          "high": "استخدام السياق مرتفع.",
+          "critical": "نافذة السياق قريبة من الحد."
+        },
+        "contextManagement": "إدارة السياق",
+        "agentType": "Agent",
+        "configuredModel": "النموذج المضبوط",
+        "selectorModel": "نموذج محدد ACP",
+        "unknown": "غير معروف",
+        "enabled": "مفعّل",
+        "disabled": "معطّل",
+        "autoCompaction": "الضغط التلقائي",
+        "autoCompactionThreshold": "عتبة التشغيل",
+        "configuredContextWindowMax": "نافذة الضغط التلقائي المكوّنة",
+        "runtimeContextWindowMax": "النافذة التي أبلغ عنها وقت التشغيل",
+        "contextWindowClampedWarning": "تم تكوين {configured}، لكن وقت التشغيل لا يبلغ إلا عن {runtime}. قد يخفّض حد وقت التشغيل/النموذج النافذة النشطة.",
+        "compactionSupport": "دعم الضغط",
+        "compactionStatus": "حالة الضغط",
+        "configuredContextWindowMaxSourceState": {
+          "agent_env": "البيئة المكوّنة",
+          "agent_config_env": "config.env",
+          "agent_root_config": "التكوين الجذري"
+        },
+        "compactionSupportState": {
+          "unknown": "غير معروف",
+          "unsupported": "غير مدعوم",
+          "agent_managed": "يديره Agent",
+          "native_managed": "إدارة Claude Code الأصلية"
+        },
+        "compactionStatusState": {
+          "idle": "خامل",
+          "triggered": "تم التشغيل",
+          "running": "قيد التشغيل",
+          "completed": "مكتمل",
+          "failed": "فشل"
+        }
       }
     },
     "auxPanel": {
