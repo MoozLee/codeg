@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentEditableConfig, AcpAgentInfo } from "@/lib/types"
 
 const CODEBUDDY_API_KEY_ENV = "CODEBUDDY_API_KEY"
 const CODEBUDDY_ENVIRONMENT_ENV = "CODEBUDDY_INTERNET_ENVIRONMENT"
@@ -119,7 +119,7 @@ export function CodeBuddyConfigPanel({
   saving,
   onSave,
 }: {
-  agent: AcpAgentInfo
+  agent: AcpAgentInfo & AcpAgentEditableConfig
   saving: boolean
   onSave: (env: Record<string, string>, enabled: boolean) => Promise<unknown>
 }) {

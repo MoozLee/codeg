@@ -598,6 +598,10 @@ pub fn build_router(
         )
         .route("/acp_list_agents", post(handlers::acp::acp_list_agents))
         .route(
+            "/acp_get_agent_editable_config",
+            post(handlers::acp::acp_get_agent_editable_config),
+        )
+        .route(
             "/acp_env_diagnostics",
             post(handlers::acp::acp_env_diagnostics),
         )
@@ -608,6 +612,10 @@ pub fn build_router(
             post(handlers::acp::acp_touch_connection),
         )
         .route("/acp_prompt", post(handlers::acp::acp_prompt))
+        .route(
+            "/acp_run_maintenance_command",
+            post(handlers::acp::acp_run_maintenance_command),
+        )
         .route("/acp_preflight", post(handlers::acp::acp_preflight))
         .route("/acp_set_mode", post(handlers::acp::acp_set_mode))
         .route(
@@ -1127,7 +1135,10 @@ pub fn build_router(
             "/automation_list",
             post(handlers::automation::automation_list),
         )
-        .route("/automation_get", post(handlers::automation::automation_get))
+        .route(
+            "/automation_get",
+            post(handlers::automation::automation_get),
+        )
         .route(
             "/automation_runs",
             post(handlers::automation::automation_runs),

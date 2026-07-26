@@ -4,12 +4,14 @@ use std::sync::Arc;
 use axum::{extract::Extension, Json};
 use serde::Deserialize;
 
+use crate::acp::connection::SessionConfigCommandValue;
 use crate::acp::error::AcpError;
 use crate::acp::opencode_plugins::PluginCheckSummary;
 use crate::acp::preflight::PreflightResult;
 use crate::acp::types::{
-    AcpAgentInfo, AcpAgentStatus, AgentDiagnosticsReport, AgentSkillContent, AgentSkillLayout,
-    AgentSkillScope, AgentSkillsListResult, ConnectionInfo, ForkResultInfo,
+    AcpAgentEditableConfig, AcpAgentInfo, AcpAgentStatus, AgentDiagnosticsReport,
+    AgentSkillContent, AgentSkillLayout, AgentSkillScope, AgentSkillsListResult, ConnectionInfo,
+    ForkResultInfo, MaintenanceCommandResult,
 };
 use crate::app_error::{AppCommandError, AppErrorCode};
 use crate::app_state::AppState;
@@ -38,6 +40,16 @@ pub async fn acp_list_agents(
 ) -> Result<Json<Vec<AcpAgentInfo>>, AppCommandError> {
     let db = &state.db;
     let result = acp_commands::acp_list_agents_core(db)
+        .await
+        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(result))
+}
+
+pub async fn acp_get_agent_editable_config(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AgentTypeParams>,
+) -> Result<Json<AcpAgentEditableConfig>, AppCommandError> {
+    let result = acp_commands::acp_get_agent_editable_config_core(&state.db, params.agent_type)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(result))
@@ -186,6 +198,34 @@ pub async fn acp_prompt(
             }
         })?;
     Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpRunMaintenanceCommandParams {
+    pub connection_id: String,
+    pub session_id: String,
+    pub operation_id: String,
+    pub command: String,
+}
+
+pub async fn acp_run_maintenance_command(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpRunMaintenanceCommandParams>,
+) -> Result<Json<MaintenanceCommandResult>, AppCommandError> {
+    let result = acp_commands::acp_run_maintenance_command_core(
+        &state.db,
+        &state.connection_manager,
+        params.connection_id,
+        params.session_id,
+        params.operation_id,
+        params.command,
+    )
+    .await
+    .map_err(|_| {
+        AppCommandError::task_execution_failed("Maintenance command could not be completed")
+    })?;
+    Ok(Json(result))
 }
 
 // --- Pattern A: Pure function handlers ---
@@ -350,16 +390,28 @@ pub async fn acp_set_mode(
 pub struct AcpSetConfigOptionParams {
     pub connection_id: String,
     pub config_id: String,
-    pub value_id: String,
+    pub value_id: Option<String>,
+    pub value: Option<bool>,
 }
 
 pub async fn acp_set_config_option(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpSetConfigOptionParams>,
 ) -> Result<Json<()>, AppCommandError> {
+    let value = match (params.value_id, params.value) {
+        (Some(value_id), None) if !value_id.trim().is_empty() => {
+            SessionConfigCommandValue::ValueId(value_id)
+        }
+        (None, Some(value)) => SessionConfigCommandValue::Boolean(value),
+        _ => {
+            return Err(AppCommandError::invalid_input(
+                "Exactly one session config option value is required".to_string(),
+            ));
+        }
+    };
     let manager = &state.connection_manager;
     manager
-        .set_config_option(&params.connection_id, params.config_id, params.value_id)
+        .set_config_option(&params.connection_id, params.config_id, value)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
@@ -856,8 +908,8 @@ pub async fn acp_update_pi_config(
     Ok(Json(()))
 }
 
-pub async fn acp_load_pi_config(
-) -> Result<Json<acp_commands::PiConfigProjection>, AppCommandError> {
+pub async fn acp_load_pi_config() -> Result<Json<acp_commands::PiConfigProjection>, AppCommandError>
+{
     Ok(Json(acp_commands::load_pi_config_core()))
 }
 
