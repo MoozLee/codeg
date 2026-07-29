@@ -105,7 +105,9 @@ impl AgentParser for AcpNativeParser {
         // under the previous session id.
         let transcript = acp_transcript::read_chain_in(&self.root, dir, conversation_id);
         if transcript.header.is_none() && transcript.is_empty() {
-            return Err(ParseError::ConversationNotFound(conversation_id.to_string()));
+            return Err(ParseError::ConversationNotFound(
+                conversation_id.to_string(),
+            ));
         }
         let turns = project_turns(&transcript.entries);
         let session_stats = session_stats(&turns);
@@ -166,7 +168,9 @@ impl AcpNativeParser {
 }
 
 fn epoch_ms_to_utc(ms: u64) -> DateTime<Utc> {
-    Utc.timestamp_millis_opt(ms as i64).single().unwrap_or_else(Utc::now)
+    Utc.timestamp_millis_opt(ms as i64)
+        .single()
+        .unwrap_or_else(Utc::now)
 }
 
 fn first_prompt_title(entries: &[TranscriptEntry]) -> Option<String> {
@@ -204,7 +208,10 @@ fn prompt_blocks(payload: &serde_json::Value) -> Vec<ContentBlock> {
     for item in items {
         match item.get("type").and_then(|t| t.as_str()) {
             Some("image") => {
-                let data = item.get("data").and_then(|d| d.as_str()).unwrap_or_default();
+                let data = item
+                    .get("data")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or_default();
                 let mime_type = item
                     .get("mimeType")
                     .or_else(|| item.get("mime_type"))
@@ -214,10 +221,7 @@ fn prompt_blocks(payload: &serde_json::Value) -> Vec<ContentBlock> {
                     blocks.push(ContentBlock::Image {
                         data: data.to_string(),
                         mime_type: mime_type.to_string(),
-                        uri: item
-                            .get("uri")
-                            .and_then(|u| u.as_str())
-                            .map(str::to_string),
+                        uri: item.get("uri").and_then(|u| u.as_str()).map(str::to_string),
                     });
                 }
             }
@@ -580,8 +584,7 @@ fn upsert_tool_call(
     meta: Option<serde_json::Value>,
 ) {
     pending.has_content = true;
-    let own_input =
-        json_value_to_text(&raw_input.cloned()).filter(|t| !t.trim().is_empty());
+    let own_input = json_value_to_text(&raw_input.cloned()).filter(|t| !t.trim().is_empty());
     let synthesized_edit = if own_input.is_none() {
         synthesize_edit_input_from_diffs(content)
     } else {
@@ -617,7 +620,9 @@ fn upsert_tool_call(
             }
         }
         None => {
-            pending.tool_use_index.insert(id.to_string(), pending.blocks.len());
+            pending
+                .tool_use_index
+                .insert(id.to_string(), pending.blocks.len());
             pending.blocks.push(ContentBlock::ToolUse {
                 tool_use_id: Some(id.to_string()),
                 // ACP has no tool *name* channel — `title` is what the agent
@@ -1034,7 +1039,11 @@ mod tests {
             .iter()
             .filter(|b| matches!(b, ContentBlock::ToolUse { tool_name, .. } if tool_name == "TodoWrite"))
             .collect();
-        assert_eq!(plan_blocks.len(), 1, "the plan card is replaced, not repeated");
+        assert_eq!(
+            plan_blocks.len(),
+            1,
+            "the plan card is replaced, not repeated"
+        );
         match plan_blocks[0] {
             ContentBlock::ToolUse { input_preview, .. } => {
                 let v: serde_json::Value =

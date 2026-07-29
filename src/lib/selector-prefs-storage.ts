@@ -17,6 +17,7 @@
  * incoming event and overwrite locally" path.
  */
 
+import { isValidSessionConfigValue } from "@/lib/acp-context-management"
 import type { SessionModeStateInfo } from "@/lib/types"
 
 const STORAGE_KEY = "codeg:selector-prefs"
@@ -28,11 +29,62 @@ interface SelectorPrefs {
 
 type AllPrefs = Record<string, SelectorPrefs>
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+function normalizeStoredConfigValue(value: unknown): string | undefined {
+  const normalized = nonEmptyString(value)
+  return normalized && isValidSessionConfigValue(normalized)
+    ? normalized
+    : undefined
+}
+
+function serializeConfigValue(value: string | boolean): string | undefined {
+  if (typeof value === "boolean") return value ? "true" : "false"
+  return normalizeStoredConfigValue(value)
+}
+
+function normalizeConfigValues(
+  value: unknown
+): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined
+  const entries = Object.entries(value).flatMap(([configId, configValue]) => {
+    const id = nonEmptyString(configId)
+    const normalized = normalizeStoredConfigValue(configValue)
+    return id && normalized ? [[id, normalized] as const] : []
+  })
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
+function normalizePrefs(value: unknown): SelectorPrefs | undefined {
+  if (!isRecord(value)) return undefined
+  const modeId = nonEmptyString(value.modeId)
+  const configValues = normalizeConfigValues(value.configValues)
+  if (!modeId && !configValues) return undefined
+  return { modeId, configValues }
+}
+
 function readAll(): AllPrefs {
   if (typeof window === "undefined") return {}
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as AllPrefs) : {}
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([agentType, prefs]) => {
+        const id = nonEmptyString(agentType)
+        const normalized = normalizePrefs(prefs)
+        return id && normalized ? [[id, normalized] as const] : []
+      })
+    )
   } catch {
     return {}
   }
@@ -115,10 +167,13 @@ export function saveModePreference(
 export function saveConfigPreference(
   agentType: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ) {
+  const id = nonEmptyString(configId)
+  const normalized = serializeConfigValue(value)
+  if (!id || !normalized) return
   updatePrefs(agentType, (prefs) => ({
     ...prefs,
-    configValues: { ...prefs.configValues, [configId]: valueId },
+    configValues: { ...prefs.configValues, [id]: normalized },
   }))
 }

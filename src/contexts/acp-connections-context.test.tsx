@@ -123,6 +123,16 @@ async function mountProvider() {
 
 const TAB = "conv-1-claude_code-42"
 
+const EMPTY_CONTEXT_RUNTIME_CONFIG = {
+  configured_model: null,
+  configured_model_source: null,
+  configured_context_window_max_tokens: null,
+  context_window_max_source: null,
+  auto_compaction_enabled: null,
+  auto_compaction_threshold: null,
+  native_auto_compact_window: null,
+}
+
 beforeEach(() => {
   h.attach.mockClear()
   h.store = null
@@ -161,6 +171,7 @@ beforeEach(() => {
     enabled: true,
     available: true,
     installed_version: "1.0.0",
+    context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
   })
   h.acpConnect.mockResolvedValue("spawned-conn")
   h.acpDisconnect.mockResolvedValue(undefined)
@@ -1132,6 +1143,7 @@ describe("AcpConnectionsProvider Grok cross-agent-type model switch", () => {
       enabled: true,
       available: true,
       installed_version: "0.2.94",
+      context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
     })
     await mountProvider()
     await act(async () => {
@@ -1238,6 +1250,7 @@ describe("HYDRATE_FROM_SNAPSHOT last_error recovery", () => {
       enabled: true,
       available: true,
       installed_version: "1.0.0",
+      context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
     })
     await mountProvider()
     await act(async () => {

@@ -248,7 +248,11 @@ pub fn record_header(
     agent_dir: &str,
     header: &TranscriptHeader,
 ) -> tokio::sync::oneshot::Receiver<()> {
-    record_header_in(&crate::paths::codeg_acp_transcripts_root(), agent_dir, header)
+    record_header_in(
+        &crate::paths::codeg_acp_transcripts_root(),
+        agent_dir,
+        header,
+    )
 }
 
 /// Root-injectable core of [`record_header`].
@@ -260,7 +264,10 @@ pub fn record_header_in(
     // The emptiness probe is racy in principle, but a session id has exactly
     // one live connection, so the only writer is this process's writer thread.
     if let Some(path) = transcript_path_in(root, agent_dir, &header.session_id) {
-        if std::fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false) {
+        if std::fs::metadata(&path)
+            .map(|m| m.len() > 0)
+            .unwrap_or(false)
+        {
             let (tx, rx) = tokio::sync::oneshot::channel();
             let _ = tx.send(());
             return rx;
@@ -337,10 +344,7 @@ pub fn append_line_in(root: &Path, agent_dir: &str, session_id: &str, line: &str
         f.write_all(format!("{line}\n").as_bytes())
     };
     if let Err(e) = write() {
-        tracing::debug!(
-            "[acp-transcript] append failed for {}: {e}",
-            path.display()
-        );
+        tracing::debug!("[acp-transcript] append failed for {}: {e}", path.display());
     }
 }
 
@@ -630,7 +634,10 @@ mod tests {
             &root,
             "goose",
             "s1",
-            &entry_line(EntryKind::Prompt, serde_json::json!([{"type":"text","text":"hi"}])),
+            &entry_line(
+                EntryKind::Prompt,
+                serde_json::json!([{"type":"text","text":"hi"}]),
+            ),
         );
         append_line_in(
             &root,
@@ -719,22 +726,32 @@ mod tests {
             &root,
             "goose",
             "s0",
-            &entry_line(EntryKind::Prompt, serde_json::json!([{"type":"text","text":"first"}])),
+            &entry_line(
+                EntryKind::Prompt,
+                serde_json::json!([{"type":"text","text":"first"}]),
+            ),
         );
         for (id, prev, text) in [("s1", "s0", "second"), ("s2", "s1", "third")] {
-            let header = TranscriptHeader::new("custom:goose", id, "/elsewhere", 9_999)
-                .continuing(prev);
+            let header =
+                TranscriptHeader::new("custom:goose", id, "/elsewhere", 9_999).continuing(prev);
             append_line_in(&root, "goose", id, &serde_json::to_string(&header).unwrap());
             append_line_in(
                 &root,
                 "goose",
                 id,
-                &entry_line(EntryKind::Prompt, serde_json::json!([{"type":"text","text":text}])),
+                &entry_line(
+                    EntryKind::Prompt,
+                    serde_json::json!([{"type":"text","text":text}]),
+                ),
             );
         }
 
         let merged = read_chain_in(&root, "goose", "s2");
-        assert_eq!(merged.entries.len(), 3, "every link contributes its entries");
+        assert_eq!(
+            merged.entries.len(),
+            3,
+            "every link contributes its entries"
+        );
         let header = merged.header.expect("oldest header survives");
         assert_eq!(header.session_id, "s0", "the root header wins");
         assert_eq!(
@@ -760,7 +777,12 @@ mod tests {
         let root = temp_root();
         // A hand-edited file pointing at itself must not hang the reader.
         let looped = TranscriptHeader::new("custom:goose", "loop", "/repo", 1).continuing("loop");
-        append_line_in(&root, "goose", "loop", &serde_json::to_string(&looped).unwrap());
+        append_line_in(
+            &root,
+            "goose",
+            "loop",
+            &serde_json::to_string(&looped).unwrap(),
+        );
         append_line_in(
             &root,
             "goose",
@@ -773,7 +795,12 @@ mod tests {
         // never to an error or an empty result.
         let orphan =
             TranscriptHeader::new("custom:goose", "orphan", "/repo", 2).continuing("deleted");
-        append_line_in(&root, "goose", "orphan", &serde_json::to_string(&orphan).unwrap());
+        append_line_in(
+            &root,
+            "goose",
+            "orphan",
+            &serde_json::to_string(&orphan).unwrap(),
+        );
         append_line_in(
             &root,
             "goose",
@@ -841,7 +868,10 @@ mod tests {
             &root,
             "goose",
             "e1",
-            &entry_line(EntryKind::Prompt, serde_json::json!([{"type":"text","text":"hi"}])),
+            &entry_line(
+                EntryKind::Prompt,
+                serde_json::json!([{"type":"text","text":"hi"}]),
+            ),
         );
         assert!(has_entries_in(&root, "goose", "e1"));
 
@@ -875,12 +905,18 @@ mod tests {
         raw.extend_from_slice(header_line("torn").as_bytes());
         raw.push(b'\n');
         raw.extend_from_slice(
-            entry_line(EntryKind::Prompt, serde_json::json!([{"type":"text","text":"你好"}]))
-                .as_bytes(),
+            entry_line(
+                EntryKind::Prompt,
+                serde_json::json!([{"type":"text","text":"你好"}]),
+            )
+            .as_bytes(),
         );
         raw.push(b'\n');
         // A prompt line cut in the middle of a 3-byte character.
-        let torn = entry_line(EntryKind::Prompt, serde_json::json!([{"type":"text","text":"世界"}]));
+        let torn = entry_line(
+            EntryKind::Prompt,
+            serde_json::json!([{"type":"text","text":"世界"}]),
+        );
         let cut = torn.find('世').unwrap() + 2;
         raw.extend_from_slice(&torn.as_bytes()[..cut]);
         std::fs::write(&path, &raw).unwrap();
@@ -919,9 +955,10 @@ mod tests {
         let root = temp_root();
         let path = transcript_path_in(&root, "goose", "new").unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let header =
-            serde_json::to_string(&TranscriptHeader::new("custom:goose", "new", "/repo", 1).continuing("old"))
-                .unwrap();
+        let header = serde_json::to_string(
+            &TranscriptHeader::new("custom:goose", "new", "/repo", 1).continuing("old"),
+        )
+        .unwrap();
         let mut raw = Vec::from(header.as_bytes());
         raw.push(b'\n');
         raw.extend_from_slice(&[0xff, 0xfe, b'\n']);
@@ -932,7 +969,10 @@ mod tests {
             &root,
             "goose",
             "old",
-            &entry_line(EntryKind::Prompt, serde_json::json!([{"type":"text","text":"hi"}])),
+            &entry_line(
+                EntryKind::Prompt,
+                serde_json::json!([{"type":"text","text":"hi"}]),
+            ),
         );
 
         // `new` is readable despite the garbage line, so `old` is legitimately
@@ -959,7 +999,12 @@ mod tests {
         let header = TranscriptHeader::new("custom:goose", "s3", "/repo", 1);
         // Direct append (as the writer thread would), then a second attempt
         // through the idempotent front door.
-        append_line_in(&root, "goose", "s3", &serde_json::to_string(&header).unwrap());
+        append_line_in(
+            &root,
+            "goose",
+            "s3",
+            &serde_json::to_string(&header).unwrap(),
+        );
         let second = TranscriptHeader::new("custom:goose", "s3", "/other", 2);
         // The ack receiver is dropped on purpose: the file-non-empty short
         // circuit means nothing is queued, so there is nothing to await.
