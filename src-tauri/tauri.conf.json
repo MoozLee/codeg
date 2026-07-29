@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "codeg",
-  "version": "0.22.0",
+  "version": "0.22.0-1",
   "identifier": "app.codeg",
   "build": {
     "beforeDevCommand": "pnpm tauri:before-dev",
@@ -39,9 +39,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ4OEM3NkMyMTVENjdBODgKUldTSWV0WVZ3bmFNU0NnSzhpdFg2bXFmMHFidWd1eWpuZ2Y2WmU5QmVXdWVrU0ZpOCt2dnd6WW4K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ1RDg5QzNGOTQ1NDA3MDcKUldRSEIxU1VQNXpZUllJa1NzRnR4dW1jODAvZmcyMnhPNU5CZG1Td1Bwb09MNWtLQnNHQWdHc2sK",
       "endpoints": [
-        "https://github.com/xintaofei/codeg/releases/latest/download/latest.json"
+        "https://github.com/MoozLee/codeg/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
