@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { isValidSessionConfigValue } from "./acp-context-management"
 import { getCurrentEffectiveAppLocale } from "./i18n"
 import type {
   AgentType,
@@ -10,7 +11,10 @@ import type {
   SidebarData,
   ConnectionInfo,
   AcpAgentInfo,
+  AcpAgentEditableConfig,
   AcpAgentStatus,
+  MaintenanceCommand,
+  MaintenanceCommandResult,
   AgentSkillScope,
   AgentSkillLayout,
   AgentSkillItem,
@@ -129,9 +133,17 @@ export async function acpSetMode(
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ): Promise<void> {
-  return invoke("acp_set_config_option", { connectionId, configId, valueId })
+  if (!configId.trim() || !isValidSessionConfigValue(value)) {
+    throw new Error("Invalid config option value")
+  }
+  return invoke("acp_set_config_option", {
+    connectionId,
+    configId,
+    valueId: typeof value === "string" ? value : null,
+    value: typeof value === "boolean" ? value : null,
+  })
 }
 
 export async function acpCancel(connectionId: string): Promise<void> {
@@ -176,6 +188,26 @@ export async function acpGetAgentStatus(
   agentType: AgentType
 ): Promise<AcpAgentStatus> {
   return invoke("acp_get_agent_status", { agentType })
+}
+
+export async function acpGetAgentEditableConfig(
+  agentType: AgentType
+): Promise<AcpAgentEditableConfig> {
+  return invoke("acp_get_agent_editable_config", { agentType })
+}
+
+export async function acpRunMaintenanceCommand(
+  connectionId: string,
+  sessionId: string,
+  operationId: string,
+  command: MaintenanceCommand
+): Promise<MaintenanceCommandResult> {
+  return invoke("acp_run_maintenance_command", {
+    connectionId,
+    sessionId,
+    operationId,
+    command,
+  })
 }
 
 export async function acpClearBinaryCache(agentType: AgentType): Promise<void> {

@@ -89,6 +89,7 @@ import {
   acpDetectAgentLocalVersion,
   acpDownloadAgentBinary,
   acpInstallUvTool,
+  acpGetAgentEditableConfig,
   acpGetAgentStatus,
   acpListAgents,
   acpPreflight,
@@ -109,6 +110,7 @@ import {
   opencodeProviderCatalog,
 } from "@/lib/api"
 import type {
+  AcpAgentEditableConfig,
   AcpAgentInfo,
   AgentType,
   CheckStatus,
@@ -3090,9 +3092,9 @@ interface HermesDraftValues {
 }
 
 /**
- * Parse the normalized Hermes projection carried in `AcpAgentInfo.config_json`
- * (produced by the backend from ~/.hermes/.env + config.yaml). Falls back to a
- * sensible default provider when nothing is configured yet.
+ * Parse the normalized Hermes projection fetched for the selected settings
+ * agent (produced by the backend from ~/.hermes/.env + config.yaml). Falls
+ * back to a sensible default provider when nothing is configured yet.
  */
 function parseHermesConfig(configText: string): HermesDraftValues {
   let parsed: HermesLocalConfig = {}
@@ -3114,24 +3116,28 @@ function parseHermesConfig(configText: string): HermesDraftValues {
   }
 }
 
-function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
+function buildAgentDraft(
+  agent: AcpAgentInfo,
+  editable?: AcpAgentEditableConfig
+): AgentDraft {
   const configText =
-    typeof agent.config_json === "string" && agent.config_json.trim()
-      ? agent.config_json
+    typeof editable?.config_json === "string" && editable.config_json.trim()
+      ? editable.config_json
       : ""
+  const env = editable?.env ?? {}
   const hermesValues =
     agent.agent_type === "hermes" ? parseHermesConfig(configText) : null
-  const openCodeAuthJsonText = agent.opencode_auth_json ?? ""
-  const codexAuthJsonText = agent.codex_auth_json ?? ""
+  const openCodeAuthJsonText = editable?.opencode_auth_json ?? ""
+  const codexAuthJsonText = editable?.codex_auth_json ?? ""
   const codexConfigTomlText =
     agent.agent_type === "codex"
       ? updateTomlRootBooleanKey(
-          agent.codex_config_toml ?? "",
+          editable?.codex_config_toml ?? "",
           "disable_response_storage",
           true
         )
-      : (agent.codex_config_toml ?? "")
-  const codexSandbox = agent.codex_sandbox_settings ?? null
+      : (editable?.codex_config_toml ?? "")
+  const codexSandbox = editable?.codex_sandbox_settings ?? null
   // Seeded once, then fingerprinted, so a save can tell a real control change
   // from "untouched, still whatever config.toml says".
   const codexSandboxFields: CodexSandboxDraftFields = {
@@ -3153,20 +3159,17 @@ function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
     codexExcludeSlashTmp:
       codexSandbox?.workspace_write.exclude_slash_tmp ?? false,
   }
-  const grokConfigTomlText = agent.grok_config_toml ?? ""
-  const grokPermissionMode = agent.grok_settings?.permission_mode ?? ""
+  const grokConfigTomlText = editable?.grok_config_toml ?? ""
+  const grokPermissionMode = editable?.grok_settings?.permission_mode ?? ""
   const grokReasoningEffort =
-    agent.grok_settings?.default_reasoning_effort ?? ""
+    editable?.grok_settings?.default_reasoning_effort ?? ""
   const important = extractImportantConfigValues(
     agent.agent_type,
-    agent.env,
+    env,
     configText
   )
-  const geminiImportant = extractGeminiImportantValues(agent.env, configText)
-  const openClawImportant = extractOpenClawImportantValues(
-    agent.env,
-    configText
-  )
+  const geminiImportant = extractGeminiImportantValues(env, configText)
+  const openClawImportant = extractOpenClawImportantValues(env, configText)
   const codexImportant = extractCodexImportantValues(
     codexAuthJsonText,
     codexConfigTomlText
@@ -3185,11 +3188,11 @@ function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
   const grokAuthMode: GrokAuthMethod =
     agent.agent_type === "grok"
       ? inferGrokMode(
-          agent.env,
-          Boolean(agent.grok_settings?.custom_model_id?.trim())
+          env,
+          Boolean(editable?.grok_settings?.custom_model_id?.trim())
         )
       : "api_key"
-  const rawEnvText = envMapToText(agent.env)
+  const rawEnvText = envMapToText(env)
   // When codex is in official subscription mode, clean up API keys/URLs from env.
   // Grok mirrors this: record the auth-method knob, and in subscription mode
   // strip XAI_API_KEY so the editable env can't override the `grok login`
@@ -3281,23 +3284,25 @@ function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
       important.claudeDisableNonessentialTraffic,
     codexAuthJsonText,
     codexConfigTomlText,
-    codexModelList: parseCodexModelConfig(agent.codex_model_catalog ?? null),
+    codexModelList: parseCodexModelConfig(
+      editable?.codex_model_catalog ?? null
+    ),
     grokConfigTomlText,
     grokAuthMode,
     grokPermissionMode,
     grokReasoningEffort,
-    grokCustomModelId: agent.grok_settings?.custom_model_id ?? "",
-    grokCustomBaseUrl: agent.grok_settings?.custom_base_url ?? "",
-    grokCustomApiKey: agent.grok_settings?.custom_api_key ?? "",
+    grokCustomModelId: editable?.grok_settings?.custom_model_id ?? "",
+    grokCustomBaseUrl: editable?.grok_settings?.custom_base_url ?? "",
+    grokCustomApiKey: editable?.grok_settings?.custom_api_key ?? "",
     grokCustomApiBackend:
-      agent.grok_settings?.custom_api_backend ?? GROK_DEFAULT_API_BACKEND,
+      editable?.grok_settings?.custom_api_backend ?? GROK_DEFAULT_API_BACKEND,
     grokCustomContextWindow:
-      agent.grok_settings?.custom_context_window != null
-        ? String(agent.grok_settings.custom_context_window)
+      editable?.grok_settings?.custom_context_window != null
+        ? String(editable.grok_settings.custom_context_window)
         : "",
     grokAutoCompactThreshold:
-      agent.grok_settings?.auto_compact_threshold_percent != null
-        ? String(agent.grok_settings.auto_compact_threshold_percent)
+      editable?.grok_settings?.auto_compact_threshold_percent != null
+        ? String(editable.grok_settings.auto_compact_threshold_percent)
         : "",
     openCodeAuthJsonText,
     openClawGatewayUrl: openClawImportant.gatewayUrl,
@@ -3308,7 +3313,7 @@ function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
     clineModel: clineImportant.model,
     clineBaseUrl: clineImportant.baseUrl,
     hermesProvider: hermesValues?.provider ?? "openrouter",
-    hermesConfigYaml: agent.hermes_config_yaml ?? "",
+    hermesConfigYaml: editable?.hermes_config_yaml ?? "",
     hermesHome: hermesValues?.hermesHome ?? "",
     hermesSetupCommand: hermesValues?.setupCommand ?? "",
     hermesModelCommand: hermesValues?.modelCommand ?? "",
@@ -3852,21 +3857,18 @@ export function kimiInitialMode(config: KimiManagedConfig): KimiAuthMode {
  *   • login — clear the managed block + remove our synthetic token, so a real
  *     OAuth login (`kimi login`, needs a Kimi subscription) governs.
  * A `<details>` raw config.toml editor is the escape hatch. Initial state is
- * derived from the projected `agent.config_json`; it resets on remount when a
+ * derived from the selected editor configuration and resets on remount when a
  * different agent is selected.
  */
 function KimiCodeConfigPanel({
-  agent,
+  configJson,
   onSaved,
 }: {
-  agent: AcpAgentInfo
+  configJson: string
   onSaved: () => Promise<void>
 }) {
   const t = useTranslations("AcpAgentSettings")
-  const config = useMemo(
-    () => parseKimiManagedConfig(agent.config_json),
-    [agent.config_json]
-  )
+  const config = useMemo(() => parseKimiManagedConfig(configJson), [configJson])
 
   const [mode, setMode] = useState<KimiAuthMode>(() => kimiInitialMode(config))
   const [saving, setSaving] = useState(false)
@@ -4371,6 +4373,13 @@ export function AcpAgentSettings() {
   acpTranslator = (key, values) => rawTranslator(key, values)
   const searchParams = useSearchParams()
   const [agents, setAgents] = useState<AcpAgentInfo[]>([])
+  // The shared agent list deliberately excludes editable configuration. Keep
+  // native/auth configuration in this settings-only cache after explicit agent
+  // selection so list consumers cannot receive it incidentally.
+  const [editableConfigs, setEditableConfigs] = useState<
+    Partial<Record<AgentType, AcpAgentEditableConfig>>
+  >({})
+  const agentsRef = useRef<AcpAgentInfo[]>([])
   const [loadingAgents, setLoadingAgents] = useState(true)
   const [addCustomOpen, setAddCustomOpen] = useState(false)
   // Registry id of the custom agent being edited; non-null renders the edit
@@ -4511,6 +4520,10 @@ export function AcpAgentSettings() {
     [searchParams]
   )
 
+  useEffect(() => {
+    agentsRef.current = agents
+  }, [agents])
+
   const refreshAgents = useCallback(async () => {
     setLoadingAgents(true)
     setLoadingError(null)
@@ -4531,16 +4544,8 @@ export function AcpAgentSettings() {
         }
         return updated
       })
-      setConfigErrors((prev) => {
-        const updated = { ...prev }
-        for (const agent of next) {
-          if (typeof updated[agent.agent_type] !== "undefined") continue
-          const configText =
-            typeof agent.config_json === "string" ? agent.config_json : ""
-          updated[agent.agent_type] = parseConfigJsonText(configText).error
-        }
-        return updated
-      })
+      // Parse errors belong to the selected editor payload, which is fetched
+      // separately below. The shared list has no config text to inspect.
     } catch (err) {
       const message = toErrorMessage(err)
       setLoadingError(message)
@@ -4714,6 +4719,40 @@ export function AcpAgentSettings() {
     })
   }, [sortedAgents])
 
+  useEffect(() => {
+    if (!selectedAgentType) return
+    const selected = agentsRef.current.find(
+      (agent) => agent.agent_type === selectedAgentType
+    )
+    if (!selected) return
+
+    let cancelled = false
+    acpGetAgentEditableConfig(selectedAgentType)
+      .then((editable) => {
+        if (cancelled) return
+        setEditableConfigs((prev) => ({
+          ...prev,
+          [selectedAgentType]: editable,
+        }))
+        setDrafts((prev) => ({
+          ...prev,
+          [selectedAgentType]: buildAgentDraft(selected, editable),
+        }))
+        setConfigErrors((prev) => ({
+          ...prev,
+          [selectedAgentType]: parseConfigJsonText(editable.config_json ?? "")
+            .error,
+        }))
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadingError(toErrorMessage(err))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedAgentType])
+
   // A settings save (env or native config) only takes effect on the NEXT agent
   // start, so any running session of that agent stays on its launch-time config
   // until restarted. The backend returns how many running sessions were left
@@ -4761,12 +4800,17 @@ export function AcpAgentSettings() {
               ? {
                   ...agent,
                   enabled,
-                  env: parsedEnv,
                   model_provider_id: modelProviderId ?? null,
                 }
               : agent
           )
         )
+        setEditableConfigs((prev) => {
+          const current = prev[agentType]
+          return current
+            ? { ...prev, [agentType]: { ...current, env: parsedEnv } }
+            : prev
+        })
         reportAffectedSessions(affected)
       } finally {
         setSavingEnv((prev) => ({ ...prev, [agentType]: false }))
@@ -4813,12 +4857,12 @@ export function AcpAgentSettings() {
         agentType === "gemini" ||
         agentType === "open_claw"
       if (usesMerge) {
-        const originalAgent = agents.find((a) => a.agent_type === agentType)
+        const originalConfig = editableConfigs[agentType]?.config_json
         // Diff even when the current config emptied to "" so removed keys still
         // produce null-deletion patches (`configForPersist` would otherwise be
         // "" → a null config_json no-op that leaves the stale key on disk).
         configForPersist =
-          buildMergeConfigPayload(configText, originalAgent?.config_json) ?? ""
+          buildMergeConfigPayload(configText, originalConfig) ?? ""
       }
       setSavingConfig((prev) => ({ ...prev, [agentType]: true }))
       try {
@@ -4846,56 +4890,57 @@ export function AcpAgentSettings() {
           grok_structured: options?.grokStructured ?? null,
         })
         reportAffectedSessions(affected)
-        setAgents((prev) =>
-          prev.map((agent) =>
-            agent.agent_type === agentType
-              ? {
-                  ...agent,
-                  config_json: normalizedConfig || null,
-                  opencode_auth_json:
-                    typeof options?.openCodeAuthJsonText === "string"
-                      ? options.openCodeAuthJsonText
-                      : agent.opencode_auth_json,
-                  codex_auth_json:
-                    typeof codexAuthJsonText === "string"
-                      ? codexAuthJsonText
-                      : agent.codex_auth_json,
-                  codex_config_toml:
-                    typeof options?.codexConfigTomlText === "string"
-                      ? options.codexConfigTomlText
-                      : agent.codex_config_toml,
-                  grok_config_toml:
-                    typeof options?.grokConfigTomlText === "string"
-                      ? options.grokConfigTomlText
-                      : agent.grok_config_toml,
-                  grok_settings: options?.grokStructured
-                    ? {
-                        default_reasoning_effort:
-                          options.grokStructured.defaultReasoningEffort,
-                        permission_mode: options.grokStructured.permissionMode,
-                        // buildGrokStructuredConfig already trims/gates/clamps
-                        // these to what the backend writes, so mirror them
-                        // directly (reseedGrokDraft re-reads disk right after).
-                        custom_model_id: options.grokStructured.customModelId,
-                        custom_base_url: options.grokStructured.customBaseUrl,
-                        custom_api_key: options.grokStructured.customApiKey,
-                        custom_api_backend:
-                          options.grokStructured.customApiBackend,
-                        custom_context_window:
-                          options.grokStructured.customContextWindow,
-                        auto_compact_threshold_percent:
-                          options.grokStructured.autoCompactThresholdPercent,
-                      }
-                    : agent.grok_settings,
-                }
-              : agent
-          )
-        )
+        setEditableConfigs((prev) => {
+          const current = prev[agentType]
+          if (!current) return prev
+          return {
+            ...prev,
+            [agentType]: {
+              ...current,
+              config_json: normalizedConfig || null,
+              opencode_auth_json:
+                typeof options?.openCodeAuthJsonText === "string"
+                  ? options.openCodeAuthJsonText
+                  : current.opencode_auth_json,
+              codex_auth_json:
+                typeof codexAuthJsonText === "string"
+                  ? codexAuthJsonText
+                  : current.codex_auth_json,
+              codex_config_toml:
+                typeof options?.codexConfigTomlText === "string"
+                  ? options.codexConfigTomlText
+                  : current.codex_config_toml,
+              codex_model_catalog:
+                typeof options?.codexModelCatalog === "string"
+                  ? options.codexModelCatalog
+                  : current.codex_model_catalog,
+              grok_config_toml:
+                typeof options?.grokConfigTomlText === "string"
+                  ? options.grokConfigTomlText
+                  : current.grok_config_toml,
+              grok_settings: options?.grokStructured
+                ? {
+                    default_reasoning_effort:
+                      options.grokStructured.defaultReasoningEffort,
+                    permission_mode: options.grokStructured.permissionMode,
+                    custom_model_id: options.grokStructured.customModelId,
+                    custom_base_url: options.grokStructured.customBaseUrl,
+                    custom_api_key: options.grokStructured.customApiKey,
+                    custom_api_backend: options.grokStructured.customApiBackend,
+                    custom_context_window:
+                      options.grokStructured.customContextWindow,
+                    auto_compact_threshold_percent:
+                      options.grokStructured.autoCompactThresholdPercent,
+                  }
+                : current.grok_settings,
+            },
+          }
+        })
       } finally {
         setSavingConfig((prev) => ({ ...prev, [agentType]: false }))
       }
     },
-    [agents, reportAffectedSessions]
+    [editableConfigs, reportAffectedSessions]
   )
 
   // After a Grok save, re-read the merged on-disk config and rebuild the Grok
@@ -4905,12 +4950,23 @@ export function AcpAgentSettings() {
   // structured merge and the raw editor each write keys the other doesn't echo).
   const reseedGrokDraft = useCallback(async () => {
     try {
-      const fresh = await acpListAgents()
+      const [fresh, editable] = await Promise.all([
+        acpListAgents(),
+        acpGetAgentEditableConfig("grok"),
+      ])
       setAgents(fresh)
       publishAgentDisplay(fresh)
       const grok = fresh.find((a) => a.agent_type === "grok")
       if (grok) {
-        setDrafts((prev) => ({ ...prev, grok: buildAgentDraft(grok) }))
+        setEditableConfigs((prev) => ({ ...prev, grok: editable }))
+        setDrafts((prev) => ({
+          ...prev,
+          grok: buildAgentDraft(grok, editable),
+        }))
+        setConfigErrors((prev) => ({
+          ...prev,
+          grok: parseConfigJsonText(editable.config_json ?? "").error,
+        }))
       }
     } catch (err) {
       // Non-fatal: the save already committed, and the agents-updated
@@ -5491,7 +5547,14 @@ export function AcpAgentSettings() {
     ? checkState[selectedAgent.agent_type]
     : undefined
   const selectedDraft = selectedAgent
-    ? (drafts[selectedAgent.agent_type] ?? buildAgentDraft(selectedAgent))
+    ? (drafts[selectedAgent.agent_type] ??
+      buildAgentDraft(selectedAgent, editableConfigs[selectedAgent.agent_type]))
+    : null
+  const selectedEditableAgent = selectedAgent
+    ? (() => {
+        const editable = editableConfigs[selectedAgent.agent_type]
+        return editable ? { ...selectedAgent, ...editable } : null
+      })()
     : null
   const selectedConfigError = selectedAgent
     ? (configErrors[selectedAgent.agent_type] ?? null)
@@ -6438,11 +6501,7 @@ export function AcpAgentSettings() {
         // provider's key, so restore it when returning to that provider and
         // clear otherwise — never carry one provider's secret into another's
         // env var. An empty key field then means "leave the stored key as-is".
-        const projected = parseHermesConfig(
-          typeof selectedAgent.config_json === "string"
-            ? selectedAgent.config_json
-            : ""
-        )
+        const projected = parseHermesConfig(selectedDraft.configText)
         const sameAsConfigured = value === projected.provider
         return {
           ...current,
@@ -7739,7 +7798,9 @@ export function AcpAgentSettings() {
             {sortedAgents.map((agent) => {
               const current = checkState[agent.agent_type]
               const isChecking = Boolean(checking[agent.agent_type])
-              const draft = drafts[agent.agent_type] ?? buildAgentDraft(agent)
+              const draft =
+                drafts[agent.agent_type] ??
+                buildAgentDraft(agent, editableConfigs[agent.agent_type])
               const allChecks = getAgentChecks(agent, current)
               const summary = summarizeChecks(allChecks)
               const displaySummary: CheckStatus | "unchecked" | "checking" =
@@ -10518,52 +10579,60 @@ supports_websockets = true`}
                     </details>
                   </div>
                 ) : selectedAgent.agent_type === "code_buddy" ? (
-                  <CodeBuddyConfigPanel
-                    agent={selectedAgent}
-                    saving={Boolean(savingEnv[selectedAgent.agent_type])}
-                    onSave={(env, enabled) =>
-                      persistEnv(
-                        selectedAgent.agent_type,
-                        enabled,
-                        envMapToText(env),
-                        selectedAgent.model_provider_id
-                      )
-                    }
-                  />
+                  selectedEditableAgent ? (
+                    <CodeBuddyConfigPanel
+                      agent={selectedEditableAgent}
+                      saving={Boolean(savingEnv[selectedAgent.agent_type])}
+                      onSave={(env, enabled) =>
+                        persistEnv(
+                          selectedAgent.agent_type,
+                          enabled,
+                          envMapToText(env),
+                          selectedAgent.model_provider_id
+                        )
+                      }
+                    />
+                  ) : null
                 ) : selectedAgent.agent_type === "kimi_code" ? (
-                  <KimiCodeConfigPanel
-                    agent={selectedAgent}
-                    onSaved={refreshAgents}
-                  />
+                  selectedEditableAgent ? (
+                    <KimiCodeConfigPanel
+                      configJson={selectedDraft.configText}
+                      onSaved={refreshAgents}
+                    />
+                  ) : null
                 ) : selectedAgent.agent_type === "pi" ? (
-                  <PiConfigPanel
-                    agent={selectedAgent}
-                    saving={Boolean(savingEnv[selectedAgent.agent_type])}
-                    onSaveEnv={(env, enabled) =>
-                      persistEnv(
-                        selectedAgent.agent_type,
-                        enabled,
-                        envMapToText(env),
-                        selectedAgent.model_provider_id
-                      )
-                    }
-                    onSaved={refreshAgents}
-                  />
+                  selectedEditableAgent ? (
+                    <PiConfigPanel
+                      agent={selectedEditableAgent}
+                      saving={Boolean(savingEnv[selectedAgent.agent_type])}
+                      onSaveEnv={(env, enabled) =>
+                        persistEnv(
+                          selectedAgent.agent_type,
+                          enabled,
+                          envMapToText(env),
+                          selectedAgent.model_provider_id
+                        )
+                      }
+                      onSaved={refreshAgents}
+                    />
+                  ) : null
                 ) : selectedAgent.agent_type === "cursor" ? (
-                  <CursorConfigPanel
-                    agent={selectedAgent}
-                    saving={Boolean(savingEnv[selectedAgent.agent_type])}
-                    onSaveEnv={(env, enabled) =>
-                      persistEnv(
-                        selectedAgent.agent_type,
-                        enabled,
-                        envMapToText(env),
-                        selectedAgent.model_provider_id
-                      )
-                    }
-                    onSaved={refreshAgents}
-                    onAffectedSessions={reportAffectedSessions}
-                  />
+                  selectedEditableAgent ? (
+                    <CursorConfigPanel
+                      agent={selectedEditableAgent}
+                      saving={Boolean(savingEnv[selectedAgent.agent_type])}
+                      onSaveEnv={(env, enabled) =>
+                        persistEnv(
+                          selectedAgent.agent_type,
+                          enabled,
+                          envMapToText(env),
+                          selectedAgent.model_provider_id
+                        )
+                      }
+                      onSaved={refreshAgents}
+                      onAffectedSessions={reportAffectedSessions}
+                    />
+                  ) : null
                 ) : selectedAgent.agent_type === "grok" ? (
                   <div className="space-y-3 rounded-md border bg-muted/10 p-3">
                     <div>
@@ -11067,7 +11136,7 @@ supports_websockets = true`}
                               selectedDraft.configText,
                               buildGrokSaveOptions(
                                 selectedDraft,
-                                selectedAgent.grok_config_toml
+                                selectedEditableAgent?.grok_config_toml ?? null
                               )
                             )
                             // Independent second write (the API key lives in env).
