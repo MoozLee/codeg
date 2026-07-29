@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use futures::FutureExt;
 use sacp::schema::{
     BlobResourceContents, CancelNotification, ClientCapabilities, ContentBlock, ContentChunk,
     CreateTerminalRequest, CreateTerminalResponse, ElicitationCapabilities,
@@ -47,6 +49,7 @@ use crate::network::proxy;
 use crate::web::event_bridge::{emit_with_state, EventEmitter};
 
 const DEFAULT_COMMAND_COLOR_ENV: [(&str, &str); 1] = [("CLICOLOR_FORCE", "1")];
+const CLAUDE_CONTEXT_1M_BETA: &str = "context-1m-2025-08-07";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionConfigCommandValue {
@@ -1097,6 +1100,7 @@ pub async fn spawn_agent_connection(
                     cmd_rx,
                     emitter_clone.clone(),
                     Arc::clone(&state_clone),
+                    runtime_env,
                     terminal_base_env,
                     preferred_mode_id,
                     preferred_config_values,
@@ -2112,8 +2116,81 @@ fn resolve_working_dir(working_dir: Option<&str>) -> PathBuf {
     }
 }
 
+fn resolve_claude_auto_compact_window(runtime_env: &BTreeMap<String, String>) -> Option<i64> {
+    let value = runtime_env
+        .get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")?
+        .trim()
+        .parse::<i64>()
+        .ok()?;
+    (100_000..=1_000_000).contains(&value).then_some(value)
+}
+
+fn read_claude_code_user_options(
+    runtime_env: &BTreeMap<String, String>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let Some(settings_path) = runtime_env
+        .get("CODEG_TEST_CLAUDE_SETTINGS_PATH")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".claude").join("settings.json")))
+    else {
+        return serde_json::Map::new();
+    };
+
+    fs::read_to_string(settings_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| {
+            value
+                .get("_meta")
+                .and_then(|meta| meta.get("claudeCode"))
+                .and_then(|claude_code| claude_code.get("options"))
+                .and_then(serde_json::Value::as_object)
+                .cloned()
+        })
+        .unwrap_or_default()
+}
+
+fn merge_json_objects(
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    patch: serde_json::Map<String, serde_json::Value>,
+) {
+    for (key, value) in patch {
+        match (target.get_mut(&key), value) {
+            (
+                Some(serde_json::Value::Object(target_object)),
+                serde_json::Value::Object(patch_object),
+            ) => merge_json_objects(target_object, patch_object),
+            (_, value) => {
+                target.insert(key, value);
+            }
+        }
+    }
+}
+
+fn merge_claude_context_beta(options: &mut serde_json::Map<String, serde_json::Value>) {
+    match options.get_mut("betas") {
+        Some(serde_json::Value::Array(betas)) => {
+            if !betas
+                .iter()
+                .any(|value| value.as_str() == Some(CLAUDE_CONTEXT_1M_BETA))
+            {
+                betas.push(serde_json::Value::String(
+                    CLAUDE_CONTEXT_1M_BETA.to_string(),
+                ));
+            }
+        }
+        _ => {
+            options.insert(
+                "betas".to_string(),
+                serde_json::json!([CLAUDE_CONTEXT_1M_BETA]),
+            );
+        }
+    }
+}
+
 fn claude_raw_sdk_session_meta(
     agent_type: AgentType,
+    runtime_env: &BTreeMap<String, String>,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     if agent_type != AgentType::ClaudeCode {
         return None;
@@ -2124,6 +2201,23 @@ fn claude_raw_sdk_session_meta(
         "emitRawSDKMessages".to_string(),
         serde_json::Value::Bool(true),
     );
+
+    if let Some(auto_compact_window) = resolve_claude_auto_compact_window(runtime_env) {
+        let mut options = read_claude_code_user_options(runtime_env);
+        merge_json_objects(
+            &mut options,
+            serde_json::json!({
+                "settings": { "autoCompactWindow": auto_compact_window }
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+        );
+        if auto_compact_window > 200_000 {
+            merge_claude_context_beta(&mut options);
+        }
+        claude_code.insert("options".to_string(), serde_json::Value::Object(options));
+    }
 
     let mut meta = serde_json::Map::new();
     meta.insert(
@@ -2183,9 +2277,10 @@ fn build_new_session_request(
     agent_type: AgentType,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
+    runtime_env: &BTreeMap<String, String>,
 ) -> NewSessionRequest {
     let mut req = NewSessionRequest::new(cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type, runtime_env) {
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -2199,9 +2294,10 @@ fn build_load_session_request(
     session_id: SessionId,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
+    runtime_env: &BTreeMap<String, String>,
 ) -> LoadSessionRequest {
     let mut req = LoadSessionRequest::new(session_id, cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type, runtime_env) {
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -2220,9 +2316,10 @@ fn build_resume_session_request(
     session_id: SessionId,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
+    runtime_env: &BTreeMap<String, String>,
 ) -> ResumeSessionRequest {
     let mut req = ResumeSessionRequest::new(session_id, cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
+    if let Some(meta) = claude_raw_sdk_session_meta(agent_type, runtime_env) {
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -2779,6 +2876,7 @@ async fn run_connection(
     mut cmd_rx: mpsc::Receiver<ConnectionCommand>,
     emitter: EventEmitter,
     state: Arc<RwLock<SessionState>>,
+    runtime_env: BTreeMap<String, String>,
     terminal_base_env: BTreeMap<String, String>,
     preferred_mode_id: Option<String>,
     preferred_config_values: BTreeMap<String, String>,
@@ -3218,6 +3316,7 @@ async fn run_connection(
                         SessionId::new(sid.clone()),
                         &cwd,
                         mcp_servers.clone(),
+                        &runtime_env,
                     );
                     match send_resume_session(&cx, resume_req).await {
                         Ok((resume_resp, grok_models_raw)) => {
@@ -3278,6 +3377,7 @@ async fn run_connection(
                                 terminal_runtime.clone(),
                                 &cwd_string,
                                 supports_fork,
+                                &runtime_env,
                                 &prompt_ledger,
                                 delegation_injection.as_ref(),
                             )
@@ -3299,6 +3399,7 @@ async fn run_connection(
                                 terminal_runtime.clone(),
                                 &cwd,
                                 &cwd_string,
+                                &runtime_env,
                                 &prompt_ledger,
                                 delegation_injection.as_ref(),
                             )
@@ -3332,6 +3433,7 @@ async fn run_connection(
                     SessionId::new(sid.clone()),
                     &cwd,
                     mcp_servers.clone(),
+                    &runtime_env,
                 );
                 let load_result = cx.send_request_to(Agent, load_req).block_task().await;
 
@@ -3467,6 +3569,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd_string,
                             supports_fork,
+                            &runtime_env,
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
@@ -3484,6 +3587,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd,
                             &cwd_string,
+                            &runtime_env,
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
@@ -3573,7 +3677,7 @@ async fn run_connection(
                         let (new_resp, grok_models_raw) = send_new_session_capturing_models(
                             &cx,
                             agent_type,
-                            build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                            build_new_session_request(agent_type, &cwd, mcp_servers.clone(), &runtime_env),
                         )
                         .await?;
                         let fallback_sid = new_resp.session_id.0.to_string();
@@ -3630,6 +3734,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd_string,
                             supports_fork,
+                            &runtime_env,
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
@@ -3649,6 +3754,7 @@ async fn run_connection(
                             terminal_runtime.clone(),
                             &cwd,
                             &cwd_string,
+                            &runtime_env,
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                         )
@@ -3660,7 +3766,7 @@ async fn run_connection(
                 let (new_resp, grok_models_raw) = send_new_session_capturing_models(
                     &cx,
                     agent_type,
-                    build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                    build_new_session_request(agent_type, &cwd, mcp_servers.clone(), &runtime_env),
                 )
                 .await?;
                 let sid = new_resp.session_id.0.to_string();
@@ -3709,6 +3815,7 @@ async fn run_connection(
                     terminal_runtime.clone(),
                     &cwd_string,
                     supports_fork,
+                    &runtime_env,
                     &prompt_ledger,
                     delegation_injection.as_ref(),
                 )
@@ -3726,6 +3833,7 @@ async fn run_connection(
                     terminal_runtime.clone(),
                     &cwd,
                     &cwd_string,
+                    &runtime_env,
                     &prompt_ledger,
                     delegation_injection.as_ref(),
                 )
@@ -5143,6 +5251,7 @@ async fn handle_fork_or_exit(
     terminal_runtime: Arc<TerminalRuntime>,
     _cwd: &std::path::Path,
     cwd_string: &str,
+    runtime_env: &BTreeMap<String, String>,
     // Threaded through from run_connection: the connection-scoped prompt
     // ledger (the forked session's loop keeps fingerprinting into the SAME
     // ledger the still-running watcher consumes from).
@@ -5234,6 +5343,7 @@ async fn handle_fork_or_exit(
         terminal_runtime.clone(),
         cwd_string,
         true, // fork already succeeded on this process
+        runtime_env,
         prompt_ledger,
         delegation_injection,
     )
@@ -5253,6 +5363,7 @@ async fn handle_fork_or_exit(
         terminal_runtime,
         _cwd,
         cwd_string,
+        runtime_env,
         prompt_ledger,
         delegation_injection,
     ))
@@ -5365,6 +5476,64 @@ fn maintenance_transport_failure(origin: &MaintenancePromptOrigin) -> Maintenanc
     }
 }
 
+enum PromptResponseCompletionRoute {
+    Maintenance(MaintenanceTurnCompletion),
+    User(&'static str),
+}
+
+/// A maintenance prompt response has no user-visible completion path. Its
+/// outcome is returned only to the operation that started it, before the turn
+/// loop can write history or emit an event.
+fn route_prompt_response_completion(
+    maintenance_origin: Option<&MaintenancePromptOrigin>,
+    raw_stop_reason: &'static str,
+    turn_had_agent_output: bool,
+) -> PromptResponseCompletionRoute {
+    if let Some(origin) = maintenance_origin {
+        return PromptResponseCompletionRoute::Maintenance(maintenance_completion_for_stop(
+            origin,
+            raw_stop_reason,
+        ));
+    }
+
+    let stop_reason = if raw_stop_reason == "end_turn" && !turn_had_agent_output {
+        "empty"
+    } else {
+        raw_stop_reason
+    };
+    PromptResponseCompletionRoute::User(stop_reason)
+}
+
+/// Maintenance starts from the already-connected state, so it must not emit a
+/// duplicate public connection-status event after its private completion.
+fn should_emit_post_prompt_connected(is_maintenance: bool) -> bool {
+    !is_maintenance
+}
+
+/// ACP notifications are not correlated to an individual prompt. After a
+/// maintenance response ends, suppress delayed notifications until a user
+/// prompt establishes the next public turn boundary.
+#[derive(Default)]
+struct IdleUpdateGate {
+    suppress_after_maintenance: bool,
+}
+
+impl IdleUpdateGate {
+    fn begin_prompt(&mut self, is_maintenance: bool) {
+        if !is_maintenance {
+            self.suppress_after_maintenance = false;
+        }
+    }
+
+    fn suppress_after_maintenance(&mut self) {
+        self.suppress_after_maintenance = true;
+    }
+
+    fn forwards_updates(&self) -> bool {
+        !self.suppress_after_maintenance
+    }
+}
+
 /// True when a `SessionUpdate` represents actual agent-produced output for
 /// the current turn. Used to detect "silent EndTurn" cases where an agent
 /// (notably OpenCode) reports the turn ended successfully but never emitted
@@ -5448,6 +5617,7 @@ async fn run_conversation_loop<'a>(
     terminal_runtime: Arc<TerminalRuntime>,
     cwd: &str,
     supports_fork: bool,
+    runtime_env: &BTreeMap<String, String>,
     // Connection-scoped (created once in `run_connection`, shared across fork
     // restarts of this loop): outgoing prompts are fingerprinted here so the
     // transcript watcher can classify their turns as wire-rendered foreground.
@@ -5473,6 +5643,7 @@ async fn run_conversation_loop<'a>(
     // prompt turn, journaled or not, so consecutive ordinals prove adjacent
     // turns to the reader.
     let mut cursor_turn_ord: u64 = 0;
+    let mut idle_update_gate = IdleUpdateGate::default();
     loop {
         // Wait for either a user command or a session update (e.g. available_commands_update)
         let cmd = loop {
@@ -5482,6 +5653,9 @@ async fn run_conversation_loop<'a>(
                 update = session.read_update() => {
                     match update {
                         Ok(SessionMessage::SessionMessage(dispatch)) => {
+                            if !idle_update_gate.forwards_updates() {
+                                continue;
+                            }
                             let h = emitter.clone();
                             let st = Arc::clone(state);
                             let cwd_opt = Some(cwd);
@@ -5519,6 +5693,14 @@ async fn run_conversation_loop<'a>(
                     PromptOrigin::Maintenance(origin) => Some(origin),
                 };
                 let is_maintenance = maintenance_origin.is_some();
+                if !is_maintenance && !idle_update_gate.forwards_updates() {
+                    // A command can win the idle select while a delayed maintenance
+                    // notification is already queued. Discard the ready queue
+                    // without awaiting so the new user turn owns every update it
+                    // receives after this boundary.
+                    while let Some(Ok(_)) = session.read_update().now_or_never() {}
+                }
+                idle_update_gate.begin_prompt(is_maintenance);
                 // Maintenance is a normal ACP request but has no durable user
                 // provenance: it must not seed transcript/watch classifications.
                 if !is_maintenance {
@@ -5553,6 +5735,7 @@ async fn run_conversation_loop<'a>(
                     // rather than emitting a synthetic user-visible turn.
                     state.write().await.turn_in_flight = false;
                     if let Some(origin) = maintenance_origin.take() {
+                        idle_update_gate.suppress_after_maintenance();
                         let completion = maintenance_transport_failure(&origin);
                         let _ = origin.completion_tx.send(completion);
                     } else {
@@ -5766,6 +5949,7 @@ async fn run_conversation_loop<'a>(
                                         raw_reason_str
                                     };
                                     if let Some(origin) = maintenance_origin.take() {
+                                        idle_update_gate.suppress_after_maintenance();
                                         state.write().await.turn_in_flight = false;
                                         let completion = maintenance_completion_for_stop(
                                             &origin,
@@ -5835,6 +6019,7 @@ async fn run_conversation_loop<'a>(
                                 Ok(result) => result.stop_reason,
                                 Err(error) => {
                                     if let Some(origin) = maintenance_origin.take() {
+                                        idle_update_gate.suppress_after_maintenance();
                                         state.write().await.turn_in_flight = false;
                                         let completion = maintenance_transport_failure(&origin);
                                         let _ = origin.completion_tx.send(completion);
@@ -5842,6 +6027,22 @@ async fn run_conversation_loop<'a>(
                                     }
                                     return Err(error);
                                 }
+                            };
+                            let raw_reason_str = stop_reason_to_str(reason);
+                            let reason_str = match route_prompt_response_completion(
+                                maintenance_origin.as_ref(),
+                                raw_reason_str,
+                                turn_had_agent_output,
+                            ) {
+                                PromptResponseCompletionRoute::Maintenance(completion) => {
+                                    idle_update_gate.suppress_after_maintenance();
+                                    state.write().await.turn_in_flight = false;
+                                    if let Some(origin) = maintenance_origin.take() {
+                                        let _ = origin.completion_tx.send(completion);
+                                    }
+                                    break;
+                                }
+                                PromptResponseCompletionRoute::User(reason_str) => reason_str,
                             };
                             if !tracked_terminal_tool_calls.is_empty() {
                                 poll_tracked_terminal_tool_calls(
@@ -5853,14 +6054,6 @@ async fn run_conversation_loop<'a>(
                                 )
                                 .await;
                             }
-                            let raw_reason_str = stop_reason_to_str(reason);
-                            let reason_str = if raw_reason_str == "end_turn"
-                                && !turn_had_agent_output
-                            {
-                                "empty"
-                            } else {
-                                raw_reason_str
-                            };
                             if let Some(err_event) =
                                 turn_failure_error_event(reason_str, agent_type)
                             {
@@ -6012,6 +6205,7 @@ async fn run_conversation_loop<'a>(
                                 }
                                 Some(ConnectionCommand::Cancel) => {
                                     if let Some(origin) = maintenance_origin.take() {
+                                        idle_update_gate.suppress_after_maintenance();
                                         let _ = cx.send_notification_to(
                                             Agent,
                                             CancelNotification::new(sid.clone()),
@@ -6150,14 +6344,16 @@ async fn run_conversation_loop<'a>(
                     break;
                 }
 
-                emit_with_state(
-                    state,
-                    emitter,
-                    AcpEvent::StatusChanged {
-                        status: ConnectionStatus::Connected,
-                    },
-                )
-                .await;
+                if should_emit_post_prompt_connected(is_maintenance) {
+                    emit_with_state(
+                        state,
+                        emitter,
+                        AcpEvent::StatusChanged {
+                            status: ConnectionStatus::Connected,
+                        },
+                    )
+                    .await;
+                }
             }
             Some(ConnectionCommand::RespondPermission {
                 request_id,
@@ -6283,7 +6479,13 @@ async fn run_conversation_loop<'a>(
                     sid.0,
                     cwd
                 );
-                let result = crate::acp::fork::fork_session(&cx, &sid, cwd).await;
+                let result = crate::acp::fork::fork_session(
+                    &cx,
+                    &sid,
+                    cwd,
+                    claude_raw_sdk_session_meta(agent_type, runtime_env),
+                )
+                .await;
                 match result {
                     Ok((fork_response, fork_models_raw)) => {
                         tracing::info!(
@@ -8545,7 +8747,8 @@ mod tests {
 
     #[test]
     fn claude_raw_sdk_meta_enabled_only_for_claude() {
-        let claude_meta = claude_raw_sdk_session_meta(AgentType::ClaudeCode)
+        let runtime_env = BTreeMap::new();
+        let claude_meta = claude_raw_sdk_session_meta(AgentType::ClaudeCode, &runtime_env)
             .expect("Claude must have raw SDK meta");
         assert_eq!(
             claude_meta
@@ -8555,7 +8758,71 @@ mod tests {
             Some(true)
         );
 
-        assert!(claude_raw_sdk_session_meta(AgentType::Codex).is_none());
+        assert!(claude_raw_sdk_session_meta(AgentType::Codex, &runtime_env).is_none());
+    }
+
+    #[test]
+    fn maintenance_idle_updates_stay_private_until_user_prompt() {
+        let mut gate = IdleUpdateGate::default();
+        assert!(gate.forwards_updates());
+
+        gate.suppress_after_maintenance();
+        assert!(
+            !gate.forwards_updates(),
+            "late maintenance updates must not enter the idle event path"
+        );
+
+        gate.begin_prompt(true);
+        assert!(
+            !gate.forwards_updates(),
+            "a following maintenance command must not reopen public updates"
+        );
+
+        gate.begin_prompt(false);
+        assert!(
+            gate.forwards_updates(),
+            "the next user prompt establishes the next public turn boundary"
+        );
+    }
+
+    #[test]
+    fn maintenance_prompt_response_routes_privately_before_user_completion() {
+        let (completion_tx, _completion_rx) = tokio::sync::oneshot::channel();
+        let origin = MaintenancePromptOrigin {
+            operation_id: "maintenance-1".to_string(),
+            session_id: "session-1".to_string(),
+            command: "/compact".to_string(),
+            completion_tx,
+        };
+
+        match route_prompt_response_completion(Some(&origin), "end_turn", false) {
+            PromptResponseCompletionRoute::Maintenance(completion) => {
+                assert_eq!(completion.operation_id, "maintenance-1");
+                assert_eq!(completion.session_id, "session-1");
+                assert_eq!(completion.stop_reason.as_deref(), Some("end_turn"));
+                assert!(matches!(
+                    completion.outcome,
+                    MaintenanceCommandOutcome::Completed
+                ));
+            }
+            PromptResponseCompletionRoute::User(_) => {
+                panic!("maintenance response must not take the user completion path")
+            }
+        }
+
+        match route_prompt_response_completion(None, "end_turn", false) {
+            PromptResponseCompletionRoute::User("empty") => {}
+            _ => panic!("a silent user response must remain an empty user turn"),
+        }
+
+        assert!(
+            !should_emit_post_prompt_connected(true),
+            "a maintenance completion must not create a public Connected event"
+        );
+        assert!(
+            should_emit_post_prompt_connected(false),
+            "a user prompt completion must restore the public Connected status"
+        );
     }
 
     #[test]
@@ -8813,17 +9080,91 @@ mod tests {
     }
 
     #[test]
-    fn build_new_session_request_sets_claude_raw_meta() {
+    fn claude_auto_compact_window_enforces_supported_bounds() {
+        for value in ["100000", "200000", "1000000"] {
+            let env = BTreeMap::from([(
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                value.to_string(),
+            )]);
+            assert_eq!(
+                resolve_claude_auto_compact_window(&env),
+                value.parse::<i64>().ok()
+            );
+        }
+        for value in ["", "not-a-number", "99999", "1000001"] {
+            let env = BTreeMap::from([(
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                value.to_string(),
+            )]);
+            assert_eq!(resolve_claude_auto_compact_window(&env), None);
+        }
+    }
+
+    #[test]
+    fn claude_window_is_injected_into_new_load_and_resume_requests() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new());
+        let env = BTreeMap::from([(
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+            "300000".to_string(),
+        )]);
+        let requests = [
+            serde_json::to_value(build_new_session_request(
+                AgentType::ClaudeCode,
+                &cwd,
+                Vec::new(),
+                &env,
+            ))
+            .expect("serialize new request"),
+            serde_json::to_value(build_load_session_request(
+                AgentType::ClaudeCode,
+                SessionId::new("load-session".to_string()),
+                &cwd,
+                Vec::new(),
+                &env,
+            ))
+            .expect("serialize load request"),
+            serde_json::to_value(build_resume_session_request(
+                AgentType::ClaudeCode,
+                SessionId::new("resume-session".to_string()),
+                &cwd,
+                Vec::new(),
+                &env,
+            ))
+            .expect("serialize resume request"),
+        ];
+
+        for request in requests {
+            assert_eq!(
+                request.pointer("/_meta/claudeCode/options/settings/autoCompactWindow"),
+                Some(&serde_json::json!(300000))
+            );
+            assert_eq!(
+                request.pointer("/_meta/claudeCode/options/betas/0"),
+                Some(&serde_json::json!(CLAUDE_CONTEXT_1M_BETA))
+            );
+        }
+    }
+
+    #[test]
+    fn claude_window_is_injected_into_fork_request() {
+        let env = BTreeMap::from([(
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+            "300000".to_string(),
+        )]);
+        let request = crate::acp::fork::build_fork_session_request(
+            &SessionId::new("fork-source-session".to_string()),
+            "/tmp/codeg",
+            claude_raw_sdk_session_meta(AgentType::ClaudeCode, &env),
+        );
+        let request = serde_json::to_value(request).expect("serialize fork request");
 
         assert_eq!(
-            req.meta
-                .as_ref()
-                .and_then(|m| m.get("claudeCode"))
-                .and_then(|v| v.get("emitRawSDKMessages"))
-                .and_then(|v| v.as_bool()),
-            Some(true)
+            request.pointer("/_meta/claudeCode/options/settings/autoCompactWindow"),
+            Some(&serde_json::json!(300000))
+        );
+        assert_eq!(
+            request.pointer("/_meta/claudeCode/options/betas/0"),
+            Some(&serde_json::json!(CLAUDE_CONTEXT_1M_BETA))
         );
     }
 
@@ -8835,6 +9176,7 @@ mod tests {
             SessionId::new("abc".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
 
         assert!(req.meta.is_none());
@@ -8853,7 +9195,8 @@ mod tests {
     fn openclaw_session_requests_carry_no_mcp_servers() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
 
-        let new_req = build_new_session_request(AgentType::OpenClaw, &cwd, Vec::new());
+        let new_req =
+            build_new_session_request(AgentType::OpenClaw, &cwd, Vec::new(), &BTreeMap::new());
         assert!(
             new_req.mcp_servers.is_empty(),
             "OpenClaw session/new must carry no MCP servers"
@@ -8870,6 +9213,7 @@ mod tests {
             SessionId::new("openclaw-session".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
         assert!(
             load_req.mcp_servers.is_empty(),
@@ -8891,6 +9235,7 @@ mod tests {
             SessionId::new("abc".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
 
         assert_eq!(
@@ -8911,6 +9256,7 @@ mod tests {
             SessionId::new("abc".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
 
         assert!(req.meta.is_none());
@@ -8932,6 +9278,7 @@ mod tests {
             SessionId::new("openclaw-session".to_string()),
             &cwd,
             Vec::new(),
+            &BTreeMap::new(),
         );
         assert!(
             req.mcp_servers.is_empty(),

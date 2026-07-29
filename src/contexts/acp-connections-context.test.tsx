@@ -38,6 +38,7 @@ const h = vi.hoisted(() => {
     acpConnect: vi.fn(),
     acpDisconnect: vi.fn(),
     acpGetSessionSnapshot: vi.fn(),
+    acpPrompt: vi.fn(),
     buildDelegationSeedEnvelopes: vi.fn(() => []),
     denormalizeSnapshot: vi.fn(),
   }
@@ -84,7 +85,7 @@ vi.mock("@/lib/api", () => ({
   acpConnect: h.acpConnect,
   acpDisconnect: h.acpDisconnect,
   acpGetSessionSnapshot: h.acpGetSessionSnapshot,
-  acpPrompt: vi.fn(),
+  acpPrompt: h.acpPrompt,
   acpSetMode: vi.fn(),
   acpSetConfigOption: vi.fn(),
   acpCancel: vi.fn(),
@@ -143,6 +144,7 @@ beforeEach(() => {
   h.acpConnect.mockReset()
   h.acpDisconnect.mockReset()
   h.acpGetSessionSnapshot.mockReset()
+  h.acpPrompt.mockReset()
   h.denormalizeSnapshot.mockReset()
   h.denormalizeSnapshot.mockReturnValue({
     connectionId: "owner-conn",
@@ -176,6 +178,7 @@ beforeEach(() => {
   h.acpConnect.mockResolvedValue("spawned-conn")
   h.acpDisconnect.mockResolvedValue(undefined)
   h.acpGetSessionSnapshot.mockResolvedValue(null)
+  h.acpPrompt.mockResolvedValue(undefined)
 })
 
 function latestAttachHandlers(): AttachHandlers {
@@ -251,6 +254,40 @@ describe("AcpConnectionsProvider cross-client viewer lifecycle", () => {
       "spawned-conn",
       expect.anything(),
       expect.anything()
+    )
+  })
+
+  it("blocks only exact standalone maintenance commands from the user prompt path", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    await act(async () => {
+      await expect(
+        h.actions!.sendPrompt(TAB, [{ type: "text", text: " /SUMMARIZE " }])
+      ).rejects.toThrow("Reserved maintenance commands cannot be sent manually")
+    })
+    expect(h.acpPrompt).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await h.actions!.sendPrompt(TAB, [
+        { type: "text", text: "/compact this text" },
+      ])
+      await h.actions!.sendPrompt(TAB, [
+        { type: "text", text: "/compact" },
+        { type: "text", text: "include this" },
+      ])
+    })
+    expect(h.acpPrompt).toHaveBeenCalledTimes(2)
+    expect(h.acpPrompt).toHaveBeenNthCalledWith(
+      1,
+      "spawned-conn",
+      [{ type: "text", text: "/compact this text" }],
+      null,
+      null,
+      null
     )
   })
 

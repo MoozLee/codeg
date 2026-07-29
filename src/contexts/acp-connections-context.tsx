@@ -84,6 +84,7 @@ import {
   deriveContextManagementFromAgentStatus,
   deriveContextManagementFromSelectors,
   getCompactionTriggerDecision,
+  isReservedMaintenancePromptBlocks,
   isValidSessionConfigValue,
   sessionConfigOptionAcceptsValue,
   type CompactionTriggerStatus,
@@ -4841,6 +4842,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     ) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
+      if (isReservedMaintenancePromptBlocks(blocks)) {
+        throw new Error("Reserved maintenance commands cannot be sent manually")
+      }
       lastActivityRef.current.set(contextKey, Date.now())
       await acpPrompt(
         conn.connectionId,
