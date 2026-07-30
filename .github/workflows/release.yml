@@ -38,17 +38,18 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check tag commit belongs to default branch
+      - name: Check tag commit belongs to release branch
         shell: bash
         run: |
-          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
-          git fetch origin "${DEFAULT_BRANCH}"
+          RELEASE_BRANCH="release"
+          RELEASE_REF="origin/${RELEASE_BRANCH}"
+          git fetch origin "+refs/heads/${RELEASE_BRANCH}:refs/remotes/${RELEASE_REF}"
 
           TAG_COMMIT=$(git rev-list -n 1 "${GITHUB_REF_NAME}")
-          if git merge-base --is-ancestor "${TAG_COMMIT}" "origin/${DEFAULT_BRANCH}"; then
-            echo "Tag ${GITHUB_REF_NAME} is based on ${DEFAULT_BRANCH}"
+          if git merge-base --is-ancestor "${TAG_COMMIT}" "${RELEASE_REF}"; then
+            echo "Tag ${GITHUB_REF_NAME} is contained in ${RELEASE_REF}"
           else
-            echo "Tag ${GITHUB_REF_NAME} is not based on ${DEFAULT_BRANCH}"
+            echo "Tag ${GITHUB_REF_NAME} is not contained in ${RELEASE_REF}"
             exit 1
           fi
 
@@ -66,6 +67,12 @@ jobs:
             exit 1
           fi
 
+      - name: Test release note fixtures
+        run: node --test .github/scripts/release-notes.test.mjs
+
+      - name: Verify fork release overlay
+        run: node .github/scripts/verify-release-workflow.mjs
+
       - id: release
         name: Create or reuse draft release
         uses: actions/github-script@v7
@@ -73,61 +80,21 @@ jobs:
           PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         with:
           script: |
-            const tag = context.ref.replace("refs/tags/", "");
-            const { owner, repo } = context.repo;
+            const {
+              createReleaseNotes,
+            } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/release-notes.cjs`);
             const prerelease = process.env.PRERELEASE === "true";
-            const releaseName = `codeg ${tag}`;
-            const { data: tagRef } = await github.rest.git.getRef({
-              owner,
-              repo,
-              ref: `tags/${tag}`,
-            });
-
-            let commitSha = tagRef.object.sha;
-            if (tagRef.object.type === "tag") {
-              const { data: annotatedTag } = await github.rest.git.getTag({
-                owner,
-                repo,
-                tag_sha: commitSha,
-              });
-              if (annotatedTag.object.type !== "commit") {
-                core.setFailed(
-                  `Tag ${tag} points to ${annotatedTag.object.type}, not a commit.`,
-                );
-                return;
-              }
-              commitSha = annotatedTag.object.sha;
-            }
-
-            const { data: commit } = await github.rest.repos.getCommit({
-              owner,
-              repo,
-              ref: commitSha,
-            });
-
-            const releaseBody =
-              commit.commit.message?.trim() || "_No commit message._";
+            const notes = await createReleaseNotes({ context, github, core });
+            const { owner, repo } = context.repo;
+            const releaseName = `codeg ${notes.tag}`;
             let release;
 
-            try {
-              const existing = await github.rest.repos.getReleaseByTag({
-                owner,
-                repo,
-                tag,
-              });
-
-              if (!existing.data.draft) {
-                core.setFailed(
-                  `Release for tag ${tag} already exists and is not a draft.`,
-                );
-                return;
-              }
-
-              release = existing.data;
+            if (notes.existingDraft) {
+              release = notes.existingDraft;
               if (
                 release.prerelease !== prerelease ||
                 release.name !== releaseName ||
-                (release.body ?? "").trim() !== releaseBody
+                (release.body ?? "").trim() !== notes.releaseBody
               ) {
                 const updated = await github.rest.repos.updateRelease({
                   owner,
@@ -135,33 +102,28 @@ jobs:
                   release_id: release.id,
                   name: releaseName,
                   prerelease,
-                  body: releaseBody,
+                  body: notes.releaseBody,
                 });
                 release = updated.data;
               }
               core.info(`Reusing existing draft release #${release.id}`);
-            } catch (error) {
-              if (error.status !== 404) {
-                throw error;
-              }
-
+            } else {
               const created = await github.rest.repos.createRelease({
                 owner,
                 repo,
-                tag_name: tag,
+                tag_name: notes.tag,
                 name: releaseName,
-                body: releaseBody,
+                body: notes.releaseBody,
                 draft: true,
                 prerelease,
               });
-
               release = created.data;
               core.info(`Created draft release #${release.id}`);
             }
 
             core.setOutput("release_id", String(release.id));
             core.setOutput("release_url", release.html_url);
-            core.setOutput("release_body", releaseBody);
+            core.setOutput("release_body", notes.releaseBody);
 
   build-tauri:
     needs: create-draft-release
@@ -327,16 +289,14 @@ jobs:
           fi
           ls -la "$file"
 
-      - name: Import Apple Developer ID certificate
+      - id: apple-signing
+        name: Detect Apple signing secrets
         if: contains(matrix.target, 'apple-darwin')
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
 
@@ -344,10 +304,34 @@ jobs:
           for name in \
             APPLE_CERTIFICATE \
             APPLE_CERTIFICATE_PASSWORD \
-            KEYCHAIN_PASSWORD \
-            APPLE_ID \
-            APPLE_PASSWORD \
-            APPLE_TEAM_ID; do
+            KEYCHAIN_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            printf '::warning::Apple signing secrets are not configured; building unsigned macOS artifacts without notarization: %s\n' "${missing[*]}"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import Apple Developer ID certificate
+        if: contains(matrix.target, 'apple-darwin') && steps.apple-signing.outputs.available == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            KEYCHAIN_PASSWORD; do
             if [ -z "${!name:-}" ]; then
               missing+=("$name")
             fi
@@ -403,7 +387,7 @@ jobs:
           security find-identity -v -p codesigning "$keychain_path"
 
       - name: Resolve Apple Developer ID identity
-        if: contains(matrix.target, 'apple-darwin')
+        if: contains(matrix.target, 'apple-darwin') && steps.apple-signing.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -504,7 +488,7 @@ jobs:
           retryAttempts: 2
 
       - name: Build, sign, and upload to draft release (macOS)
-        if: contains(matrix.target, 'apple-darwin')
+        if: contains(matrix.target, 'apple-darwin') && steps.apple-signing.outputs.available == 'true'
         uses: tauri-apps/tauri-action@v0.6.1
         env:
           # The matrix-target sidecar is already staged and verified above.
@@ -530,6 +514,94 @@ jobs:
           args: --target ${{ matrix.target }}
           includeUpdaterJson: true
           retryAttempts: 2
+
+      - name: Build and upload unsigned macOS artifact to draft release
+        if: contains(matrix.target, 'apple-darwin') && steps.apple-signing.outputs.available != 'true'
+        uses: tauri-apps/tauri-action@v0.6.1
+        env:
+          # The matrix-target sidecar is already staged and verified above.
+          # Skip the duplicate beforeBuildCommand sidecar pass so cross builds
+          # do not fall back to the runner host triple.
+          CODEG_SKIP_SIDECAR: "1"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.create-draft-release.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          releaseBody: ${{ needs.create-draft-release.outputs.release_body }}
+          releaseDraft: true
+          prerelease: ${{ needs.create-draft-release.outputs.prerelease }}
+          tauriScript: pnpm tauri
+          args: --target ${{ matrix.target }}
+          includeUpdaterJson: true
+          retryAttempts: 2
+
+      # Verify updater archives against the public key committed in
+      # src-tauri/tauri.conf.json before this successful build can publish.
+      - name: Verify updater signatures match committed pubkey
+        if: contains(matrix.target, 'apple-darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          brew install minisign
+
+          PUBKEY_B64=$(python3 -c '
+          import json, sys
+          with open("src-tauri/tauri.conf.json", "r", encoding="utf-8") as fh:
+              cfg = json.load(fh)
+          pubkey = cfg["plugins"]["updater"]["pubkey"]
+          if not pubkey:
+              sys.exit("plugins.updater.pubkey is empty")
+          sys.stdout.write(pubkey)
+          ')
+          pubkey_path="$RUNNER_TEMP/codeg-updater.pub"
+          printf '%s' "$PUBKEY_B64" | base64 --decode > "$pubkey_path"
+
+          BUNDLE_ROOT="src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [[ ! -d "$BUNDLE_ROOT" ]]; then
+            echo "Expected bundle directory not found: $BUNDLE_ROOT" >&2
+            exit 1
+          fi
+
+          declare -a SIG_FILES=()
+          while IFS= read -r -d '' f; do
+            SIG_FILES+=("$f")
+          done < <(find "$BUNDLE_ROOT" -type f -name "*.sig" -print0)
+          if [[ ${#SIG_FILES[@]} -eq 0 ]]; then
+            echo "No updater signature files found under $BUNDLE_ROOT" >&2
+            exit 1
+          fi
+
+          FAILED=0
+          VERIFIED=0
+          for sig in "${SIG_FILES[@]}"; do
+            archive="${sig%.sig}"
+            if [[ ! -f "$archive" ]]; then
+              echo "Signature has no matching archive: $sig" >&2
+              FAILED=1
+              continue
+            fi
+            if ! base64 --decode < "$sig" > "${sig}.minisig"; then
+              echo "::error file=$sig::Failed to decode updater signature."
+              FAILED=1
+              continue
+            fi
+            if ! minisign -Vm "$archive" -p "$pubkey_path" -x "${sig}.minisig"; then
+              echo "::error file=src-tauri/tauri.conf.json::Updater signature verification failed for $archive."
+              FAILED=1
+            else
+              VERIFIED=$((VERIFIED + 1))
+            fi
+            rm -f "${sig}.minisig"
+          done
+
+          rm -f "$pubkey_path"
+          if [[ $FAILED -ne 0 ]]; then
+            exit 1
+          fi
+          echo "All ${VERIFIED} updater signatures verified against committed pubkey"
 
       - name: Delete Apple signing keychain
         if: always() && contains(matrix.target, 'apple-darwin')
@@ -780,6 +852,8 @@ jobs:
         run: gh release upload "${{ github.ref_name }}" "dist/${{ matrix.artifact }}.zip" "dist/${{ matrix.artifact }}.zip.sig" "dist/${{ matrix.artifact }}.zip.sha256" --clobber
 
   build-docker:
+    # Docker publishing is intentionally disabled for this release candidate.
+    if: ${{ false }}
     needs:
       - create-draft-release
       - build-server
@@ -861,8 +935,7 @@ jobs:
       - create-draft-release
       - build-tauri
       - build-server
-      - build-docker
-    if: ${{ needs.build-tauri.result == 'success' && needs.build-server.result == 'success' && needs.build-docker.result == 'success' }}
+    if: ${{ needs.build-tauri.result == 'success' && needs.build-server.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
