@@ -6,12 +6,14 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
-import { CodeBuddyConfigPanel } from "./codebuddy-config-panel"
+import {
+  CodeBuddyConfigPanel,
+  type CodeBuddyConfigAgent,
+} from "./codebuddy-config-panel"
 import enMessages from "@/i18n/messages/en.json"
-import type { AcpAgentInfo } from "@/lib/types"
 
-/** A minimal CodeBuddy AcpAgentInfo whose only meaningful field is `env`. */
-function makeAgent(env: Record<string, string>): AcpAgentInfo {
+/** A minimal selected editor config whose only meaningful field is `env`. */
+function makeAgent(env: Record<string, string>): CodeBuddyConfigAgent {
   return {
     agent_type: "code_buddy",
     skills_capable: true,
@@ -25,26 +27,13 @@ function makeAgent(env: Record<string, string>): AcpAgentInfo {
     enabled: true,
     sort_order: 0,
     installed_version: null,
-    env,
-    config_json: null,
-    config_file_path: null,
-    opencode_auth_json: null,
-    codex_auth_json: null,
-    codex_config_toml: null,
-    codex_model_catalog: null,
-    codex_sandbox_settings: null,
-    grok_config_toml: null,
-    grok_settings: null,
-    cline_secrets_json: null,
-    hermes_config_yaml: null,
-    cursor_cli_config_json: null,
-    cursor_settings: null,
     model_provider_id: null,
     icon_url: null,
+    env,
   }
 }
 
-function renderPanel(agent: AcpAgentInfo) {
+function renderPanel(agent: CodeBuddyConfigAgent) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
       <CodeBuddyConfigPanel agent={agent} saving={false} onSave={vi.fn()} />

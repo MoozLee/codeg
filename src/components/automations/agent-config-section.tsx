@@ -174,6 +174,7 @@ function selectValueLabel(
   kind: SessionConfigOptionInfo["kind"],
   value: string
 ): string | undefined {
+  if (kind.type !== "select") return undefined
   for (const group of kind.groups) {
     const hit = group.options.find((o) => o.value === value)
     if (hit) return hit.name
