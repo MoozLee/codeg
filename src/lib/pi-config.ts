@@ -13,14 +13,11 @@ export const PI_CONFIG_DIR_ENV = "PI_CODING_AGENT_DIR"
  * codeg's Settings skill store (Skills tab, Experts, Office tools) manages each
  * agent type's DEFAULT global skill directory — `~/.pi/agent/skills` for pi. A
  * per-agent custom config dir lives only in env_json (it reaches the pi child
- * but not codeg's process), so the skill store can't target it. Surfacing such
- * a pi would let the UI show skills as "enabled" that the custom-dir pi never
- * loads, so callers exclude it from the skill surfaces. Default-dir pi (the
- * common case) returns false and participates normally.
+ * but not codeg's process), so the skill store can't target it. The backend
+ * exposes only a safe derived boolean, allowing callers to exclude such a pi
+ * without receiving its path. Default-dir pi (the common case) participates
+ * normally.
  */
 export function piUsesCustomAgentDir(agent: AcpAgentInfo): boolean {
-  return (
-    agent.agent_type === "pi" &&
-    (agent.env[PI_CONFIG_DIR_ENV] ?? "").trim() !== ""
-  )
+  return agent.agent_type === "pi" && agent.pi_uses_custom_agent_dir === true
 }

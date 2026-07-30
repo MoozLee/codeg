@@ -702,12 +702,7 @@ mod tests {
             "openclaw@2026.7.1",
             Some("22.22.3"),
         );
-        assert_npx_version(
-            AgentType::Cline,
-            "3.0.46",
-            "cline@3.0.46",
-            Some("22.0.0"),
-        );
+        assert_npx_version(AgentType::Cline, "3.0.46", "cline@3.0.46", Some("22.0.0"));
         assert_npx_version(
             AgentType::CodeBuddy,
             "2.128.0",

@@ -40,7 +40,7 @@ import {
 } from "@/lib/api"
 import { useAgentInstallStream } from "@/hooks/use-agent-install-stream"
 import { PI_CONFIG_DIR_ENV } from "@/lib/pi-config"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentEditableConfig, AcpAgentInfo } from "@/lib/types"
 import { cn, randomUUID } from "@/lib/utils"
 
 const PI_COMMAND_ENV = "PI_ACP_PI_COMMAND"
@@ -177,13 +177,15 @@ export function buildPiRuntimeEnv(
  *    `PI_ACP_PI_COMMAND` (+ optional config/session dir overrides) into the
  *    per-agent `env_json`, letting users run their own pi build/install.
  */
+type PiConfigAgent = AcpAgentInfo & Pick<AcpAgentEditableConfig, "env">
+
 export function PiConfigPanel({
   agent,
   saving,
   onSaveEnv,
   onSaved,
 }: {
-  agent: AcpAgentInfo
+  agent: PiConfigAgent
   saving: boolean
   onSaveEnv: (env: Record<string, string>, enabled: boolean) => Promise<unknown>
   onSaved: () => Promise<void>

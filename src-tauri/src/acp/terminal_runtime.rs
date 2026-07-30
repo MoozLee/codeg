@@ -843,8 +843,7 @@ mod tests {
 
         // Genuine shell operators must evaluate, not be passed as literal args.
         let session_id = SessionId::new("shell-ops".to_string());
-        let request =
-            CreateTerminalRequest::new(session_id.clone(), "true && echo OK".to_string());
+        let request = CreateTerminalRequest::new(session_id.clone(), "true && echo OK".to_string());
         let output = run_and_capture(&runtime, &session_id, request).await;
         assert!(
             output.contains("OK"),
@@ -865,8 +864,7 @@ mod tests {
 
         let session_id = SessionId::new("overlong-cmd".to_string());
         let marker = "x".repeat(5000);
-        let request =
-            CreateTerminalRequest::new(session_id.clone(), format!("echo {marker}"));
+        let request = CreateTerminalRequest::new(session_id.clone(), format!("echo {marker}"));
         let output = run_and_capture(&runtime, &session_id, request).await;
         assert!(
             output.contains(&marker),
@@ -902,8 +900,7 @@ mod tests {
         let runtime = TerminalRuntime::with_base_env(BTreeMap::new());
 
         let session_id = SessionId::new("direct-exec".to_string());
-        let mut request =
-            CreateTerminalRequest::new(session_id.clone(), "/bin/echo".to_string());
+        let mut request = CreateTerminalRequest::new(session_id.clone(), "/bin/echo".to_string());
         request.args = vec!["hello world".into()];
         let output = run_and_capture(&runtime, &session_id, request).await;
         assert!(

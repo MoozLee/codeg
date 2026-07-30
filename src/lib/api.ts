@@ -1,3 +1,4 @@
+import { isValidSessionConfigValue } from "./acp-context-management"
 import {
   getActiveRemoteConnectionId,
   getShellTransport,
@@ -31,8 +32,11 @@ import type {
   QuestionAnswer,
   PlanApprovalAnswer,
   AcpAgentInfo,
+  AcpAgentEditableConfig,
   AcpAgentStatus,
   AgentDiagnosticsReport,
+  MaintenanceCommand,
+  MaintenanceCommandResult,
   GrokStructuredConfig,
   CodexSandboxStructuredConfig,
   CursorStructuredConfig,
@@ -261,12 +265,16 @@ export async function acpSetMode(
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ): Promise<void> {
+  if (!configId.trim() || !isValidSessionConfigValue(value)) {
+    throw new Error("Invalid config option value")
+  }
   return getTransport().call("acp_set_config_option", {
     connectionId,
     configId,
-    valueId,
+    valueId: typeof value === "string" ? value : null,
+    value: typeof value === "boolean" ? value : null,
   })
 }
 
@@ -413,6 +421,26 @@ export async function acpGetAgentStatus(
   agentType: AgentType
 ): Promise<AcpAgentStatus> {
   return getTransport().call("acp_get_agent_status", { agentType })
+}
+
+export async function acpGetAgentEditableConfig(
+  agentType: AgentType
+): Promise<AcpAgentEditableConfig> {
+  return getTransport().call("acp_get_agent_editable_config", { agentType })
+}
+
+export async function acpRunMaintenanceCommand(
+  connectionId: string,
+  sessionId: string,
+  operationId: string,
+  command: MaintenanceCommand
+): Promise<MaintenanceCommandResult> {
+  return getTransport().call("acp_run_maintenance_command", {
+    connectionId,
+    sessionId,
+    operationId,
+    command,
+  })
 }
 
 // Run environment diagnostics for an agent (or a base env report when omitted).
