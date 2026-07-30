@@ -12573,27 +12573,30 @@ wire_api = "chat"
 
     #[test]
     fn fingerprint_config_is_deterministic_and_excludes_volatile_keys() {
-        let agent = AgentType::Codex;
-        let mut env = BTreeMap::new();
-        env.insert("OPENAI_BASE_URL".to_string(), "https://a".to_string());
-        env.insert("OPENAI_API_KEY".to_string(), "k1".to_string());
+        let codex_home = tempfile::tempdir().expect("tempdir");
+        temp_env::with_var("CODEX_HOME", Some(codex_home.path()), || {
+            let agent = AgentType::Codex;
+            let mut env = BTreeMap::new();
+            env.insert("OPENAI_BASE_URL".to_string(), "https://a".to_string());
+            env.insert("OPENAI_API_KEY".to_string(), "k1".to_string());
 
-        // Same inputs → same fingerprint (the native-config read is identical
-        // across all calls in this test, so only the env varies).
-        let fp1 = fingerprint_config(agent, &env);
-        assert_eq!(fp1, fingerprint_config(agent, &env));
+            // Same inputs → same fingerprint (the native-config read is identical
+            // across all calls in this test, so only the env varies).
+            let fp1 = fingerprint_config(agent, &env);
+            assert_eq!(fp1, fingerprint_config(agent, &env));
 
-        // Changing a real config value changes the fingerprint.
-        let mut env_changed = env.clone();
-        env_changed.insert("OPENAI_API_KEY".to_string(), "k2".to_string());
-        assert_ne!(fp1, fingerprint_config(agent, &env_changed));
+            // Changing a real config value changes the fingerprint.
+            let mut env_changed = env.clone();
+            env_changed.insert("OPENAI_API_KEY".to_string(), "k2".to_string());
+            assert_ne!(fp1, fingerprint_config(agent, &env_changed));
 
-        // The per-launch volatile key is excluded — adding it must NOT change
-        // the fingerprint (otherwise OpenClaw would look stale once a real
-        // session id is assigned and the reset flag drops).
-        let mut env_volatile = env.clone();
-        env_volatile.insert("OPENCLAW_RESET_SESSION".to_string(), "1".to_string());
-        assert_eq!(fp1, fingerprint_config(agent, &env_volatile));
+            // The per-launch volatile key is excluded — adding it must NOT change
+            // the fingerprint (otherwise OpenClaw would look stale once a real
+            // session id is assigned and the reset flag drops).
+            let mut env_volatile = env.clone();
+            env_volatile.insert("OPENCLAW_RESET_SESSION".to_string(), "1".to_string());
+            assert_eq!(fp1, fingerprint_config(agent, &env_volatile));
+        });
     }
 
     #[test]
