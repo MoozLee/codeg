@@ -109,7 +109,7 @@ export interface UseConnectionReturn {
     }
   ) => Promise<void>
   setMode: (modeId: string) => Promise<void>
-  setConfigOption: (configId: string, valueId: string) => Promise<void>
+  setConfigOption: (configId: string, value: string | boolean) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (requestId: string, optionId: string) => Promise<void>
   answerQuestion: (questionId: string, answer: QuestionAnswer) => Promise<void>
@@ -272,8 +272,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   )
 
   const setConfigOption = useCallback(
-    (configId: string, valueId: string) =>
-      actions.setConfigOption(contextKey, configId, valueId),
+    (configId: string, value: string | boolean) =>
+      actions.setConfigOption(contextKey, configId, value),
     [actions, contextKey]
   )
 

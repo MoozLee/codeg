@@ -21,7 +21,7 @@ import {
 } from "./kimi-code-config-panel"
 import { acpFetchKimiModels, acpUpdateKimiCodeConfig } from "@/lib/api"
 import enMessages from "@/i18n/messages/en.json"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentEditableConfig } from "@/lib/types"
 
 vi.mock("@/lib/api", () => ({
   acpUpdateKimiCodeConfig: vi.fn(),
@@ -422,24 +422,13 @@ describe("kimiConfigSummary", () => {
   })
 })
 
-/** A minimal Kimi AcpAgentInfo; only `config_json` / `env` carry meaning here. */
+/** Selected-editor Kimi data; only `config_json` / `env` carry meaning here. */
 function makeAgent(
   configJson: string | null,
   env: Record<string, string> = {}
-): AcpAgentInfo {
+): AcpAgentEditableConfig {
   return {
     agent_type: "kimi_code",
-    skills_capable: true,
-    registry_id: "kimi-code",
-    registry_version: null,
-    name: "Kimi Code",
-    description: "",
-    available: true,
-    distribution_type: "npx",
-    custom_source: null,
-    enabled: true,
-    sort_order: 0,
-    installed_version: null,
     env,
     config_json: configJson,
     config_file_path: "/home/u/.kimi-code/config.toml",
@@ -454,19 +443,17 @@ function makeAgent(
     grok_settings: null,
     cursor_cli_config_json: null,
     cursor_settings: null,
-    model_provider_id: null,
-    icon_url: null,
   }
 }
 
-function renderPanel(agent: AcpAgentInfo, onSaved = vi.fn()) {
+function renderPanel(agent: AcpAgentEditableConfig, onSaved = vi.fn()) {
   const view = render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
       <KimiCodeConfigPanel agent={agent} onSaved={onSaved} />
     </NextIntlClientProvider>
   )
-  /** Re-render with a fresh projection, as `onSaved → refreshAgents` does. */
-  return (next: AcpAgentInfo) =>
+  /** Re-render with a fresh selected-editor projection after a native save. */
+  return (next: AcpAgentEditableConfig) =>
     view.rerender(
       <NextIntlClientProvider locale="en" messages={enMessages}>
         <KimiCodeConfigPanel agent={next} onSaved={onSaved} />
