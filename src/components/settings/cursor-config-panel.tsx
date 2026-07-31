@@ -41,7 +41,11 @@ import {
   acpCursorListModels,
   acpUpdateAgentConfig,
 } from "@/lib/api"
-import type { AcpAgentInfo, CursorAuthStatus } from "@/lib/types"
+import type {
+  AcpAgentEditableConfig,
+  AcpAgentInfo,
+  CursorAuthStatus,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const CURSOR_API_KEY_ENV = "CURSOR_API_KEY"
@@ -215,6 +219,12 @@ function RuleListEditor({
  * CURSOR_MODEL and passed to the CLI as its root `--model` flag at launch.
  * The permission/sandbox editor and the raw-JSON advanced card are unchanged.
  */
+type CursorConfigAgent = AcpAgentInfo &
+  Pick<
+    AcpAgentEditableConfig,
+    "env" | "cursor_cli_config_json" | "cursor_settings"
+  >
+
 export function CursorConfigPanel({
   agent,
   saving,
@@ -222,7 +232,7 @@ export function CursorConfigPanel({
   onSaved,
   onAffectedSessions,
 }: {
-  agent: AcpAgentInfo
+  agent: CursorConfigAgent
   saving: boolean
   onSaveEnv: (env: Record<string, string>, enabled: boolean) => Promise<unknown>
   onSaved: () => void

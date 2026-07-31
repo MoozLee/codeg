@@ -40,6 +40,7 @@ const h = vi.hoisted(() => {
     acpConnect: vi.fn(),
     acpDisconnect: vi.fn(),
     acpGetSessionSnapshot: vi.fn(),
+    acpPrompt: vi.fn(),
     buildDelegationSeedEnvelopes: vi.fn(() => []),
     denormalizeSnapshot: vi.fn(),
   }
@@ -86,7 +87,7 @@ vi.mock("@/lib/api", () => ({
   acpConnect: h.acpConnect,
   acpDisconnect: h.acpDisconnect,
   acpGetSessionSnapshot: h.acpGetSessionSnapshot,
-  acpPrompt: vi.fn(),
+  acpPrompt: h.acpPrompt,
   acpSetMode: vi.fn(),
   acpSetConfigOption: vi.fn(),
   acpCancel: vi.fn(),
@@ -125,6 +126,16 @@ async function mountProvider() {
 
 const TAB = "conv-1-claude_code-42"
 
+const EMPTY_CONTEXT_RUNTIME_CONFIG = {
+  configured_model: null,
+  configured_model_source: null,
+  configured_context_window_max_tokens: null,
+  context_window_max_source: null,
+  auto_compaction_enabled: null,
+  auto_compaction_threshold: null,
+  native_auto_compact_window: null,
+}
+
 beforeEach(() => {
   h.attach.mockClear()
   h.store = null
@@ -135,6 +146,7 @@ beforeEach(() => {
   h.acpConnect.mockReset()
   h.acpDisconnect.mockReset()
   h.acpGetSessionSnapshot.mockReset()
+  h.acpPrompt.mockReset()
   h.denormalizeSnapshot.mockReset()
   h.denormalizeSnapshot.mockReturnValue({
     connectionId: "owner-conn",
@@ -163,10 +175,12 @@ beforeEach(() => {
     enabled: true,
     available: true,
     installed_version: "1.0.0",
+    context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
   })
   h.acpConnect.mockResolvedValue("spawned-conn")
   h.acpDisconnect.mockResolvedValue(undefined)
   h.acpGetSessionSnapshot.mockResolvedValue(null)
+  h.acpPrompt.mockResolvedValue(undefined)
 })
 
 function latestAttachHandlers(): AttachHandlers {
@@ -242,6 +256,40 @@ describe("AcpConnectionsProvider cross-client viewer lifecycle", () => {
       "spawned-conn",
       expect.anything(),
       expect.anything()
+    )
+  })
+
+  it("blocks only exact standalone maintenance commands from the user prompt path", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    await act(async () => {
+      await expect(
+        h.actions!.sendPrompt(TAB, [{ type: "text", text: " /SUMMARIZE " }])
+      ).rejects.toThrow("Reserved maintenance commands cannot be sent manually")
+    })
+    expect(h.acpPrompt).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await h.actions!.sendPrompt(TAB, [
+        { type: "text", text: "/compact this text" },
+      ])
+      await h.actions!.sendPrompt(TAB, [
+        { type: "text", text: "/compact" },
+        { type: "text", text: "include this" },
+      ])
+    })
+    expect(h.acpPrompt).toHaveBeenCalledTimes(2)
+    expect(h.acpPrompt).toHaveBeenNthCalledWith(
+      1,
+      "spawned-conn",
+      [{ type: "text", text: "/compact this text" }],
+      null,
+      null,
+      null
     )
   })
 
@@ -1134,6 +1182,7 @@ describe("AcpConnectionsProvider Grok cross-agent-type model switch", () => {
       enabled: true,
       available: true,
       installed_version: "0.2.94",
+      context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
     })
     await mountProvider()
     await act(async () => {
@@ -1240,6 +1289,7 @@ describe("HYDRATE_FROM_SNAPSHOT last_error recovery", () => {
       enabled: true,
       available: true,
       installed_version: "1.0.0",
+      context_runtime_config: EMPTY_CONTEXT_RUNTIME_CONFIG,
     })
     await mountProvider()
     await act(async () => {

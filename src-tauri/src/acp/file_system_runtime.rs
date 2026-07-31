@@ -130,26 +130,21 @@ impl FsAccessPolicy {
             }
             Some("strict") => Self::strict(workspace_root),
             Some("unrestricted") => Self::unrestricted(),
-            Some(other) => {
-                tracing::warn!(
-                    "[ACP] unrecognized {FS_POLICY_ENV}={other:?}; falling back to \"default\""
-                );
+            Some(_) => {
+                tracing::warn!("[ACP] unrecognized {FS_POLICY_ENV}; falling back to \"default\"");
                 Self::permissive(workspace_root, agent_type, runtime_env)
             }
         }
     }
 
-    /// One-line summary for the connection log.
+    /// One-line policy shape for the connection log. Roots can be derived from
+    /// per-agent environment, so they must never be rendered here.
     pub fn describe(&self) -> String {
-        fn render(roots: &[PathBuf]) -> String {
+        fn render(roots: &[PathBuf]) -> &'static str {
             if roots.is_empty() {
-                "unrestricted".to_string()
+                "unrestricted"
             } else {
-                roots
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "restricted"
             }
         }
         format!(
@@ -212,8 +207,7 @@ fn extra_write_roots(runtime_env: &BTreeMap<String, String>) -> Vec<PathBuf> {
                 return true;
             }
             tracing::warn!(
-                "[ACP] ignoring relative {FS_EXTRA_ROOTS_ENV} entry {}; use an absolute path",
-                path.display()
+                "[ACP] ignoring relative {FS_EXTRA_ROOTS_ENV} entry; use an absolute path"
             );
             false
         })
@@ -307,10 +301,9 @@ fn resolve_root_slot(slot: &RootSlot, runtime_env: &BTreeMap<String, String>) ->
         let base = PathBuf::from(value);
         if !base.is_absolute() {
             tracing::warn!(
-                "[ACP] relative {key}={} cannot be used as an fs write root; \
+                "[ACP] relative {key} cannot be used as an fs write root; \
                  the agent's own directory is NOT writable this launch. \
-                 Use an absolute path (or {FS_EXTRA_ROOTS_ENV}).",
-                base.display()
+                 Use an absolute path (or {FS_EXTRA_ROOTS_ENV})."
             );
             return None;
         }
@@ -395,9 +388,8 @@ fn child_home_dir(runtime_env: &BTreeMap<String, String>) -> Option<PathBuf> {
     // home, so refuse it the same way.
     if !home.is_absolute() {
         tracing::warn!(
-            "[ACP] relative {HOME_KEY}={} cannot anchor the fs write roots; \
-             the agent's own directory is NOT writable this launch",
-            home.display()
+            "[ACP] relative {HOME_KEY} cannot anchor the fs write roots; \
+             the agent's own directory is NOT writable this launch"
         );
         return None;
     }
@@ -931,13 +923,16 @@ fn map_io_error(action: &str, path: &Path, err: std::io::Error) -> FileSystemRun
     }
 }
 
-fn log_if_slow(operation: &str, path: &Path, started_at: Instant) {
+fn slow_operation_diagnostic(operation: &str, elapsed_ms: u128) -> String {
+    format!("[ACP] {operation} slow elapsed_ms={elapsed_ms}")
+}
+
+fn log_if_slow(operation: &str, _path: &Path, started_at: Instant) {
     let elapsed = started_at.elapsed();
     if elapsed.as_millis() >= FS_SLOW_OPERATION_MS {
         tracing::info!(
-            "[ACP] {operation} slow path={} elapsed_ms={}",
-            path.display(),
-            elapsed.as_millis()
+            "{}",
+            slow_operation_diagnostic(operation, elapsed.as_millis())
         );
     }
 }
@@ -1312,6 +1307,34 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn policy_description_redacts_runtime_derived_roots() {
+        let secret_root = absolute_path("Users/secret/.claude");
+        let policy = FsAccessPolicy {
+            read_roots: vec![secret_root.clone()],
+            write_roots: vec![secret_root.clone()],
+        };
+
+        let description = policy.describe();
+        assert_eq!(description, "read=restricted write=restricted");
+        assert!(
+            !description.contains(secret_root.to_string_lossy().as_ref()),
+            "policy summary must not disclose a runtime-derived root: {description}"
+        );
+    }
+
+    #[test]
+    fn slow_operation_diagnostic_redacts_paths() {
+        let secret_path = absolute_path("Users/secret/.claude/settings.json");
+        let diagnostic = slow_operation_diagnostic("fs/read_text_file", 250);
+
+        assert_eq!(diagnostic, "[ACP] fs/read_text_file slow elapsed_ms=250");
+        assert!(
+            !diagnostic.contains(secret_path.to_string_lossy().as_ref()),
+            "slow-operation diagnostic must not disclose a path: {diagnostic}"
+        );
     }
 
     /// A per-agent home relocation must move the allowed root with it, or the
