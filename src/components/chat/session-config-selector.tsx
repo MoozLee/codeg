@@ -3,6 +3,7 @@
 import { Fragment } from "react"
 import { ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +19,7 @@ import type { SessionConfigOptionInfo } from "@/lib/types"
 
 interface SessionConfigSelectorProps {
   option: SessionConfigOptionInfo
-  onSelect: (configId: string, valueId: string) => void
+  onSelect: (configId: string, value: string | boolean) => void
   /**
    * Frontend-derived grouping for the model picker (split on the `provider/`
    * prefix). When provided, it overrides the option's own (flat) value list;
@@ -33,7 +34,16 @@ export function InlineSessionConfigSelector({
   onSelect,
   derivedGroups,
 }: SessionConfigSelectorProps) {
-  if (option.kind.type !== "select") return null
+  if (option.kind.type === "boolean") {
+    return (
+      <Switch
+        checked={option.kind.current_value}
+        onCheckedChange={(value) => onSelect(option.id, value)}
+        title={option.name}
+        aria-label={option.name}
+      />
+    )
+  }
 
   // Unified group list rendered in the dropdown body. Derived (model) groups
   // win; otherwise server-provided groups; otherwise `null` → flat options.

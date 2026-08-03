@@ -21,6 +21,7 @@ import {
   acpConnect,
   acpGetAgentStatus,
   acpPrompt,
+  acpRunMaintenanceCommand,
   acpSetMode,
   acpSetConfigOption,
   acpGoalControl,
@@ -75,6 +76,20 @@ import {
   saveModePreference,
   saveConfigPreference,
 } from "@/lib/selector-prefs-storage"
+import {
+  DEFAULT_AUTO_COMPACTION_THRESHOLD,
+  DEFAULT_CONTEXT_MANAGEMENT,
+  applyContextRuntimeIdentity,
+  applyContextUsage,
+  deriveContextManagementFromAgentStatus,
+  deriveContextManagementFromSelectors,
+  getCompactionTriggerDecision,
+  isReservedMaintenancePromptBlocks,
+  isValidSessionConfigValue,
+  sessionConfigOptionAcceptsValue,
+  type CompactionTriggerStatus,
+  type ContextManagementState,
+} from "@/lib/acp-context-management"
 import { useAlertContext, type AlertAction } from "@/contexts/alert-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 
@@ -177,6 +192,7 @@ export interface ConnectionState {
   configOptions: SessionConfigOptionInfo[] | null
   availableCommands: AvailableCommandInfo[] | null
   usage: SessionUsageUpdateInfo | null
+  contextManagement: ContextManagementState
   liveMessage: LiveMessage | null
   pendingPermission: PendingPermission | null
   /** In-flight user prompt for the current turn — set from a `user_message`
@@ -332,6 +348,7 @@ type Action =
       connectionId: string
       agentType: AgentType
       workingDir: string | null
+      contextManagement: ContextManagementState
       // Set when attaching to a connection another client owns (viewer).
       // Defaults to false (owner) when omitted.
       isViewer?: boolean
@@ -512,12 +529,19 @@ type Action =
       type: "CONFIG_OPTION_CHANGED"
       contextKey: string
       configId: string
-      valueId: string
+      value: string | boolean
     }
   | {
       type: "PLAN_UPDATE"
       contextKey: string
       entries: PlanEntryInfo[]
+    }
+  | {
+      type: "COMPACTION_STATUS_CHANGED"
+      contextKey: string
+      status: CompactionTriggerStatus
+      operationId: string | null
+      error?: string | null
     }
   | {
       type: "CLAUDE_API_RETRY"
@@ -1220,6 +1244,7 @@ function connectionsReducer(
         configOptions: null,
         availableCommands: null,
         usage: null,
+        contextManagement: action.contextManagement,
         liveMessage: null,
         pendingPermission: null,
         pendingUserMessage: null,
@@ -1277,6 +1302,7 @@ function connectionsReducer(
         configOptions: null,
         availableCommands: null,
         usage: null,
+        contextManagement: DEFAULT_CONTEXT_MANAGEMENT,
         liveMessage: null,
         pendingPermission: null,
         pendingUserMessage: null,
@@ -1341,6 +1367,20 @@ function connectionsReducer(
         current.availableCommands ?? action.patch.availableCommands
       const mergedPromptCapabilities =
         action.patch.promptCapabilities ?? current.promptCapabilities
+      const mergedContextManagement = current.usage
+        ? applyContextUsage(
+            deriveContextManagementFromSelectors(
+              mergedConfigOptions,
+              mergedAvailableCommands,
+              current.contextManagement
+            ),
+            current.usage
+          )
+        : deriveContextManagementFromSelectors(
+            mergedConfigOptions,
+            mergedAvailableCommands,
+            current.contextManagement
+          )
 
       // Race guard: the snapshot may have been generated BEFORE events
       // that have since arrived and been applied to in-memory state.
@@ -1370,6 +1410,7 @@ function connectionsReducer(
           configOptions: mergedConfigOptions,
           availableCommands: mergedAvailableCommands,
           promptCapabilities: mergedPromptCapabilities,
+          contextManagement: mergedContextManagement,
           selectorsReady: mergedSelectorsReady,
           supportsFork: mergedSupportsFork,
         })
@@ -1381,6 +1422,18 @@ function connectionsReducer(
         action.patch.pendingPermission,
         hydratedLiveMessage ?? current.liveMessage
       )
+      const hydratedContextIdentity = deriveContextManagementFromSelectors(
+        action.patch.configOptions,
+        action.patch.availableCommands,
+        applyContextRuntimeIdentity(
+          current.contextManagement,
+          action.patch.connectionId,
+          action.patch.sessionId
+        )
+      )
+      const hydratedContextManagement = action.patch.usage
+        ? applyContextUsage(hydratedContextIdentity, action.patch.usage)
+        : hydratedContextIdentity
       const next = new Map(state)
       next.set(action.contextKey, {
         ...current,
@@ -1390,6 +1443,7 @@ function connectionsReducer(
         configOptions: action.patch.configOptions,
         availableCommands: action.patch.availableCommands,
         usage: action.patch.usage,
+        contextManagement: hydratedContextManagement,
         liveMessage: hydratedLiveMessage,
         pendingPermission: hydratedPendingPermission,
         pendingAskQuestion: action.patch.pendingAskQuestion,
@@ -2027,11 +2081,21 @@ function connectionsReducer(
 
     case "SESSION_STARTED": {
       const conn = state.get(action.contextKey)
-      if (!conn) return state
+      if (!conn || conn.sessionId === action.sessionId) return state
       const next = new Map(state)
       next.set(action.contextKey, {
         ...conn,
         sessionId: action.sessionId,
+        modes: null,
+        configOptions: null,
+        availableCommands: null,
+        selectorsReady: false,
+        usage: null,
+        contextManagement: applyContextRuntimeIdentity(
+          conn.contextManagement,
+          conn.connectionId,
+          action.sessionId
+        ),
       })
       return next
     }
@@ -2058,6 +2122,11 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         configOptions: action.configOptions,
+        contextManagement: deriveContextManagementFromSelectors(
+          action.configOptions,
+          conn.availableCommands,
+          conn.contextManagement
+        ),
       })
       return next
     }
@@ -2165,19 +2234,66 @@ function connectionsReducer(
       const idx = options.findIndex((o) => o.id === action.configId)
       if (idx === -1) return state
       const opt = options[idx]
+      if (!sessionConfigOptionAcceptsValue(opt, action.value)) return state
+      const updated = [...options]
+      if (opt.kind.type === "select") {
+        if (
+          typeof action.value !== "string" ||
+          opt.kind.current_value === action.value
+        ) {
+          return state
+        }
+        updated[idx] = {
+          ...opt,
+          kind: { ...opt.kind, current_value: action.value },
+        }
+      } else {
+        if (
+          typeof action.value !== "boolean" ||
+          opt.kind.current_value === action.value
+        ) {
+          return state
+        }
+        updated[idx] = {
+          ...opt,
+          kind: { ...opt.kind, current_value: action.value },
+        }
+      }
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        configOptions: updated,
+        contextManagement: deriveContextManagementFromSelectors(
+          updated,
+          conn.availableCommands,
+          conn.contextManagement
+        ),
+      })
+      return next
+    }
+
+    case "COMPACTION_STATUS_CHANGED": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const terminal =
+        action.status === "completed" || action.status === "failed"
       if (
-        opt.kind.type !== "select" ||
-        opt.kind.current_value === action.valueId
+        terminal &&
+        conn.contextManagement.activeCompactionOperationId !==
+          action.operationId
       ) {
         return state
       }
-      const updated = [...options]
-      updated[idx] = {
-        ...opt,
-        kind: { ...opt.kind, current_value: action.valueId },
-      }
       const next = new Map(state)
-      next.set(action.contextKey, { ...conn, configOptions: updated })
+      next.set(action.contextKey, {
+        ...conn,
+        contextManagement: {
+          ...conn.contextManagement,
+          compactionStatus: action.status,
+          activeCompactionOperationId: terminal ? null : action.operationId,
+          lastCompactionError: action.error ?? null,
+        },
+      })
       return next
     }
 
@@ -2283,6 +2399,11 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         availableCommands: commands,
+        contextManagement: deriveContextManagementFromSelectors(
+          conn.configOptions,
+          commands,
+          conn.contextManagement
+        ),
       })
       return next
     }
@@ -2306,6 +2427,10 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         usage: action.usage,
+        contextManagement: applyContextUsage(
+          conn.contextManagement,
+          action.usage
+        ),
       })
       return next
     }
@@ -2385,7 +2510,7 @@ export interface AcpActionsValue {
   setConfigOption(
     contextKey: string,
     configId: string,
-    valueId: string
+    value: string | boolean
   ): Promise<void>
   cancel(contextKey: string): Promise<void>
   respondPermission(
@@ -2557,6 +2682,24 @@ function normalizeErrorMessage(error: unknown): string {
   return String(error)
 }
 
+function findCurrentMaintenanceContextKey(
+  connections: ConnectionsMap,
+  connectionId: string,
+  sessionId: string,
+  operationId: string
+): string | null {
+  for (const [contextKey, candidate] of connections) {
+    if (
+      candidate.connectionId === connectionId &&
+      candidate.sessionId === sessionId &&
+      candidate.contextManagement.activeCompactionOperationId === operationId
+    ) {
+      return contextKey
+    }
+  }
+  return null
+}
+
 type AlertedError = Error & { alerted: true }
 
 function createAlertedError(message: string): AlertedError {
@@ -2694,10 +2837,24 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   // store outside React (see `LiveMessageSink`). A ref → no re-renders.
   const liveMessageSinksRef = useRef(new Map<string, LiveMessageSink>())
 
-  // Activity tracking (no re-renders)
+  // Activity tracking and per-session compaction dedupe (no re-renders)
   const lastActivityRef = useRef(new Map<string, number>())
+  const compactionTriggerKeysRef = useRef(new Set<string>())
   const streamingQueueRef = useRef<StreamingAction[]>([])
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearCompactionTriggerKeys = useCallback(
+    (connectionId: string, sessionId: string | null) => {
+      if (!sessionId) return
+      const sessionKeyPrefix = `${connectionId}:${sessionId}:`
+      for (const key of compactionTriggerKeysRef.current) {
+        if (key.startsWith(sessionKeyPrefix)) {
+          compactionTriggerKeysRef.current.delete(key)
+        }
+      }
+    },
+    []
+  )
   const pendingUnmappedEventsRef = useRef(new Map<string, EventEnvelope[]>())
   const listenerReadyRef = useRef(false)
   const listenerReadyWaitersRef = useRef<Array<() => void>>([])
@@ -3013,12 +3170,123 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const maybeTriggerAgentCompaction = useCallback(
+    (contextKey: string) => {
+      const conn = storeRef.current.connections.get(contextKey)
+      if (!conn || conn.isDelegationChild || conn.isViewer || !conn.sessionId) {
+        return
+      }
+
+      const contextMax =
+        conn.contextManagement.configuredContextWindowMaxTokens ??
+        conn.usage?.size ??
+        0
+      const threshold =
+        conn.contextManagement.autoCompactionThreshold ??
+        DEFAULT_AUTO_COMPACTION_THRESHOLD
+      if (
+        contextMax > 0 &&
+        conn.usage != null &&
+        (conn.usage.used / contextMax) * 100 < threshold
+      ) {
+        const sessionKeyPrefix = `${conn.connectionId}:${conn.sessionId}:`
+        for (const key of compactionTriggerKeysRef.current) {
+          if (key.startsWith(sessionKeyPrefix)) {
+            compactionTriggerKeysRef.current.delete(key)
+          }
+        }
+      }
+
+      const decision = getCompactionTriggerDecision({
+        connectionId: conn.connectionId,
+        sessionId: conn.sessionId,
+        status: conn.status,
+        usage: conn.usage,
+        management: conn.contextManagement,
+        commands: conn.availableCommands,
+      })
+      if (!decision || compactionTriggerKeysRef.current.has(decision.key)) {
+        return
+      }
+
+      const operationId = randomUUID()
+      const { connectionId, sessionId } = conn
+      compactionTriggerKeysRef.current.add(decision.key)
+      dispatch({
+        type: "COMPACTION_STATUS_CHANGED",
+        contextKey,
+        status: "triggered",
+        operationId,
+      })
+      dispatch({
+        type: "COMPACTION_STATUS_CHANGED",
+        contextKey,
+        status: "running",
+        operationId,
+      })
+      lastActivityRef.current.set(contextKey, Date.now())
+
+      void acpRunMaintenanceCommand(
+        connectionId,
+        sessionId,
+        operationId,
+        decision.command
+      )
+        .then((result) => {
+          if (
+            result.connection_id !== connectionId ||
+            result.session_id !== sessionId ||
+            result.operation_id !== operationId
+          ) {
+            return
+          }
+          const currentContextKey = findCurrentMaintenanceContextKey(
+            storeRef.current.connections,
+            connectionId,
+            sessionId,
+            operationId
+          )
+          if (!currentContextKey) return
+          const completed = result.outcome === "completed"
+          dispatch({
+            type: "COMPACTION_STATUS_CHANGED",
+            contextKey: currentContextKey,
+            status: completed ? "completed" : "failed",
+            operationId,
+            error: completed
+              ? null
+              : (result.error ?? "Maintenance command did not complete"),
+          })
+        })
+        .catch((error: unknown) => {
+          const currentContextKey = findCurrentMaintenanceContextKey(
+            storeRef.current.connections,
+            connectionId,
+            sessionId,
+            operationId
+          )
+          if (!currentContextKey) return
+          dispatch({
+            type: "COMPACTION_STATUS_CHANGED",
+            contextKey: currentContextKey,
+            status: "failed",
+            operationId,
+            error: normalizeErrorMessage(error),
+          })
+        })
+    },
+    [dispatch]
+  )
+
   const handleMappedEvent = useCallback(
     (contextKey: string, e: EventEnvelope) => {
       switch (e.type) {
         case "status_changed":
           flushStreamingQueue()
           dispatch({ type: "STATUS_CHANGED", contextKey, status: e.status })
+          if (e.status === "connected") {
+            maybeTriggerAgentCompaction(contextKey)
+          }
           break
         case "content_delta":
           enqueueStreamingAction({
@@ -3329,6 +3597,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             contextKey,
             configOptions: e.config_options,
           })
+          maybeTriggerAgentCompaction(contextKey)
           const cfgConn = storeRef.current.connections.get(contextKey)
           if (cfgConn) {
             const entry = selectorsCache.get(cfgConn.agentType) ?? {
@@ -3616,6 +3885,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             contextKey,
             commands: e.commands,
           })
+          maybeTriggerAgentCompaction(contextKey)
           break
         case "usage_update":
           flushStreamingQueue()
@@ -3627,6 +3897,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               size: e.size,
             },
           })
+          maybeTriggerAgentCompaction(contextKey)
           break
       }
     },
@@ -3635,6 +3906,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       enqueueStreamingAction,
       flushPendingToolCallUpdates,
       flushStreamingQueue,
+      maybeTriggerAgentCompaction,
       scheduleToolCallUpdateFlush,
       t,
       tChat,
@@ -3784,6 +4056,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         onSnapshot: (snapshot) => {
           const patch = denormalizeSnapshot(snapshot)
           dispatch({ type: "HYDRATE_FROM_SNAPSHOT", contextKey, patch })
+          maybeTriggerAgentCompaction(contextKey)
           surfaceSnapshotErrorDetailsRef.current(contextKey, patch)
           lastActivityRef.current.set(contextKey, Date.now())
           // Recover delegation bindings the snapshot carries but the transient
@@ -3833,7 +4106,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       attachSubscriptionsRef.current.set(contextKey, activeSub)
       return activeSub
     },
-    [applyMappedEnvelope, dispatch, seedDelegationsFromSnapshot]
+    [
+      applyMappedEnvelope,
+      dispatch,
+      maybeTriggerAgentCompaction,
+      seedDelegationsFromSnapshot,
+    ]
   )
 
   // Tear down an attach subscription: detach the WS subscription so the
@@ -4112,7 +4390,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       contextKey: string,
       connectionId: string,
       agentType: AgentType,
-      workingDir: string | null
+      workingDir: string | null,
+      configuredAgent: AcpAgentStatus
     ) => {
       dispatch({
         type: "CONNECTION_CREATED",
@@ -4120,6 +4399,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         connectionId,
         agentType,
         workingDir,
+        contextManagement: deriveContextManagementFromAgentStatus(
+          configuredAgent,
+          DEFAULT_CONTEXT_MANAGEMENT,
+          connectionId,
+          null
+        ),
         isViewer: true,
       })
       lastActivityRef.current.set(contextKey, Date.now())
@@ -4162,6 +4447,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       }
       if (patch) {
         dispatch({ type: "HYDRATE_FROM_SNAPSHOT", contextKey, patch })
+        maybeTriggerAgentCompaction(contextKey)
         surfaceSnapshotErrorDetailsRef.current(contextKey, patch)
         seedDelegationsFromSnapshot(
           patch.connectionId,
@@ -4178,6 +4464,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       applyMappedEnvelope,
       consumeBufferedEvents,
       dispatch,
+      maybeTriggerAgentCompaction,
       seedDelegationsFromSnapshot,
       setupAttachSubscription,
     ]
@@ -4249,6 +4536,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             [buildOpenAgentsSettingsAction(agentType)]
           )
           throw createAlertedError(blocked.reason)
+        }
+
+        if (!configuredAgent) {
+          throw createAlertedError(t("blocked.missingConfig"))
         }
 
         const nextWorkingDir = workingDir ?? null
@@ -4387,7 +4678,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               contextKey,
               discovered.connection_id,
               agentType,
-              nextWorkingDir
+              nextWorkingDir,
+              configuredAgent
             )
             return
           }
@@ -4439,6 +4731,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           connectionId,
           agentType,
           workingDir: nextWorkingDir,
+          contextManagement: deriveContextManagementFromAgentStatus(
+            configuredAgent,
+            DEFAULT_CONTEXT_MANAGEMENT,
+            connectionId,
+            sessionId ?? null
+          ),
         })
 
         // Subscribe-with-Snapshot path. When the active transport supports
@@ -4482,6 +4780,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               contextKey,
               patch: snapshotPatch,
             })
+            maybeTriggerAgentCompaction(contextKey)
             surfaceSnapshotErrorDetailsRef.current(contextKey, snapshotPatch)
             // Recover delegation bindings from the snapshot here too. On
             // Tauri the firehose also delivers the events (so this is an
@@ -4575,6 +4874,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       consumeBufferedEvents,
       dispatch,
       isConnectionOwnedLocally,
+      maybeTriggerAgentCompaction,
       resolveConnectBlockState,
       seedDelegationsFromSnapshot,
       setActiveKey,
@@ -4598,6 +4898,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         }
         return
       }
+      clearCompactionTriggerKeys(conn.connectionId, conn.sessionId)
       if (conn.isViewer) {
         // Viewer teardown: drop our read-only attachment WITHOUT
         // `acpDisconnect` — the backend connection belongs to another client,
@@ -4618,7 +4919,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       pendingUnmappedEventsRef.current.delete(conn.connectionId)
       dispatch({ type: "CONNECTION_REMOVED", contextKey })
     },
-    [dispatch, teardownAttachSubscription]
+    [clearCompactionTriggerKeys, dispatch, teardownAttachSubscription]
   )
 
   const reapplyConfig = useCallback(
@@ -4664,14 +4965,16 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       reverseMapRef.current.delete(conn.connectionId)
       teardownAttachSubscription(contextKey)
       pendingUnmappedEventsRef.current.delete(conn.connectionId)
+      clearCompactionTriggerKeys(conn.connectionId, conn.sessionId)
     }
     lastActivityRef.current.clear()
+    compactionTriggerKeysRef.current.clear()
     // Context keys are reused across backends, so a surviving entry here would
     // suppress the first snapshot alert of an unrelated session.
     alertedErrorDetailsRef.current.clear()
     await Promise.all(promises)
     dispatch({ type: "REMOVE_ALL" })
-  }, [dispatch, teardownAttachSubscription])
+  }, [clearCompactionTriggerKeys, dispatch, teardownAttachSubscription])
 
   const sendPrompt = useCallback(
     async (
@@ -4685,6 +4988,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     ) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
+      if (isReservedMaintenancePromptBlocks(blocks)) {
+        throw new Error("Reserved maintenance commands cannot be sent manually")
+      }
       lastActivityRef.current.set(contextKey, Date.now())
       await acpPrompt(
         conn.connectionId,
@@ -4714,20 +5020,29 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setConfigOption = useCallback(
-    async (contextKey: string, configId: string, valueId: string) => {
+    async (contextKey: string, configId: string, value: string | boolean) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
+      const option = (conn.configOptions ?? []).find(
+        (candidate) => candidate.id === configId
+      )
+      if (!isValidSessionConfigValue(value) || !option) {
+        throw new Error("Invalid config option value")
+      }
+      if (!sessionConfigOptionAcceptsValue(option, value)) {
+        throw new Error("Invalid or unadvertised config option value")
+      }
       dispatch({
         type: "CONFIG_OPTION_CHANGED",
         contextKey,
         configId,
-        valueId,
+        value,
       })
       // Persist user selection to localStorage so the next `acp_connect`
       // can ship it back to the backend as a preferred config value.
-      saveConfigPreference(conn.agentType, configId, valueId)
+      saveConfigPreference(conn.agentType, configId, value)
       lastActivityRef.current.set(contextKey, Date.now())
-      await acpSetConfigOption(conn.connectionId, configId, valueId)
+      await acpSetConfigOption(conn.connectionId, configId, value)
     },
     [dispatch]
   )

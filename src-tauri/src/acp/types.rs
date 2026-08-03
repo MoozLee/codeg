@@ -402,10 +402,7 @@ pub enum AcpEvent {
     /// clear its "restart to apply" banner. Carried into `SessionState` so a
     /// snapshot attach (web reconnect, window refresh, new tile) recovers the
     /// staleness the one-shot event won't replay for it.
-    SessionConfigStale {
-        stale: bool,
-        kind: ConfigStaleKind,
-    },
+    SessionConfigStale { stale: bool, kind: ConfigStaleKind },
 }
 
 /// One background task settled by a `<task-notification>` transcript record,
@@ -597,9 +594,15 @@ pub struct SessionConfigSelectInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfigBooleanInfo {
+    pub current_value: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionConfigKindInfo {
     Select(SessionConfigSelectInfo),
+    Boolean(SessionConfigBooleanInfo),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -713,46 +716,37 @@ pub struct AcpAgentInfo {
     pub enabled: bool,
     pub sort_order: i32,
     pub installed_version: Option<String>,
+    pub model_provider_id: Option<i32>,
+    /// Whether pi has a custom `PI_CODING_AGENT_DIR` in its persisted launch
+    /// environment. Skill surfaces use this summary-only signal to exclude a
+    /// custom pi directory without receiving the environment itself.
+    pub uses_custom_skill_dir: bool,
+    /// Display icon for a custom ACP agent — normally an inlined
+    /// `data:image/…;base64,…` URL (see
+    /// `crate::acp::custom_registry::CustomAgentDef::icon_url`). Always `None`
+    /// for built-ins, which ship hand-drawn marks in the frontend.
+    pub icon_url: Option<String>,
+}
+
+/// Editable ACP configuration. This is intentionally loaded only for the
+/// selected agent in Settings; summary lists and the app-wide registry cache
+/// must never serialize these credential-adjacent values.
+#[derive(Debug, Clone, Serialize)]
+pub struct AcpAgentEditableConfig {
     pub env: BTreeMap<String, String>,
     pub config_json: Option<String>,
     pub config_file_path: Option<String>,
     pub opencode_auth_json: Option<String>,
     pub codex_auth_json: Option<String>,
     pub codex_config_toml: Option<String>,
-    /// Compact structured codex model-catalog source (the `codeg` custom-model
-    /// list) round-tripped into the settings editor. Only populated for
-    /// `AgentType::Codex`, and only in api-key mode (no bound provider).
     pub codex_model_catalog: Option<String>,
-    /// Parsed sandbox / approval keys from `~/.codex/config.toml` backing the
-    /// Codex panel's structured controls. Only populated for `AgentType::Codex`.
-    /// Derived from `codex_config_toml`.
     pub codex_sandbox_settings: Option<CodexSandboxSettings>,
     pub cline_secrets_json: Option<String>,
-    /// Raw `~/.hermes/config.yaml` text, attached for the Hermes settings panel's
-    /// advanced editor. Only populated for `AgentType::Hermes`.
     pub hermes_config_yaml: Option<String>,
-    /// Raw `~/.grok/config.toml` text, attached for the Grok settings panel's
-    /// config-file editor. Only populated for `AgentType::Grok`.
     pub grok_config_toml: Option<String>,
-    /// Parsed scalar settings from `~/.grok/config.toml` that back the Grok
-    /// settings panel's structured controls (permission mode / reasoning
-    /// effort). Only populated for `AgentType::Grok`. `None` fields mean the key
-    /// is absent from the config. Derived from `grok_config_toml`.
     pub grok_settings: Option<GrokSettings>,
-    /// Raw `~/.cursor/cli-config.json` text, attached for the Cursor settings
-    /// panel's advanced view. Only populated for `AgentType::Cursor`.
     pub cursor_cli_config_json: Option<String>,
-    /// Parsed scalar settings from cli-config.json backing the Cursor panel's
-    /// structured controls (sandbox / permission rules; the Run Everything
-    /// permission mode is a launch flag, not a config key). Only populated
-    /// for `AgentType::Cursor`. Derived from `cursor_cli_config_json`.
     pub cursor_settings: Option<CursorSettings>,
-    pub model_provider_id: Option<i32>,
-    /// Display icon for a custom ACP agent — normally an inlined
-    /// `data:image/…;base64,…` URL (see
-    /// `crate::acp::custom_registry::CustomAgentDef::icon_url`). Always `None`
-    /// for built-ins, which ship hand-drawn marks in the frontend.
-    pub icon_url: Option<String>,
 }
 
 /// The `~/.codex/config.toml` sandbox / approval keys surfaced as structured
@@ -1038,8 +1032,37 @@ pub struct CursorModelsResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfiguredModelSource {
+    AgentEnv,
+    AgentConfigEnv,
+    AgentRootConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextWindowMaxSource {
+    AgentEnv,
+    AgentConfigEnv,
+    AgentRootConfig,
+}
+
+/// Safe projection of launch-time context-management settings. Raw environment
+/// variables and native configuration documents must never be added here.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ContextRuntimeConfigInfo {
+    pub configured_model: Option<String>,
+    pub configured_model_source: Option<ConfiguredModelSource>,
+    pub configured_context_window_max_tokens: Option<u64>,
+    pub context_window_max_source: Option<ContextWindowMaxSource>,
+    pub auto_compaction_enabled: Option<bool>,
+    pub auto_compaction_threshold: Option<f64>,
+    pub native_auto_compact_window: Option<u64>,
+}
+
 /// Lightweight status info for a single agent, used by connect() pre-check.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcpAgentStatus {
     pub agent_type: crate::models::agent::AgentType,
     pub available: bool,
@@ -1048,6 +1071,30 @@ pub struct AcpAgentStatus {
     /// See [`AcpAgentInfo::is_acp_adapter`] — the connect pre-check uses it to
     /// pick the right "not installed" wording.
     pub is_acp_adapter: bool,
+    #[serde(default)]
+    pub context_runtime_config: ContextRuntimeConfigInfo,
+}
+
+/// Correlated result of an internal ACP maintenance command. This is deliberately
+/// limited to command lifecycle metadata: maintenance prompt contents and agent
+/// responses never leave the private connection path.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MaintenanceCommandOutcome {
+    Completed,
+    Failed,
+    Cancelled,
+    Stale,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MaintenanceCommandResult {
+    pub operation_id: String,
+    pub connection_id: String,
+    pub session_id: String,
+    pub stop_reason: Option<String>,
+    pub outcome: MaintenanceCommandOutcome,
+    pub error: Option<String>,
 }
 
 /// Severity of a single diagnostics check / the overall verdict.
@@ -1288,5 +1335,73 @@ mod envelope_tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn agent_summary_never_serializes_editable_configuration() {
+        let summary = AcpAgentInfo {
+            agent_type: crate::models::agent::AgentType::Pi,
+            skills_capable: true,
+            registry_id: "pi".to_string(),
+            registry_version: None,
+            name: "Pi".to_string(),
+            description: "test".to_string(),
+            available: true,
+            distribution_type: "npx".to_string(),
+            is_acp_adapter: false,
+            custom_source: None,
+            enabled: true,
+            sort_order: 0,
+            installed_version: Some("1.0.0".to_string()),
+            model_provider_id: None,
+            uses_custom_skill_dir: true,
+            icon_url: None,
+        };
+
+        let serialized = serde_json::to_value(summary).expect("summary serializes");
+        assert_eq!(serialized["uses_custom_skill_dir"], true);
+        for field in [
+            "env",
+            "config_json",
+            "config_file_path",
+            "opencode_auth_json",
+            "codex_auth_json",
+            "codex_config_toml",
+            "codex_model_catalog",
+            "codex_sandbox_settings",
+            "cline_secrets_json",
+            "hermes_config_yaml",
+            "grok_config_toml",
+            "grok_settings",
+            "cursor_cli_config_json",
+            "cursor_settings",
+        ] {
+            assert!(serialized.get(field).is_none(), "{field} leaked into list");
+        }
+    }
+
+    #[test]
+    fn selected_agent_detail_serializes_editable_fields() {
+        let detail = AcpAgentEditableConfig {
+            env: BTreeMap::from([("CONFIG_KEY".to_string(), "test-value".to_string())]),
+            config_json: Some("{}".to_string()),
+            config_file_path: Some("/test/config.json".to_string()),
+            opencode_auth_json: None,
+            codex_auth_json: None,
+            codex_config_toml: None,
+            codex_model_catalog: None,
+            codex_sandbox_settings: None,
+            cline_secrets_json: None,
+            hermes_config_yaml: None,
+            grok_config_toml: None,
+            grok_settings: None,
+            cursor_cli_config_json: None,
+            cursor_settings: None,
+        };
+
+        let serialized = serde_json::to_value(detail).expect("detail serializes");
+        assert_eq!(serialized["env"]["CONFIG_KEY"], "test-value");
+        assert_eq!(serialized["config_json"], "{}");
+        assert_eq!(serialized["config_file_path"], "/test/config.json");
     }
 }

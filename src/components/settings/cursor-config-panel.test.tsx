@@ -14,7 +14,7 @@ import {
   acpCursorListModels,
   acpUpdateAgentConfig,
 } from "@/lib/api"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentSettingsInfo } from "@/lib/types"
 import enMessages from "@/i18n/messages/en.json"
 
 vi.mock("@/lib/api", () => ({
@@ -140,7 +140,7 @@ describe("CursorConfigPanel", () => {
     const agent = {
       ...baseAgent,
       env: overrides?.env ?? baseAgent.env,
-    } as unknown as AcpAgentInfo
+    } as unknown as AcpAgentSettingsInfo
     render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
         <CursorConfigPanel

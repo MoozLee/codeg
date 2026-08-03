@@ -879,12 +879,7 @@ mod tests {
             "openclaw@2026.7.1",
             Some("22.22.3"),
         );
-        assert_npx_version(
-            AgentType::Cline,
-            "3.0.49",
-            "cline@3.0.49",
-            Some("22.0.0"),
-        );
+        assert_npx_version(AgentType::Cline, "3.0.49", "cline@3.0.49", Some("22.0.0"));
         assert_npx_version(
             AgentType::CodeBuddy,
             "2.132.0",
@@ -910,7 +905,11 @@ mod tests {
             "@xai-official/grok@0.2.118",
             Some("20.0.0"),
         );
-        assert_binary_version(AgentType::OpenCode, "1.18.11", "/releases/download/v1.18.11/");
+        assert_binary_version(
+            AgentType::OpenCode,
+            "1.18.11",
+            "/releases/download/v1.18.11/",
+        );
         assert_uvx_version(
             AgentType::Hermes,
             "0.19.0",
