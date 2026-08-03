@@ -34,7 +34,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react"
-import { isDesktop, openUrl } from "@/lib/platform"
+import { isDesktop, openUrl, subscribe } from "@/lib/platform"
 import { getActiveRemoteConnectionId } from "@/lib/transport"
 import { toast } from "sonner"
 import {
@@ -89,6 +89,7 @@ import {
   acpDetectAgentLocalVersion,
   acpDownloadAgentBinary,
   acpInstallUvTool,
+  acpGetAgentConfig,
   acpGetAgentStatus,
   acpListAgents,
   acpPreflight,
@@ -107,7 +108,9 @@ import {
   opencodeProviderCatalog,
 } from "@/lib/api"
 import type {
+  AcpAgentEditableConfig,
   AcpAgentInfo,
+  AcpAgentSettingsInfo,
   AdapterInfo,
   AgentType,
   CheckStatus,
@@ -3114,7 +3117,7 @@ function parseHermesConfig(configText: string): HermesDraftValues {
   }
 }
 
-function buildAgentDraft(agent: AcpAgentInfo): AgentDraft {
+function buildAgentDraft(agent: AcpAgentSettingsInfo): AgentDraft {
   const configText =
     typeof agent.config_json === "string" && agent.config_json.trim()
       ? agent.config_json
@@ -3773,6 +3776,11 @@ export function AcpAgentSettings() {
   acpTranslator = (key, values) => rawTranslator(key, values)
   const searchParams = useSearchParams()
   const [agents, setAgents] = useState<AcpAgentInfo[]>([])
+  const [agentConfigs, setAgentConfigs] = useState<
+    Partial<Record<AgentType, AcpAgentEditableConfig>>
+  >({})
+  const [agentConfigError, setAgentConfigError] = useState<string | null>(null)
+  const agentConfigRequestIdRef = useRef(0)
   const [loadingAgents, setLoadingAgents] = useState(true)
   const [addCustomOpen, setAddCustomOpen] = useState(false)
   // Registry id of the custom agent being edited; non-null renders the edit
@@ -3819,6 +3827,8 @@ export function AcpAgentSettings() {
   const [selectedAgentType, setSelectedAgentType] = useState<AgentType | null>(
     null
   )
+  const selectedAgentTypeRef = useRef<AgentType | null>(null)
+  selectedAgentTypeRef.current = selectedAgentType
   const [drafts, setDrafts] = useState<Partial<Record<AgentType, AgentDraft>>>(
     {}
   )
@@ -3897,12 +3907,17 @@ export function AcpAgentSettings() {
       ),
     [agents]
   )
-  const selectedAgent = useMemo(
+  const selectedAgentSummary = useMemo(
     () =>
       sortedAgents.find((agent) => agent.agent_type === selectedAgentType) ??
       null,
     [selectedAgentType, sortedAgents]
   )
+  const selectedAgent = useMemo<AcpAgentSettingsInfo | null>(() => {
+    if (!selectedAgentSummary) return null
+    const config = agentConfigs[selectedAgentSummary.agent_type]
+    return config ? { ...selectedAgentSummary, ...config } : null
+  }, [agentConfigs, selectedAgentSummary])
   const agentTypesKey = useMemo(
     () =>
       [...new Set(agents.map((agent) => agent.agent_type))].sort().join(","),
@@ -3924,25 +3939,6 @@ export function AcpAgentSettings() {
       setAgents(next)
       publishAgentDisplay(next)
       setModelProviders(providers)
-      setDrafts((prev) => {
-        const updated = { ...prev }
-        for (const agent of next) {
-          if (!updated[agent.agent_type]) {
-            updated[agent.agent_type] = buildAgentDraft(agent)
-          }
-        }
-        return updated
-      })
-      setConfigErrors((prev) => {
-        const updated = { ...prev }
-        for (const agent of next) {
-          if (typeof updated[agent.agent_type] !== "undefined") continue
-          const configText =
-            typeof agent.config_json === "string" ? agent.config_json : ""
-          updated[agent.agent_type] = parseConfigJsonText(configText).error
-        }
-        return updated
-      })
     } catch (err) {
       const message = toErrorMessage(err)
       setLoadingError(message)
@@ -3950,6 +3946,39 @@ export function AcpAgentSettings() {
       setLoadingAgents(false)
     }
   }, [])
+
+  const refreshAgentConfig = useCallback(
+    async (agentType: AgentType, clearBeforeLoad = false) => {
+      if (selectedAgentTypeRef.current !== agentType) return
+
+      const requestId = agentConfigRequestIdRef.current + 1
+      agentConfigRequestIdRef.current = requestId
+      if (clearBeforeLoad) {
+        setAgentConfigs({})
+        setDrafts({})
+        setConfigErrors({})
+        setAgentConfigError(null)
+      }
+
+      const config = await acpGetAgentConfig(agentType)
+      const summary = agents.find((agent) => agent.agent_type === agentType)
+      if (
+        requestId !== agentConfigRequestIdRef.current ||
+        selectedAgentTypeRef.current !== agentType ||
+        !summary
+      )
+        return
+
+      const configuredAgent: AcpAgentSettingsInfo = { ...summary, ...config }
+      setAgentConfigs({ [agentType]: config })
+      setDrafts({ [agentType]: buildAgentDraft(configuredAgent) })
+      setConfigErrors({
+        [agentType]: parseConfigJsonText(config.config_json ?? "").error,
+      })
+      setAgentConfigError(null)
+    },
+    [agents]
+  )
 
   const runPreflight = useCallback(
     async (agentType: AgentType, forceRefresh?: boolean) => {
@@ -4116,6 +4145,68 @@ export function AcpAgentSettings() {
     })
   }, [sortedAgents])
 
+  useEffect(() => {
+    if (!selectedAgentSummary) {
+      agentConfigRequestIdRef.current += 1
+      setAgentConfigs({})
+      setDrafts({})
+      setConfigErrors({})
+      setAgentConfigError(null)
+      return
+    }
+
+    let cancelled = false
+    const { agent_type: agentType } = selectedAgentSummary
+    void refreshAgentConfig(agentType, true).catch((error: unknown) => {
+      if (cancelled) return
+      const message = toErrorMessage(error)
+      setAgentConfigError(message)
+      setConfigErrors({ [agentType]: message })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [refreshAgentConfig, selectedAgentSummary])
+
+  useEffect(() => {
+    let disposed = false
+    let unsubscribe: (() => void) | null = null
+    const reloadAfterExternalUpdate = () => {
+      if (disposed) return
+      void refreshAgents()
+      if (selectedAgentType) {
+        void refreshAgentConfig(selectedAgentType, true).catch(
+          (error: unknown) => {
+            console.error(
+              "[Settings] refresh agent config after update failed:",
+              error
+            )
+          }
+        )
+      }
+    }
+
+    void subscribe<unknown>(
+      "app://acp-agents-updated",
+      reloadAfterExternalUpdate
+    )
+      .then((dispose) => {
+        if (disposed) {
+          dispose()
+          return
+        }
+        unsubscribe = dispose
+      })
+      .catch(() => {
+        // Transport subscriptions are unavailable only on unsupported clients.
+      })
+
+    return () => {
+      disposed = true
+      unsubscribe?.()
+    }
+  }, [refreshAgentConfig, refreshAgents, selectedAgentType])
+
   // A settings save (env or native config) only takes effect on the NEXT agent
   // start, so any running session of that agent stays on its launch-time config
   // until restarted. The backend returns how many running sessions were left
@@ -4163,12 +4254,17 @@ export function AcpAgentSettings() {
               ? {
                   ...agent,
                   enabled,
-                  env: parsedEnv,
                   model_provider_id: modelProviderId ?? null,
                 }
               : agent
           )
         )
+        setAgentConfigs((prev) => {
+          const current = prev[agentType]
+          return current
+            ? { ...prev, [agentType]: { ...current, env: parsedEnv } }
+            : prev
+        })
         reportAffectedSessions(affected)
       } finally {
         setSavingEnv((prev) => ({ ...prev, [agentType]: false }))
@@ -4215,12 +4311,12 @@ export function AcpAgentSettings() {
         agentType === "gemini" ||
         agentType === "open_claw"
       if (usesMerge) {
-        const originalAgent = agents.find((a) => a.agent_type === agentType)
+        const originalConfig = agentConfigs[agentType]
         // Diff even when the current config emptied to "" so removed keys still
         // produce null-deletion patches (`configForPersist` would otherwise be
         // "" → a null config_json no-op that leaves the stale key on disk).
         configForPersist =
-          buildMergeConfigPayload(configText, originalAgent?.config_json) ?? ""
+          buildMergeConfigPayload(configText, originalConfig?.config_json) ?? ""
       }
       setSavingConfig((prev) => ({ ...prev, [agentType]: true }))
       try {
@@ -4248,78 +4344,67 @@ export function AcpAgentSettings() {
           grok_structured: options?.grokStructured ?? null,
         })
         reportAffectedSessions(affected)
-        setAgents((prev) =>
-          prev.map((agent) =>
-            agent.agent_type === agentType
-              ? {
-                  ...agent,
-                  config_json: normalizedConfig || null,
-                  opencode_auth_json:
-                    typeof options?.openCodeAuthJsonText === "string"
-                      ? options.openCodeAuthJsonText
-                      : agent.opencode_auth_json,
-                  codex_auth_json:
-                    typeof codexAuthJsonText === "string"
-                      ? codexAuthJsonText
-                      : agent.codex_auth_json,
-                  codex_config_toml:
-                    typeof options?.codexConfigTomlText === "string"
-                      ? options.codexConfigTomlText
-                      : agent.codex_config_toml,
-                  grok_config_toml:
-                    typeof options?.grokConfigTomlText === "string"
-                      ? options.grokConfigTomlText
-                      : agent.grok_config_toml,
-                  grok_settings: options?.grokStructured
-                    ? {
-                        default_reasoning_effort:
-                          options.grokStructured.defaultReasoningEffort,
-                        permission_mode: options.grokStructured.permissionMode,
-                        // buildGrokStructuredConfig already trims/gates/clamps
-                        // these to what the backend writes, so mirror them
-                        // directly (reseedGrokDraft re-reads disk right after).
-                        custom_model_id: options.grokStructured.customModelId,
-                        custom_base_url: options.grokStructured.customBaseUrl,
-                        custom_api_key: options.grokStructured.customApiKey,
-                        custom_api_backend:
-                          options.grokStructured.customApiBackend,
-                        custom_context_window:
-                          options.grokStructured.customContextWindow,
-                        auto_compact_threshold_percent:
-                          options.grokStructured.autoCompactThresholdPercent,
-                      }
-                    : agent.grok_settings,
-                }
-              : agent
-          )
-        )
+        setAgentConfigs((prev) => {
+          const current = prev[agentType]
+          if (!current) return prev
+          return {
+            ...prev,
+            [agentType]: {
+              ...current,
+              config_json: normalizedConfig || null,
+              opencode_auth_json:
+                typeof options?.openCodeAuthJsonText === "string"
+                  ? options.openCodeAuthJsonText
+                  : current.opencode_auth_json,
+              codex_auth_json:
+                typeof codexAuthJsonText === "string"
+                  ? codexAuthJsonText
+                  : current.codex_auth_json,
+              codex_config_toml:
+                typeof options?.codexConfigTomlText === "string"
+                  ? options.codexConfigTomlText
+                  : current.codex_config_toml,
+              grok_config_toml:
+                typeof options?.grokConfigTomlText === "string"
+                  ? options.grokConfigTomlText
+                  : current.grok_config_toml,
+              grok_settings: options?.grokStructured
+                ? {
+                    default_reasoning_effort:
+                      options.grokStructured.defaultReasoningEffort,
+                    permission_mode: options.grokStructured.permissionMode,
+                    custom_model_id: options.grokStructured.customModelId,
+                    custom_base_url: options.grokStructured.customBaseUrl,
+                    custom_api_key: options.grokStructured.customApiKey,
+                    custom_api_backend: options.grokStructured.customApiBackend,
+                    custom_context_window:
+                      options.grokStructured.customContextWindow,
+                    auto_compact_threshold_percent:
+                      options.grokStructured.autoCompactThresholdPercent,
+                  }
+                : current.grok_settings,
+            },
+          }
+        })
       } finally {
         setSavingConfig((prev) => ({ ...prev, [agentType]: false }))
       }
     },
-    [agents, reportAffectedSessions]
+    [agentConfigs, reportAffectedSessions]
   )
 
-  // After a Grok save, re-read the merged on-disk config and rebuild the Grok
-  // draft. The agents-updated refetch deliberately does NOT overwrite existing
-  // drafts (to preserve in-progress edits), so without this the collapsed raw
-  // editor and the structured dropdowns could drift out of sync with disk (the
-  // structured merge and the raw editor each write keys the other doesn't echo).
+  // After a Grok save, re-read the merged on-disk config and rebuild its draft.
+  // The raw editor and structured controls each write fields the other does not
+  // echo, so the disk representation is authoritative after either save path.
   const reseedGrokDraft = useCallback(async () => {
     try {
-      const fresh = await acpListAgents()
-      setAgents(fresh)
-      publishAgentDisplay(fresh)
-      const grok = fresh.find((a) => a.agent_type === "grok")
-      if (grok) {
-        setDrafts((prev) => ({ ...prev, grok: buildAgentDraft(grok) }))
-      }
+      await refreshAgentConfig("grok")
     } catch (err) {
-      // Non-fatal: the save already committed, and the agents-updated
-      // subscription will resync shortly — never surface this as a save failure.
+      // Non-fatal: the save already committed and the event subscription will
+      // retry on the matching registry update.
       console.error("[Settings] reseed grok draft failed:", err)
     }
-  }, [])
+  }, [refreshAgentConfig])
 
   const runBinaryAction = useCallback(
     async (
@@ -7141,7 +7226,8 @@ export function AcpAgentSettings() {
             {sortedAgents.map((agent) => {
               const current = checkState[agent.agent_type]
               const isChecking = Boolean(checking[agent.agent_type])
-              const draft = drafts[agent.agent_type] ?? buildAgentDraft(agent)
+              const isEnabled =
+                drafts[agent.agent_type]?.enabled ?? agent.enabled
               const allChecks = getAgentChecks(agent, current)
               const summary = summarizeChecks(allChecks)
               const displaySummary: CheckStatus | "unchecked" | "checking" =
@@ -7152,7 +7238,7 @@ export function AcpAgentSettings() {
                   : displaySummary === "checking"
                     ? "Checking"
                     : displaySummary.toUpperCase()
-              const statusToneClass = !draft.enabled
+              const statusToneClass = !isEnabled
                 ? "border-muted-foreground/30 bg-muted/30 text-muted-foreground"
                 : displaySummary === "pass"
                   ? "border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400"
@@ -7213,7 +7299,7 @@ export function AcpAgentSettings() {
                         <span className="text-sm font-medium truncate">
                           {agent.name}
                         </span>
-                        {draft.enabled && (
+                        {isEnabled && (
                           <span
                             className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"
                             aria-label={t("status.agentEnabledAria", {
@@ -9947,7 +10033,7 @@ supports_websockets = true`}
                 ) : selectedAgent.agent_type === "kimi_code" ? (
                   <KimiCodeConfigPanel
                     agent={selectedAgent}
-                    onSaved={refreshAgents}
+                    onSaved={() => refreshAgentConfig("kimi_code")}
                   />
                 ) : selectedAgent.agent_type === "pi" ? (
                   <PiConfigPanel
@@ -9961,7 +10047,7 @@ supports_websockets = true`}
                         selectedAgent.model_provider_id
                       )
                     }
-                    onSaved={refreshAgents}
+                    onSaved={() => refreshAgentConfig("pi")}
                   />
                 ) : selectedAgent.agent_type === "cursor" ? (
                   <CursorConfigPanel
@@ -9975,7 +10061,16 @@ supports_websockets = true`}
                         selectedAgent.model_provider_id
                       )
                     }
-                    onSaved={refreshAgents}
+                    onSaved={() => {
+                      void refreshAgentConfig("cursor").catch(
+                        (error: unknown) => {
+                          console.error(
+                            "[Settings] refresh cursor config failed:",
+                            error
+                          )
+                        }
+                      )
+                    }}
                     onAffectedSessions={reportAffectedSessions}
                   />
                 ) : selectedAgent.agent_type === "grok" ? (
@@ -11196,6 +11291,14 @@ supports_websockets = true`}
                   </div>
                 )}
               </div>
+            </div>
+          ) : selectedAgentSummary ? (
+            <div className="h-full flex items-center justify-center px-4 text-center text-xs text-muted-foreground">
+              {agentConfigError ? (
+                <span className="text-destructive">{agentConfigError}</span>
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
             </div>
           ) : (
             <div className="h-full flex items-center justify-center text-xs text-muted-foreground">

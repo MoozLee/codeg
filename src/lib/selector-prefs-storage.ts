@@ -28,11 +28,39 @@ interface SelectorPrefs {
 
 type AllPrefs = Record<string, SelectorPrefs>
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function normalizePrefs(value: unknown): SelectorPrefs {
+  if (!isRecord(value)) return {}
+  const configValues: Record<string, string> = {}
+  if (isRecord(value.configValues)) {
+    for (const [configId, configValue] of Object.entries(value.configValues)) {
+      if (configId.trim().length > 0 && typeof configValue === "string") {
+        configValues[configId] = configValue
+      }
+    }
+  }
+  return {
+    modeId: typeof value.modeId === "string" ? value.modeId : undefined,
+    configValues:
+      Object.keys(configValues).length > 0 ? configValues : undefined,
+  }
+}
+
 function readAll(): AllPrefs {
   if (typeof window === "undefined") return {}
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as AllPrefs) : {}
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    if (!isRecord(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed).map(([agentType, prefs]) => [
+        agentType,
+        normalizePrefs(prefs),
+      ])
+    )
   } catch {
     return {}
   }
@@ -115,10 +143,14 @@ export function saveModePreference(
 export function saveConfigPreference(
   agentType: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ) {
+  if (!configId.trim() || (typeof value === "string" && !value.trim())) return
   updatePrefs(agentType, (prefs) => ({
     ...prefs,
-    configValues: { ...prefs.configValues, [configId]: valueId },
+    configValues: {
+      ...prefs.configValues,
+      [configId]: typeof value === "boolean" ? String(value) : value,
+    },
   }))
 }

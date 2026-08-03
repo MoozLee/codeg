@@ -21,7 +21,7 @@ import {
 } from "./kimi-code-config-panel"
 import { acpFetchKimiModels, acpUpdateKimiCodeConfig } from "@/lib/api"
 import enMessages from "@/i18n/messages/en.json"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentSettingsInfo } from "@/lib/types"
 
 vi.mock("@/lib/api", () => ({
   acpUpdateKimiCodeConfig: vi.fn(),
@@ -422,11 +422,11 @@ describe("kimiConfigSummary", () => {
   })
 })
 
-/** A minimal Kimi AcpAgentInfo; only `config_json` / `env` carry meaning here. */
+/** A minimal Kimi AcpAgentSettingsInfo; only `config_json` / `env` carry meaning here. */
 function makeAgent(
   configJson: string | null,
   env: Record<string, string> = {}
-): AcpAgentInfo {
+): AcpAgentSettingsInfo {
   return {
     agent_type: "kimi_code",
     skills_capable: true,
@@ -441,6 +441,7 @@ function makeAgent(
     enabled: true,
     sort_order: 0,
     installed_version: null,
+    uses_custom_skill_dir: false,
     env,
     config_json: configJson,
     config_file_path: "/home/u/.kimi-code/config.toml",
@@ -460,14 +461,14 @@ function makeAgent(
   }
 }
 
-function renderPanel(agent: AcpAgentInfo, onSaved = vi.fn()) {
+function renderPanel(agent: AcpAgentSettingsInfo, onSaved = vi.fn()) {
   const view = render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
       <KimiCodeConfigPanel agent={agent} onSaved={onSaved} />
     </NextIntlClientProvider>
   )
   /** Re-render with a fresh projection, as `onSaved → refreshAgents` does. */
-  return (next: AcpAgentInfo) =>
+  return (next: AcpAgentSettingsInfo) =>
     view.rerender(
       <NextIntlClientProvider locale="en" messages={enMessages}>
         <KimiCodeConfigPanel agent={next} onSaved={onSaved} />

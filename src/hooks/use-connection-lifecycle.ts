@@ -65,7 +65,7 @@ export interface UseConnectionLifecycleReturn {
       onSendFailed?: (error: unknown) => void
     }
   ) => void
-  handleSetConfigOption: (configId: string, valueId: string) => void
+  handleSetConfigOption: (configId: string, value: string | boolean) => void
   handleCancel: () => void
   handleRespondPermission: (requestId: string, optionId: string) => void
 }
@@ -471,9 +471,9 @@ export function useConnectionLifecycle({
   }, [connCancel])
 
   const handleSetConfigOption = useCallback(
-    (configId: string, valueId: string) => {
+    (configId: string, value: string | boolean) => {
       touchActivity(contextKey)
-      connSetConfigOption(configId, valueId).catch((e: unknown) =>
+      connSetConfigOption(configId, value).catch((e: unknown) =>
         console.error("[ConnLifecycle] setConfigOption:", e)
       )
     },

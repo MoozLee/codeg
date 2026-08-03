@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SubAgentSessionDialog } from "./sub-agent-session-dialog"
 import enMessages from "@/i18n/messages/en.json"
+import { DEFAULT_CONTEXT_MANAGEMENT } from "@/lib/acp-context-management"
 import type { ConnectionState } from "@/contexts/acp-connections-context"
 
 // Runtime context — record dispatch calls so we can assert the bridge
@@ -203,6 +204,7 @@ function makeConnState(overrides: Partial<ConnectionState>): ConnectionState {
     configOptions: null,
     availableCommands: null,
     usage: null,
+    contextManagement: DEFAULT_CONTEXT_MANAGEMENT,
     liveMessage: null,
     pendingPermission: null,
     pendingQuestion: null,

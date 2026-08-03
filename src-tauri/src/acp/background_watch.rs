@@ -56,9 +56,10 @@ use crate::models::agent::AgentType;
 use crate::models::message::MessageTurn;
 use crate::parsers::claude::{
     capture_tag, find_session_file, group_into_turns, is_meta_message, slash_command_display,
-    task_notification_result_regex, task_notification_status_regex, task_notification_summary_regex,
-    task_notification_task_id_regex, task_notification_tool_use_id_regex, ClaudeRecordAccumulator,
-    BACKGROUND_RESULT_MAX_CHARS, CONTEXT_CONTINUATION_PREFIX,
+    task_notification_result_regex, task_notification_status_regex,
+    task_notification_summary_regex, task_notification_task_id_regex,
+    task_notification_tool_use_id_regex, ClaudeRecordAccumulator, BACKGROUND_RESULT_MAX_CHARS,
+    CONTEXT_CONTINUATION_PREFIX,
 };
 use crate::parsers::truncate_str;
 use crate::web::event_bridge::{emit_with_state, EventEmitter};
@@ -113,6 +114,16 @@ pub(crate) struct PromptLedger {
 struct LedgerEntry {
     fingerprint: String,
     recorded_at: Instant,
+    kind: LedgerEntryKind,
+}
+
+/// How a codeg-sent prompt must be treated if Claude persists it in the local
+/// transcript. Maintenance turns are deliberately invisible, including their
+/// response, while ordinary prompts render through the ACP wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LedgerEntryKind {
+    Foreground,
+    Private,
 }
 
 impl PromptLedger {
@@ -127,6 +138,23 @@ impl PromptLedger {
     /// purpose — the CLI may persist those differently, while the leading
     /// text lands verbatim at the start of the transcript's user record.
     pub(crate) fn record_prompt_blocks(&self, blocks: &[crate::acp::types::PromptInputBlock]) {
+        self.record_prompt_blocks_with_kind(blocks, LedgerEntryKind::Foreground);
+    }
+
+    /// Record a maintenance prompt so the transcript watcher consumes the
+    /// corresponding turn without publishing a background overlay.
+    pub(crate) fn record_maintenance_prompt_blocks(
+        &self,
+        blocks: &[crate::acp::types::PromptInputBlock],
+    ) {
+        self.record_prompt_blocks_with_kind(blocks, LedgerEntryKind::Private);
+    }
+
+    fn record_prompt_blocks_with_kind(
+        &self,
+        blocks: &[crate::acp::types::PromptInputBlock],
+        kind: LedgerEntryKind,
+    ) {
         let text = blocks.iter().find_map(|b| match b {
             crate::acp::types::PromptInputBlock::Text { text } => {
                 let t = text.trim();
@@ -144,6 +172,7 @@ impl PromptLedger {
         entries.push_back(LedgerEntry {
             fingerprint,
             recorded_at: Instant::now(),
+            kind,
         });
         while entries.len() > LEDGER_CAP {
             entries.pop_front();
@@ -155,10 +184,10 @@ impl PromptLedger {
     /// exactly once per sent prompt, so a later same-text autonomous re-fire
     /// finds no entry and classifies as out-of-turn. The record may carry
     /// appended wrapper content after the sent text, hence prefix matching.
-    fn consume_matching(&self, initiator_text: &str) -> bool {
+    fn consume_matching(&self, initiator_text: &str) -> Option<LedgerEntryKind> {
         let text = initiator_text.trim();
         if text.is_empty() {
-            return false;
+            return None;
         }
         let mut entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
         entries.retain(|e| e.recorded_at.elapsed() < LEDGER_TTL);
@@ -166,10 +195,9 @@ impl PromptLedger {
             .iter()
             .position(|e| text == e.fingerprint || text.starts_with(e.fingerprint.as_str()))
         {
-            entries.remove(pos);
-            return true;
+            return entries.remove(pos).map(|entry| entry.kind);
         }
-        false
+        None
     }
 
     #[cfg(test)]
@@ -349,6 +377,8 @@ struct Episode {
 enum Mode {
     /// Records belong to a codeg-sent prompt turn — the wire renders them.
     Foreground,
+    /// Records belong to a private maintenance turn and are never rendered.
+    Private,
     /// Records are out-of-turn — the overlay renders them.
     Background,
 }
@@ -670,8 +700,7 @@ impl WatchState {
         }
 
         let outstanding = self.tasks.len() as u32;
-        let accounting_changed =
-            expired_any || self.last_emitted_outstanding != Some(outstanding);
+        let accounting_changed = expired_any || self.last_emitted_outstanding != Some(outstanding);
         if changed_turns.is_empty() && settled.is_empty() && !accounting_changed {
             return None;
         }
@@ -821,8 +850,7 @@ impl WatchState {
                             .and_then(|v| v.as_str())
                             .filter(|s| !s.is_empty())
                         {
-                            let status =
-                                task.get("status").and_then(|s| s.as_str()).unwrap_or("");
+                            let status = task.get("status").and_then(|s| s.as_str()).unwrap_or("");
                             if is_terminal_task_status(status) && self.tasks.remove(id).is_some() {
                                 self.settled_ids.insert(id.to_string());
                                 tracing::info!(
@@ -892,8 +920,7 @@ impl WatchState {
                         // again — the notification's own <note> documents
                         // multi-notify).
                         "SendMessage" => {
-                            let Some(to) =
-                                input.and_then(|i| i.get("to")).and_then(|t| t.as_str())
+                            let Some(to) = input.and_then(|i| i.get("to")).and_then(|t| t.as_str())
                             else {
                                 continue;
                             };
@@ -953,14 +980,24 @@ impl WatchState {
         changed_turns: &mut Vec<MessageTurn>,
     ) {
         if let Some(initiator_text) = turn_initiator_text(value) {
-            if ledger.consume_matching(&initiator_text) {
-                // A codeg-sent prompt: the wire renders this turn. Close any
-                // open episode first (flush its final state) and go silent.
-                tracing::debug!("[bg-watch] foreground turn matched ledger");
-                self.collect_changed_turns(cwd, changed_turns);
-                self.episode = None;
-                self.mode = Mode::Foreground;
-                return;
+            match ledger.consume_matching(&initiator_text) {
+                Some(LedgerEntryKind::Foreground) => {
+                    // A codeg-sent prompt: the wire renders this turn. Close any
+                    // open episode first (flush its final state) and go silent.
+                    tracing::debug!("[bg-watch] foreground turn matched ledger");
+                    self.collect_changed_turns(cwd, changed_turns);
+                    self.episode = None;
+                    self.mode = Mode::Foreground;
+                    return;
+                }
+                Some(LedgerEntryKind::Private) => {
+                    tracing::debug!("[bg-watch] private maintenance turn matched ledger");
+                    self.collect_changed_turns(cwd, changed_turns);
+                    self.episode = None;
+                    self.mode = Mode::Private;
+                    return;
+                }
+                None => {}
             }
             tracing::debug!(
                 "[bg-watch] out-of-turn initiator: {:?}",
@@ -970,7 +1007,10 @@ impl WatchState {
                 .episode
                 .as_ref()
                 .is_some_and(|e| e.acc.messages.len() >= MAX_EPISODE_MESSAGES);
-            if matches!(self.mode, Mode::Foreground) || self.episode.is_none() || rotate {
+            if matches!(self.mode, Mode::Foreground | Mode::Private)
+                || self.episode.is_none()
+                || rotate
+            {
                 if rotate {
                     self.collect_changed_turns(cwd, changed_turns);
                 }
@@ -1007,8 +1047,7 @@ impl WatchState {
                 // Cosmetic re-basing of the SAME continuous out-of-turn
                 // stretch (not a new initiator record) — the origin carries
                 // over unchanged.
-                let inherited_origin =
-                    self.episode.as_ref().and_then(|e| e.origin_task_id.clone());
+                let inherited_origin = self.episode.as_ref().and_then(|e| e.origin_task_id.clone());
                 self.episode = Some(Episode {
                     start_offset: self.next_episode_base(),
                     acc: ClaudeRecordAccumulator::new(
@@ -1348,9 +1387,7 @@ mod tests {
         ws.tick(ledger, "/tmp", "conn-test", false, true)
     }
 
-    fn unpack(
-        event: AcpEvent,
-    ) -> (Vec<MessageTurn>, u32, Vec<BackgroundSettledInfo>, u64) {
+    fn unpack(event: AcpEvent) -> (Vec<MessageTurn>, u32, Vec<BackgroundSettledInfo>, u64) {
         match event {
             AcpEvent::BackgroundActivity {
                 turns,
@@ -1466,7 +1503,8 @@ mod tests {
         let path = temp_session(&dir);
         // Fork-time metadata at the head (post-epoch stamp), then the copied
         // history (original pre-fork stamps), then the genuinely-new prompt.
-        let queue_op = r#"{"type":"queue-operation","timestamp":"2026-07-07T03:50:00.100Z","uuid":"q-1"}"#;
+        let queue_op =
+            r#"{"type":"queue-operation","timestamp":"2026-07-07T03:50:00.100Z","uuid":"q-1"}"#;
         let copied_user = r#"{"type":"user","timestamp":"2026-07-07T03:46:00.000Z","uuid":"u-hi","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#;
         let copied_asst = r#"{"type":"assistant","timestamp":"2026-07-07T03:46:05.000Z","uuid":"a-hi","message":{"role":"assistant","content":[{"type":"text","text":"Hi!"}]}}"#;
         let new_user = r#"{"type":"user","timestamp":"2026-07-07T03:50:10.000Z","uuid":"u-hello","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}"#;
@@ -1511,8 +1549,7 @@ mod tests {
         // The flush completes: the reconstructed ack must account.
         append_raw(&path, tail);
         append_raw(&path, "\n");
-        let (_, outstanding, ..) =
-            unpack(tick_now(&mut ws, &ledger).expect("ack event"));
+        let (_, outstanding, ..) = unpack(tick_now(&mut ws, &ledger).expect("ack event"));
         assert_eq!(outstanding, 1, "mid-flush ack must survive discovery");
     }
 
@@ -1546,8 +1583,7 @@ mod tests {
         // ahead of the baseline and re-arms the accounting.
         ws.rearm("s2".into(), epoch("2026-07-07T03:50:00.000Z"));
         ws.adopt_file(forked.clone());
-        let (_, outstanding, ..) =
-            unpack(tick_now(&mut ws, &ledger).expect("resume event"));
+        let (_, outstanding, ..) = unpack(tick_now(&mut ws, &ledger).expect("resume event"));
         assert_eq!(
             outstanding, 1,
             "a resume written before the watcher noticed the fork must re-arm"
@@ -1587,8 +1623,7 @@ mod tests {
         assert_eq!(outstanding, 1, "post-fork resume must re-arm");
 
         write_lines(&forked, &[&notification("agentX", "completed")]);
-        let (_, outstanding, settled, _) =
-            unpack(tick_now(&mut ws, &ledger).unwrap());
+        let (_, outstanding, settled, _) = unpack(tick_now(&mut ws, &ledger).unwrap());
         assert_eq!(outstanding, 0);
         assert_eq!(settled.len(), 1);
     }
@@ -1668,8 +1703,7 @@ mod tests {
             &path,
             &[&cron_prompt("new pass"), &assistant_text("a9", "hi")],
         );
-        let (turns, outstanding, ..) =
-            unpack(tick_now(&mut ws, &ledger).expect("turns event"));
+        let (turns, outstanding, ..) = unpack(tick_now(&mut ws, &ledger).expect("turns event"));
         assert_eq!(outstanding, 0, "historical ack must NOT register");
         assert_eq!(turns.len(), 1);
     }
@@ -1929,11 +1963,18 @@ mod tests {
         let _ = tick_now(&mut ws, &ledger);
         write_lines(
             &path,
-            &[&notification("shell1", "completed"), &assistant_text("a1", "Done.")],
+            &[
+                &notification("shell1", "completed"),
+                &assistant_text("a1", "Done."),
+            ],
         );
         let (turns, outstanding, settled, _) =
             unpack(tick_now(&mut ws, &ledger).expect("settle event"));
-        assert_eq!(turns.len(), 1, "a shell follow-up has nowhere else to render");
+        assert_eq!(
+            turns.len(),
+            1,
+            "a shell follow-up has nowhere else to render"
+        );
         assert_eq!(outstanding, 0);
         assert_eq!(
             settled.len(),
@@ -2022,8 +2063,7 @@ mod tests {
                 &assistant_text("a1", "Working on it."),
             ],
         );
-        let (turns, ..) =
-            unpack(tick_prompting(&mut ws, &ledger).expect("turns event"));
+        let (turns, ..) = unpack(tick_prompting(&mut ws, &ledger).expect("turns event"));
         assert_eq!(
             turns.len(),
             1,
@@ -2058,8 +2098,7 @@ mod tests {
                 &assistant_text("a1", "Build finished cleanly."),
             ],
         );
-        let (turns, ..) =
-            unpack(tick_prompting(&mut ws, &ledger).expect("settle event"));
+        let (turns, ..) = unpack(tick_prompting(&mut ws, &ledger).expect("settle event"));
         assert_eq!(
             turns.len(),
             1,
@@ -2220,7 +2259,10 @@ mod tests {
         let more = assistant_text("a2", "step two");
         let (head, tail) = more.split_at(more.len() / 2);
         {
-            let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
             f.write_all(head.as_bytes()).unwrap();
         }
         assert!(
@@ -2229,7 +2271,10 @@ mod tests {
         );
 
         {
-            let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
             f.write_all(tail.as_bytes()).unwrap();
             f.write_all(b"\n").unwrap();
         }
@@ -2287,9 +2332,12 @@ mod tests {
     fn ledger_prefix_matches_and_consumes_once() {
         let ledger = PromptLedger::shared();
         ledger.record_text("deploy the app");
-        assert!(ledger.consume_matching("deploy the app\n<system-hint>extra</system-hint>"));
+        assert_eq!(
+            ledger.consume_matching("deploy the app\n<system-hint>extra</system-hint>"),
+            Some(LedgerEntryKind::Foreground)
+        );
         assert!(
-            !ledger.consume_matching("deploy the app"),
+            ledger.consume_matching("deploy the app").is_none(),
             "an entry is consumed exactly once"
         );
     }

@@ -8,10 +8,10 @@ vi.mock("sonner", () => ({
 
 import { CodeBuddyConfigPanel } from "./codebuddy-config-panel"
 import enMessages from "@/i18n/messages/en.json"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentSettingsInfo } from "@/lib/types"
 
-/** A minimal CodeBuddy AcpAgentInfo whose only meaningful field is `env`. */
-function makeAgent(env: Record<string, string>): AcpAgentInfo {
+/** A minimal CodeBuddy AcpAgentSettingsInfo whose only meaningful field is `env`. */
+function makeAgent(env: Record<string, string>): AcpAgentSettingsInfo {
   return {
     agent_type: "code_buddy",
     skills_capable: true,
@@ -26,6 +26,7 @@ function makeAgent(env: Record<string, string>): AcpAgentInfo {
     enabled: true,
     sort_order: 0,
     installed_version: null,
+    uses_custom_skill_dir: false,
     env,
     config_json: null,
     config_file_path: null,
@@ -45,7 +46,7 @@ function makeAgent(env: Record<string, string>): AcpAgentInfo {
   }
 }
 
-function renderPanel(agent: AcpAgentInfo) {
+function renderPanel(agent: AcpAgentSettingsInfo) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
       <CodeBuddyConfigPanel agent={agent} saving={false} onSave={vi.fn()} />

@@ -15,9 +15,7 @@ use crate::models::{
     WorkTaskChangedFile, WorkTaskDraft, WorkTaskEventInfo, WorkTaskFolderSettings, WorkTaskInfo,
     WorkTaskTemplateDraft, WorkTaskTemplateInfo,
 };
-use crate::web::event_bridge::{
-    emit_event, EventEmitter, WorkTaskChange, WORK_TASK_CHANGED_EVENT,
-};
+use crate::web::event_bridge::{emit_event, EventEmitter, WorkTaskChange, WORK_TASK_CHANGED_EVENT};
 
 fn engine() -> Result<std::sync::Arc<crate::work_task::TaskEngine>, DbError> {
     crate::work_task::engine()
@@ -231,7 +229,10 @@ pub async fn work_task_archive_core(
 }
 
 pub async fn work_task_cleanup_core(id: i32) -> Result<(), DbError> {
-    engine()?.cleanup_task(id).await.map_err(DbError::Validation)
+    engine()?
+        .cleanup_task(id)
+        .await
+        .map_err(DbError::Validation)
 }
 
 /// Diff of the task worktree vs. its recorded base (`base_sha`, so the view is
@@ -385,9 +386,7 @@ pub async fn work_task_events(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn work_task_attention_count(
-    db: tauri::State<'_, AppDatabase>,
-) -> Result<u64, DbError> {
+pub async fn work_task_attention_count(db: tauri::State<'_, AppDatabase>) -> Result<u64, DbError> {
     work_task_attention_count_core(&db).await
 }
 

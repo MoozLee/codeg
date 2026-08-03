@@ -10,13 +10,18 @@ import {
 } from "./model-config-groups"
 import type {
   SessionConfigOptionInfo,
+  SessionConfigSelectInfo,
   SessionConfigSelectOptionInfo,
 } from "@/lib/types"
 
+type SelectSessionConfigOptionInfo = Omit<SessionConfigOptionInfo, "kind"> & {
+  kind: { type: "select" } & SessionConfigSelectInfo
+}
+
 function modelOption(
   options: SessionConfigSelectOptionInfo[],
-  overrides: Partial<SessionConfigOptionInfo> = {}
-): SessionConfigOptionInfo {
+  overrides: Partial<Omit<SelectSessionConfigOptionInfo, "kind">> = {}
+): SelectSessionConfigOptionInfo {
   return {
     id: "model",
     name: "Model",

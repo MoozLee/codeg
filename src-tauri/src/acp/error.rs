@@ -19,6 +19,10 @@ pub enum AcpError {
     /// message queue above the input box instead of surfacing an error.
     #[error("turn already in progress for this connection")]
     TurnInProgress,
+    /// A private context maintenance command is running. Public control actions
+    /// must wait so they cannot produce visible state or change the command.
+    #[error("private context maintenance is in progress")]
+    PrivateMaintenanceInProgress,
     /// Live feedback was submitted while no turn was in flight. Feedback only
     /// makes sense while the agent is working (it is pulled mid-turn via the
     /// `check_user_feedback` MCP tool); with no active turn there is nothing to
@@ -77,6 +81,7 @@ impl AcpError {
             Self::ProbeTimedOut => Some("probe_timed_out"),
             Self::ProcessExited => Some("process_exited"),
             Self::TurnInProgress => Some("turn_in_progress"),
+            Self::PrivateMaintenanceInProgress => Some("private_maintenance_in_progress"),
             Self::NoActiveTurn => Some("no_active_turn"),
             Self::FeedbackDisabled => Some("feedback_disabled"),
             Self::InvalidFeedback(_) => Some("invalid_feedback"),

@@ -9,8 +9,10 @@ import type {
   AgentStats,
   SidebarData,
   ConnectionInfo,
+  AcpAgentEditableConfig,
   AcpAgentInfo,
   AcpAgentStatus,
+  MaintenanceCommandResult,
   AgentSkillScope,
   AgentSkillLayout,
   AgentSkillItem,
@@ -119,6 +121,20 @@ export async function acpPrompt(
   return invoke("acp_prompt", { connectionId, blocks })
 }
 
+export async function acpRunMaintenanceCommand(
+  connectionId: string,
+  sessionId: string,
+  operationId: string,
+  command: string
+): Promise<MaintenanceCommandResult> {
+  return invoke("acp_run_maintenance_command", {
+    connectionId,
+    sessionId,
+    operationId,
+    command,
+  })
+}
+
 export async function acpSetMode(
   connectionId: string,
   modeId: string
@@ -129,9 +145,17 @@ export async function acpSetMode(
 export async function acpSetConfigOption(
   connectionId: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ): Promise<void> {
-  return invoke("acp_set_config_option", { connectionId, configId, valueId })
+  if (!configId.trim() || (typeof value === "string" && !value.trim())) {
+    throw new Error("Invalid config option value")
+  }
+  return invoke("acp_set_config_option", {
+    connectionId,
+    configId,
+    valueId: typeof value === "string" ? value : null,
+    value: typeof value === "boolean" ? value : null,
+  })
 }
 
 export async function acpCancel(connectionId: string): Promise<void> {
@@ -170,6 +194,12 @@ export async function acpListConnections(): Promise<ConnectionInfo[]> {
 
 export async function acpListAgents(): Promise<AcpAgentInfo[]> {
   return invoke("acp_list_agents")
+}
+
+export async function acpGetAgentConfig(
+  agentType: AgentType
+): Promise<AcpAgentEditableConfig> {
+  return invoke("acp_get_agent_config", { agentType })
 }
 
 export async function acpGetAgentStatus(

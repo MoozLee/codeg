@@ -40,7 +40,7 @@ import {
 } from "@/lib/api"
 import { useAgentInstallStream } from "@/hooks/use-agent-install-stream"
 import { PI_CONFIG_DIR_ENV } from "@/lib/pi-config"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentSettingsInfo } from "@/lib/types"
 import { cn, randomUUID } from "@/lib/utils"
 
 const PI_COMMAND_ENV = "PI_ACP_PI_COMMAND"
@@ -183,7 +183,7 @@ export function PiConfigPanel({
   onSaveEnv,
   onSaved,
 }: {
-  agent: AcpAgentInfo
+  agent: AcpAgentSettingsInfo
   saving: boolean
   onSaveEnv: (env: Record<string, string>, enabled: boolean) => Promise<unknown>
   onSaved: () => Promise<void>

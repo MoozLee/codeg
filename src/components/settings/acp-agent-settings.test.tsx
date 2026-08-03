@@ -18,13 +18,15 @@ import {
   setClaudeEnvFlagInConfigText,
 } from "./acp-agent-settings"
 import type {
-  AcpAgentInfo,
+  AcpAgentSettingsInfo,
   AdapterInfo,
   AgentType,
   PreflightResult,
 } from "@/lib/types"
 
-function makeAgent(overrides: Partial<AcpAgentInfo>): AcpAgentInfo {
+function makeAgent(
+  overrides: Partial<AcpAgentSettingsInfo>
+): AcpAgentSettingsInfo {
   return {
     agent_type: "hermes" as AgentType,
     skills_capable: true,
@@ -39,6 +41,7 @@ function makeAgent(overrides: Partial<AcpAgentInfo>): AcpAgentInfo {
     enabled: true,
     sort_order: 0,
     installed_version: null,
+    uses_custom_skill_dir: false,
     env: {},
     config_json: null,
     config_file_path: null,

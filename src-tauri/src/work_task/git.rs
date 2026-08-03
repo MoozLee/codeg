@@ -18,7 +18,11 @@ async fn run_git(path: &str, args: &[&str]) -> Result<std::process::Output, AppC
 
 /// Resolve a revision to a full sha.
 pub async fn rev_parse(path: &str, rev: &str) -> Result<String, AppCommandError> {
-    let out = run_git(path, &["rev-parse", "--verify", &format!("{rev}^{{commit}}")]).await?;
+    let out = run_git(
+        path,
+        &["rev-parse", "--verify", &format!("{rev}^{{commit}}")],
+    )
+    .await?;
     if !out.status.success() {
         return Err(git_command_error("rev-parse", &out.stderr));
     }
