@@ -142,8 +142,8 @@ mod tests {
 
     #[test]
     fn fork_release_suffix_has_expected_upgrade_ordering() {
-        assert!(is_newer("0.23.0-1", "0.22.2-1"));
-        assert!(!is_newer("0.23.0-1", "0.23.0"));
+        assert!(is_newer("0.23.0-2", "0.23.0-1"));
+        assert!(!is_newer("0.23.0-2", "0.23.0"));
     }
 
     #[test]

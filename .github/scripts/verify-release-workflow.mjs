@@ -51,6 +51,11 @@ assert(
   versions.every((version) => version === versions[0]),
   `version sources are not lockstep: ${versions.join(", ")}`
 )
+const upstreamVersion = versions[0].replace(/-\d+$/, "")
+assert(
+  upstreamVersion !== versions[0],
+  "fork release version must include a numeric suffix"
+)
 
 const tag = `v${versions[0]}`
 const chineseNotesPath = `.github/release-notes/${tag}.zh.md`
@@ -223,19 +228,28 @@ assert(
   "macOS updater signature verification must occur before publish"
 )
 
+function rootPackageVersion(lockfile) {
+  return lockfile.match(
+    /\[\[package\]\]\nname = "codeg"\nversion = "([^"]+)"/
+  )?.[1]
+}
+
+function findUpstreamBaseline(version) {
+  let ref = "HEAD"
+  for (let depth = 0; depth < 16; depth += 1) {
+    const lockfile = runGit(["show", `${ref}:src-tauri/Cargo.lock`])
+    if (rootPackageVersion(lockfile) === version) {
+      return { ref, lockfile }
+    }
+    ref = `${ref}^`
+  }
+  throw new Error(`could not find ${version} on the first-parent release path`)
+}
+
 try {
-  const headCargoLock = runGit(["show", "HEAD:src-tauri/Cargo.lock"])
-  const headRootPackage = headCargoLock.match(
-    /\[\[package\]\]\nname = "codeg"\nversion = "([^"]+)"/
-  )?.[1]
-  const baselineRef = headRootPackage === versions[0] ? "HEAD^" : "HEAD"
-  const baselineCargoLock = runGit([
-    "show",
-    `${baselineRef}:src-tauri/Cargo.lock`,
-  ])
-  const baselineRootPackage = baselineCargoLock.match(
-    /\[\[package\]\]\nname = "codeg"\nversion = "([^"]+)"/
-  )?.[1]
+  const { ref: baselineRef, lockfile: baselineCargoLock } =
+    findUpstreamBaseline(upstreamVersion)
+  const baselineRootPackage = rootPackageVersion(baselineCargoLock)
   const baselineLines = baselineCargoLock.trimEnd().split("\n")
   const workingLines = cargoLock.trimEnd().split("\n")
   const changedLines = []
@@ -249,9 +263,9 @@ try {
     }
   }
   assert(
-    baselineRootPackage === "0.23.0" &&
+    baselineRootPackage === upstreamVersion &&
       changedLines.length === 1 &&
-      changedLines[0].baseline === 'version = "0.23.0"' &&
+      changedLines[0].baseline === `version = "${upstreamVersion}"` &&
       changedLines[0].working === `version = "${versions[0]}"`,
     "Cargo.lock release-prep delta must contain only the root codeg version"
   )
