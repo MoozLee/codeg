@@ -14,7 +14,11 @@ mod m20260422_000001_folder_sort_order;
 mod m20260423_000001_drop_folder_parent_branch;
 mod m20260424_000001_folder_color;
 mod m20260424_000002_quick_message;
+mod m20260510_000001_folder_is_pinned;
+mod m20260511_000001_paired_devices;
+mod m20260513_000001_provider_usage_config;
 mod m20260513_000001_remote_workspace_connection;
+mod m20260513_000002_provider_usage_config_query_kinds;
 mod m20260518_000001_model_provider_single_type_and_model;
 mod m20260522_000001_delegation_columns;
 mod m20260607_000001_folder_parent_id;
@@ -53,7 +57,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20260423_000001_drop_folder_parent_branch::Migration),
             Box::new(m20260424_000001_folder_color::Migration),
             Box::new(m20260424_000002_quick_message::Migration),
+            Box::new(m20260510_000001_folder_is_pinned::Migration),
+            Box::new(m20260511_000001_paired_devices::Migration),
+            Box::new(m20260513_000001_provider_usage_config::Migration),
             Box::new(m20260513_000001_remote_workspace_connection::Migration),
+            Box::new(m20260513_000002_provider_usage_config_query_kinds::Migration),
             Box::new(m20260518_000001_model_provider_single_type_and_model::Migration),
             Box::new(m20260522_000001_delegation_columns::Migration),
             Box::new(m20260607_000001_folder_parent_id::Migration),
@@ -73,5 +81,39 @@ impl MigratorTrait for Migrator {
             Box::new(m20260801_000002_work_task_p2::Migration),
             Box::new(m20260801_000003_work_task_template::Migration),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm_migration::MigratorTrait;
+
+    use super::Migrator;
+
+    #[test]
+    fn keeps_all_migrations_shipped_on_the_previous_release_line() {
+        let names: Vec<String> = Migrator::migrations()
+            .iter()
+            .map(|migration| migration.name().to_string())
+            .collect();
+        let required_sequence = [
+            "m20260510_000001_folder_is_pinned",
+            "m20260511_000001_paired_devices",
+            "m20260513_000001_provider_usage_config",
+            "m20260513_000001_remote_workspace_connection",
+            "m20260513_000002_provider_usage_config_query_kinds",
+            "m20260518_000001_model_provider_single_type_and_model",
+        ];
+        let preserves_sequence = names.windows(required_sequence.len()).any(|window| {
+            window
+                .iter()
+                .map(String::as_str)
+                .eq(required_sequence.iter().copied())
+        });
+
+        assert!(
+            preserves_sequence,
+            "release builds must keep the previous release migration sequence"
+        );
     }
 }
