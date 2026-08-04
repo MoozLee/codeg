@@ -70,6 +70,8 @@ if (existsSync(resolve(root, chineseNotesPath))) {
   )
 }
 
+const FORK_UPDATER_PUBLIC_KEY =
+  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ1RDg5QzNGOTQ1NDA3MDcKUldRSEIxU1VQNXpZUllJa1NzRnR4dW1jODAvZmcyMnhPNU5CZG1Td1Bwb09MNWtLQnNHQWdHc2sK"
 const updater = tauriConfig.plugins?.updater
 assert(
   updater?.endpoints?.includes(
@@ -78,6 +80,10 @@ assert(
   "updater endpoint does not use the fork release channel"
 )
 assert(Boolean(updater?.pubkey?.trim()), "updater public key is missing")
+assert(
+  updater?.pubkey === FORK_UPDATER_PUBLIC_KEY,
+  "updater public key must remain aligned with the fork signing key"
+)
 assert(
   signatureVerifier.includes('include_str!("../../tauri.conf.json")') &&
     signatureVerifier.includes('pointer("/plugins/updater/pubkey")'),
@@ -161,6 +167,26 @@ assert(
 assert(
   migrationRegistrations.at(-1) === "m20260803_000001_folder_link",
   "folder-link migration must remain last"
+)
+
+function matrixNames(jobStart, nextJobStart) {
+  const start = workflow.indexOf(jobStart)
+  const end = workflow.indexOf(nextJobStart)
+  const job = start >= 0 && end > start ? workflow.slice(start, end) : ""
+  const matrix = job.match(/matrix:\n        include:\n([\s\S]*?)    runs-on:/)?.[1] ?? ""
+
+  return [...matrix.matchAll(/- name: "([^"]+)"/g)].map((match) => match[1])
+}
+
+assert(
+  JSON.stringify(matrixNames("  build-tauri:", "  build-server:")) ===
+    JSON.stringify(["macOS x64", "macOS arm64"]),
+  "desktop release builds must target only macOS x64 and arm64"
+)
+assert(
+  JSON.stringify(matrixNames("  build-server:", "  build-docker:")) ===
+    JSON.stringify(["Linux x64", "Linux arm64"]),
+  "server release builds must target only Linux x64 and arm64"
 )
 
 assert(

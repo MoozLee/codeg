@@ -129,9 +129,9 @@ mod tests {
 
     #[test]
     fn fork_release_ordering() {
-        assert!(is_newer("0.23.1-1", "0.23.0-2"));
-        assert!(is_newer("0.23.1", "0.23.1-1"));
-        assert!(!is_newer("0.23.1-1", "0.23.1"));
+        assert!(is_newer("0.23.1-2", "0.23.1-1"));
+        assert!(is_newer("0.23.1", "0.23.1-2"));
+        assert!(!is_newer("0.23.1-2", "0.23.1"));
     }
 
     #[test]
