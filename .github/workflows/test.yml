@@ -48,6 +48,27 @@ jobs:
       - name: Static export build
         run: pnpm build
 
+  release-workflow:
+    name: Release workflow fixtures
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # verify-release-workflow.mjs compares the versioned candidate's
+          # Cargo.lock to its merge parent, so this job needs one parent too.
+          fetch-depth: 2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Test bounded release note selection
+        run: node --test .github/scripts/release-notes.test.mjs
+
+      - name: Validate fork release overlay
+        run: node .github/scripts/verify-release-workflow.mjs
+
   rust:
     name: Rust ${{ matrix.mode }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
