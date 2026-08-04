@@ -11,6 +11,7 @@ import {
   type PendingUserMessage,
   type PendingQuestion,
 } from "@/contexts/acp-connections-context"
+import type { ContextManagementState } from "@/lib/acp-context-management"
 import type {
   AgentType,
   AvailableCommandInfo,
@@ -87,6 +88,8 @@ export interface UseConnectionReturn {
    *  transient "syncing results" state so the gap after the running count
    *  disappears isn't a blank void. */
   backgroundSettleSyncingSince: number | null
+  /** Private context maintenance blocks automatic owner teardown. */
+  contextManagement: ContextManagementState | null
   connect: (
     agentType: AgentType,
     workingDir?: string,
@@ -109,7 +112,7 @@ export interface UseConnectionReturn {
     }
   ) => Promise<void>
   setMode: (modeId: string) => Promise<void>
-  setConfigOption: (configId: string, valueId: string) => Promise<void>
+  setConfigOption: (configId: string, value: string | boolean) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (requestId: string, optionId: string) => Promise<void>
   answerQuestion: (questionId: string, answer: QuestionAnswer) => Promise<void>
@@ -231,6 +234,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const backgroundOutstanding = connection?.backgroundOutstanding ?? 0
   const backgroundSettleSyncingSince =
     connection?.backgroundSettleSyncingSince ?? null
+  const contextManagement = connection?.contextManagement ?? null
 
   const connect = useCallback(
     (
@@ -272,8 +276,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   )
 
   const setConfigOption = useCallback(
-    (configId: string, valueId: string) =>
-      actions.setConfigOption(contextKey, configId, valueId),
+    (configId: string, value: string | boolean) =>
+      actions.setConfigOption(contextKey, configId, value),
     [actions, contextKey]
   )
 
@@ -333,6 +337,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       isDelegationChild,
       backgroundOutstanding,
       backgroundSettleSyncingSince,
+      contextManagement,
       connect,
       disconnect,
       reapplyConfig,
@@ -372,6 +377,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       isDelegationChild,
       backgroundOutstanding,
       backgroundSettleSyncingSince,
+      contextManagement,
       connect,
       disconnect,
       reapplyConfig,

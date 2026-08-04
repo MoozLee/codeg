@@ -91,6 +91,7 @@ export function shouldDisconnectOnUnmount(args: {
   status: string | null
   isViewer: boolean
   backgroundOutstanding: number
+  activeCompactionOperationId?: string | null
   transientUnmount?: boolean
 }): boolean {
   if (args.transientUnmount) return false
@@ -179,6 +180,13 @@ export function useConnectionLifecycle({
   useEffect(() => {
     backgroundOutstandingRef.current = conn.backgroundOutstanding
   }, [conn.backgroundOutstanding])
+  const activeCompactionOperationIdRef = useRef(
+    conn.contextManagement?.activeCompactionOperationId
+  )
+  useEffect(() => {
+    activeCompactionOperationIdRef.current =
+      conn.contextManagement?.activeCompactionOperationId
+  }, [conn.contextManagement?.activeCompactionOperationId])
   const contextKeyRef = useRef(contextKey)
   useEffect(() => {
     contextKeyRef.current = contextKey
@@ -359,6 +367,7 @@ export function useConnectionLifecycle({
           status: statusRef.current,
           isViewer: isViewerRef.current,
           backgroundOutstanding: backgroundOutstandingRef.current,
+          activeCompactionOperationId: activeCompactionOperationIdRef.current,
           transientUnmount: isTransientUnmountRef.current?.() === true,
         })
       ) {

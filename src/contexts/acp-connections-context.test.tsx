@@ -10,6 +10,10 @@ import {
 import { parsePermissionToolCall } from "@/lib/permission-request"
 import { subscribe } from "@/lib/platform"
 import { saveConfigPreference } from "@/lib/selector-prefs-storage"
+import {
+  CONNECTION_IDLE_TIMEOUT_MS,
+  IDLE_SWEEP_INTERVAL_MS,
+} from "@/lib/constants"
 import type { AttachHandlers } from "@/lib/transport/types"
 import type {
   EventEnvelope,
@@ -40,6 +44,7 @@ const h = vi.hoisted(() => {
     acpConnect: vi.fn(),
     acpDisconnect: vi.fn(),
     acpGetSessionSnapshot: vi.fn(),
+    acpRunMaintenanceCommand: vi.fn(),
     buildDelegationSeedEnvelopes: vi.fn(() => []),
     denormalizeSnapshot: vi.fn(),
     // Stable across renders so tests can assert on what the error handler
@@ -90,6 +95,7 @@ vi.mock("@/lib/api", () => ({
   acpConnect: h.acpConnect,
   acpDisconnect: h.acpDisconnect,
   acpGetSessionSnapshot: h.acpGetSessionSnapshot,
+  acpRunMaintenanceCommand: h.acpRunMaintenanceCommand,
   acpPrompt: vi.fn(),
   acpSetMode: vi.fn(),
   acpSetConfigOption: vi.fn(),
@@ -119,12 +125,13 @@ function Probe() {
 }
 
 async function mountProvider() {
-  render(
+  const view = render(
     <AcpConnectionsProvider>
       <Probe />
     </AcpConnectionsProvider>
   )
   await act(async () => {})
+  return view
 }
 
 const TAB = "conv-1-claude_code-42"
@@ -139,6 +146,7 @@ beforeEach(() => {
   h.acpConnect.mockReset()
   h.acpDisconnect.mockReset()
   h.acpGetSessionSnapshot.mockReset()
+  h.acpRunMaintenanceCommand.mockReset()
   h.denormalizeSnapshot.mockReset()
   h.denormalizeSnapshot.mockReturnValue({
     connectionId: "owner-conn",
@@ -168,6 +176,15 @@ beforeEach(() => {
     available: true,
     installed_version: "1.0.0",
     is_acp_adapter: true,
+    context_runtime_config: {
+      configured_model: null,
+      configured_model_source: null,
+      configured_context_window_max_tokens: null,
+      context_window_max_source: null,
+      auto_compaction_enabled: null,
+      auto_compaction_threshold: null,
+      native_auto_compact_window: null,
+    },
   })
   h.acpConnect.mockResolvedValue("spawned-conn")
   h.acpDisconnect.mockResolvedValue(undefined)
@@ -1939,5 +1956,334 @@ describe("delegation-child attach: mid-turn hydration", () => {
       } as EventEnvelope)
     })
     expect(h.store!.getConnection(CHILD)).toBeUndefined()
+  })
+})
+
+describe("context maintenance scheduling exclusions", () => {
+  const autoCompactOption: SessionConfigOptionInfo = {
+    id: "auto_compact",
+    name: "Auto compact",
+    category: null,
+    kind: { type: "boolean", current_value: true },
+  }
+  const compactCommand = {
+    name: "compact",
+    description: "Compact context",
+    input_hint: null,
+  }
+
+  function seedEligibleUsage(
+    handlers: AttachHandlers,
+    connectionId: string,
+    sessionId: string,
+    usage = { used: 90, size: 100 }
+  ) {
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: connectionId,
+      type: "session_started",
+      session_id: sessionId,
+    })
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: connectionId,
+      type: "session_config_options",
+      config_options: [autoCompactOption],
+    })
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: connectionId,
+      type: "available_commands",
+      commands: [compactCommand],
+    })
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: connectionId,
+      type: "status_changed",
+      status: "connected",
+    })
+    emitAcpEvent(handlers, {
+      seq: 5,
+      connection_id: connectionId,
+      type: "usage_update",
+      used: usage.used,
+      size: usage.size,
+    })
+  }
+
+  it("never schedules maintenance for viewer or work-task child streams", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue({
+      connection_id: "owner-conn",
+      event_seq: 0,
+    })
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(
+        TAB,
+        "claude_code",
+        "/tmp/x",
+        "viewer-session",
+        42
+      )
+    })
+    seedEligibleUsage(latestAttachHandlers(), "owner-conn", "viewer-session")
+
+    await act(async () => {
+      h.actions!.attachDelegationChild({
+        connectionId: "work-task-conn",
+        parentConnectionId: "work-task-conn",
+        parentToolUseId: "work-task-1",
+        agentType: "claude_code",
+      })
+    })
+    seedEligibleUsage(
+      latestAttachHandlers(),
+      "work-task-conn",
+      "work-task-session"
+    )
+
+    expect(h.acpRunMaintenanceCommand).not.toHaveBeenCalled()
+  })
+
+  it("runs an eligible owner compaction and records its matched completion", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    h.acpRunMaintenanceCommand.mockImplementation(
+      async (
+        connectionId: string,
+        sessionId: string,
+        operationId: string,
+        command: string
+      ) => ({
+        connection_id: connectionId,
+        session_id: sessionId,
+        operation_id: operationId,
+        stop_reason: "end_turn",
+        outcome: "completed",
+        error: null,
+        command,
+      })
+    )
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(
+        TAB,
+        "claude_code",
+        "/tmp/x",
+        "owner-session",
+        42
+      )
+    })
+    seedEligibleUsage(latestAttachHandlers(), "spawned-conn", "owner-session")
+    await act(async () => {})
+
+    expect(h.acpRunMaintenanceCommand).toHaveBeenCalledTimes(1)
+    const [connectionId, sessionId, operationId, command] = h
+      .acpRunMaintenanceCommand.mock.calls[0] as [
+      string,
+      string,
+      string,
+      string,
+    ]
+    expect(connectionId).toBe("spawned-conn")
+    expect(sessionId).toBe("owner-session")
+    expect(operationId).not.toBe("")
+    expect(command).toBe("/compact")
+    expect(
+      h.store!.getConnection(TAB)?.contextManagement.compactionStatus
+    ).toBe("completed")
+  })
+
+  it("does not re-arm a clamped runtime usage zone until it drops below threshold", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    h.acpGetAgentStatus.mockResolvedValue({
+      agent_type: "claude_code",
+      enabled: true,
+      available: true,
+      installed_version: "1.0.0",
+      is_acp_adapter: true,
+      context_runtime_config: {
+        configured_model: null,
+        configured_model_source: null,
+        configured_context_window_max_tokens: 1_000_000,
+        context_window_max_source: "agent_env",
+        auto_compaction_enabled: null,
+        auto_compaction_threshold: null,
+        native_auto_compact_window: null,
+      },
+    })
+    h.acpRunMaintenanceCommand.mockImplementation(
+      async (connectionId: string, sessionId: string, operationId: string) => ({
+        connection_id: connectionId,
+        session_id: sessionId,
+        operation_id: operationId,
+        stop_reason: "end_turn",
+        outcome: "completed",
+        error: null,
+      })
+    )
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(
+        TAB,
+        "claude_code",
+        "/tmp/x",
+        "owner-session",
+        42
+      )
+    })
+    const handlers = latestAttachHandlers()
+    seedEligibleUsage(handlers, "spawned-conn", "owner-session", {
+      used: 180_000,
+      size: 200_000,
+    })
+    await act(async () => {})
+    expect(h.acpRunMaintenanceCommand).toHaveBeenCalledTimes(1)
+
+    // Both updates are in the 90% runtime zone. The configured 1M window
+    // would misread this as 18.1% and incorrectly clear the dedupe key.
+    emitAcpEvent(handlers, {
+      seq: 6,
+      connection_id: "spawned-conn",
+      type: "usage_update",
+      used: 181_000,
+      size: 200_000,
+    })
+
+    expect(h.acpRunMaintenanceCommand).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps an active private maintenance operation alive across preview release", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    let connectionId = ""
+    let sessionId = ""
+    let operationId = ""
+    let resolveMaintenance: (() => void) | null = null
+    h.acpRunMaintenanceCommand.mockImplementation(
+      (
+        nextConnectionId: string,
+        nextSessionId: string,
+        nextOperationId: string
+      ) => {
+        connectionId = nextConnectionId
+        sessionId = nextSessionId
+        operationId = nextOperationId
+        return new Promise((resolve) => {
+          resolveMaintenance = () =>
+            resolve({
+              connection_id: connectionId,
+              session_id: sessionId,
+              operation_id: operationId,
+              stop_reason: "end_turn",
+              outcome: "completed",
+              error: null,
+            })
+        })
+      }
+    )
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(
+        TAB,
+        "claude_code",
+        "/tmp/x",
+        "owner-session",
+        42
+      )
+    })
+    seedEligibleUsage(latestAttachHandlers(), "spawned-conn", "owner-session")
+    await act(async () => {})
+
+    expect(operationId).not.toBe("")
+    expect(
+      h.store!.getConnection(TAB)?.contextManagement.activeCompactionOperationId
+    ).toBe(operationId)
+
+    await act(async () => {
+      await h.actions!.disconnectIfIdle(TAB)
+    })
+    expect(h.acpDisconnect).not.toHaveBeenCalled()
+
+    expect(resolveMaintenance).not.toBeNull()
+    await act(async () => {
+      resolveMaintenance!()
+      await Promise.resolve()
+    })
+    expect(
+      h.store!.getConnection(TAB)?.contextManagement.activeCompactionOperationId
+    ).toBeNull()
+
+    await act(async () => {
+      await h.actions!.disconnectIfIdle(TAB)
+    })
+    expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
+  })
+
+  it("keeps active private maintenance out of the periodic idle sweep", async () => {
+    vi.useFakeTimers()
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    let operationId = ""
+    let resolveMaintenance: (() => void) | null = null
+    h.acpRunMaintenanceCommand.mockImplementation(
+      (connectionId: string, sessionId: string, nextOperationId: string) => {
+        operationId = nextOperationId
+        return new Promise((resolve) => {
+          resolveMaintenance = () =>
+            resolve({
+              connection_id: connectionId,
+              session_id: sessionId,
+              operation_id: nextOperationId,
+              stop_reason: "end_turn",
+              outcome: "completed",
+              error: null,
+            })
+        })
+      }
+    )
+    const view = await mountProvider()
+
+    try {
+      await act(async () => {
+        await h.actions!.connect(
+          TAB,
+          "claude_code",
+          "/tmp/x",
+          "owner-session",
+          42
+        )
+      })
+      seedEligibleUsage(latestAttachHandlers(), "spawned-conn", "owner-session")
+      await act(async () => {})
+
+      expect(operationId).not.toBe("")
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(
+          CONNECTION_IDLE_TIMEOUT_MS + IDLE_SWEEP_INTERVAL_MS + 1
+        )
+      })
+
+      expect(h.acpDisconnect).not.toHaveBeenCalled()
+      expect(
+        h.store!.getConnection(TAB)?.contextManagement
+          .activeCompactionOperationId
+      ).toBe(operationId)
+
+      expect(resolveMaintenance).not.toBeNull()
+      await act(async () => {
+        resolveMaintenance!()
+        await Promise.resolve()
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(IDLE_SWEEP_INTERVAL_MS)
+      })
+
+      expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
   })
 })

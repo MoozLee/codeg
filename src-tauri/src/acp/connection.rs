@@ -1,20 +1,24 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
+use futures::FutureExt;
 use sacp::schema::{
     BlobResourceContents, CancelNotification, ClientCapabilities, ContentBlock, ContentChunk,
-    CreateTerminalRequest, CreateTerminalResponse,
-    ElicitationCapabilities, ElicitationFormCapabilities, EmbeddedResource, EmbeddedResourceResource,
+    CreateTerminalRequest, CreateTerminalResponse, ElicitationCapabilities,
+    ElicitationFormCapabilities, EmbeddedResource, EmbeddedResourceResource,
     FileSystemCapabilities, ImageContent, InitializeRequest, KillTerminalRequest,
     KillTerminalResponse, LoadSessionRequest, NewSessionRequest, NewSessionResponse,
     PermissionOptionKind, Plan, PlanEntryPriority, PlanEntryStatus, PromptRequest, ProtocolVersion,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
     ResumeSessionRequest, ResumeSessionResponse, SelectedPermissionOutcome, SessionConfigKind,
-    SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelectGroup, SessionConfigSelectOption, SessionConfigSelectOptions, SessionId,
-    SessionModeState, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
+    SessionConfigSelectOption, SessionConfigSelectOptions, SessionId, SessionModeState,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, StopReason, TerminalExitStatus,
     TerminalOutputRequest, TerminalOutputResponse, TextContent, TextResourceContents,
     ToolCallContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
@@ -33,21 +37,49 @@ use crate::acp::background_watch;
 use crate::acp::error::AcpError;
 use crate::acp::file_system_runtime::{FileSystemRuntime, FileSystemRuntimeError, FsAccessPolicy};
 use crate::acp::registry::{self, AgentDistribution};
-use crate::acp::session_state::SessionState;
+use crate::acp::session_state::{ConnectionOrigin, SessionState};
 use crate::acp::stderr_tail::{summarize_parser_error, StderrTail, TailScope};
 use crate::acp::terminal_runtime::{TerminalRuntime, TerminalRuntimeError};
 use crate::acp::types::{
     AcpEvent, AvailableCommandInfo, ConnectionInfo, ConnectionStatus, GrokEffortSpec,
-    PermissionOptionInfo, PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock,
-    SessionConfigKindInfo, SessionConfigOptionInfo, SessionConfigSelectGroupInfo,
-    SessionConfigSelectInfo, SessionConfigSelectOptionInfo, SessionModeInfo, SessionModeStateInfo,
-    ToolCallImageInfo, UserMessageBlock,
+    MaintenanceCommandOutcome, PermissionOptionInfo, PlanEntryInfo, PromptCapabilitiesInfo,
+    PromptInputBlock, SessionConfigBooleanInfo, SessionConfigKindInfo, SessionConfigOptionInfo,
+    SessionConfigSelectGroupInfo, SessionConfigSelectInfo, SessionConfigSelectOptionInfo,
+    SessionModeInfo, SessionModeStateInfo, ToolCallImageInfo, UserMessageBlock,
 };
 use crate::models::agent::AgentType;
 use crate::network::proxy;
 use crate::web::event_bridge::{emit_with_state, EventEmitter};
 
 const DEFAULT_COMMAND_COLOR_ENV: [(&str, &str); 1] = [("CLICOLOR_FORCE", "1")];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionConfigCommandValue {
+    ValueId(String),
+    Boolean(bool),
+}
+
+impl SessionConfigCommandValue {
+    pub(crate) fn is_advertised_by(&self, option: &SessionConfigOptionInfo) -> bool {
+        match (self, &option.kind) {
+            (Self::ValueId(value), SessionConfigKindInfo::Select(select)) => {
+                !value.trim().is_empty()
+                    && (select
+                        .options
+                        .iter()
+                        .any(|candidate| candidate.value == *value)
+                        || select.groups.iter().any(|group| {
+                            group
+                                .options
+                                .iter()
+                                .any(|candidate| candidate.value == *value)
+                        }))
+            }
+            (Self::Boolean(_), SessionConfigKindInfo::Boolean(_)) => true,
+            _ => false,
+        }
+    }
+}
 
 fn merge_agent_env(
     env: &[(&'static str, &'static str)],
@@ -92,14 +124,15 @@ fn merge_agent_env(
 /// Gated on the explicit `CURSOR_AUTH_MODE` knob (written by the Cursor panel),
 /// so legacy rows and operator-provided container env are left untouched. In
 /// custom mode the credentials are present and non-empty, so nothing is cleared.
-fn apply_cursor_env_policy(merged: &mut Vec<(String, String)>, runtime_env: &BTreeMap<String, String>) {
+fn apply_cursor_env_policy(
+    merged: &mut Vec<(String, String)>,
+    runtime_env: &BTreeMap<String, String>,
+) {
     if runtime_env.get("CURSOR_AUTH_MODE").map(String::as_str) != Some("subscription") {
         return;
     }
     for key in ["CURSOR_API_KEY", "CURSOR_API_BASE_URL"] {
-        let already_set = merged
-            .iter()
-            .any(|(k, v)| k == key && !v.trim().is_empty());
+        let already_set = merged.iter().any(|(k, v)| k == key && !v.trim().is_empty());
         if !already_set {
             merged.retain(|(k, _)| k != key);
             merged.push((key.to_string(), String::new()));
@@ -116,14 +149,15 @@ fn apply_cursor_env_policy(merged: &mut Vec<(String, String)>, runtime_env: &BTr
 /// sacp-tokio) to `env_remove` the inherited var. In api_key mode the key is
 /// present and non-empty, so nothing is cleared; legacy/no-mode rows are left
 /// untouched.
-fn apply_grok_env_policy(merged: &mut Vec<(String, String)>, runtime_env: &BTreeMap<String, String>) {
+fn apply_grok_env_policy(
+    merged: &mut Vec<(String, String)>,
+    runtime_env: &BTreeMap<String, String>,
+) {
     if runtime_env.get("GROK_AUTH_MODE").map(String::as_str) != Some("subscription") {
         return;
     }
     let key = "XAI_API_KEY";
-    let already_set = merged
-        .iter()
-        .any(|(k, v)| k == key && !v.trim().is_empty());
+    let already_set = merged.iter().any(|(k, v)| k == key && !v.trim().is_empty());
     if !already_set {
         merged.retain(|(k, _)| k != key);
         merged.push((key.to_string(), String::new()));
@@ -244,6 +278,48 @@ pub enum SteerOutcome {
     StartedNewTurn,
 }
 
+pub struct MaintenanceTurnCompletion {
+    pub operation_id: String,
+    pub session_id: String,
+    pub stop_reason: Option<String>,
+    pub outcome: MaintenanceCommandOutcome,
+    pub error: Option<String>,
+}
+
+pub struct MaintenancePromptOrigin {
+    pub operation_id: String,
+    pub session_id: String,
+    pub command: String,
+    pub completion_tx: tokio::sync::oneshot::Sender<MaintenanceTurnCompletion>,
+}
+
+pub enum PromptOrigin {
+    User,
+    Maintenance(MaintenancePromptOrigin),
+}
+
+/// Connection-scoped gate for agent requests that would otherwise create a
+/// frontend interaction. A normal user prompt is the only boundary that reopens
+/// it after a private maintenance turn.
+#[derive(Default)]
+struct MaintenanceInteractionGate {
+    suppressed: AtomicBool,
+}
+
+impl MaintenanceInteractionGate {
+    fn begin_maintenance(&self) {
+        self.suppressed.store(true, Ordering::Release);
+    }
+
+    fn begin_user_prompt(&self) {
+        self.suppressed.store(false, Ordering::Release);
+    }
+
+    fn suppresses_interactions(&self) -> bool {
+        self.suppressed.load(Ordering::Acquire)
+    }
+}
+
 /// Commands sent from Tauri command handlers to the ACP connection loop.
 pub enum ConnectionCommand {
     Prompt {
@@ -256,13 +332,14 @@ pub enum ConnectionCommand {
         /// prompt actually being processed. `None` for delegation children,
         /// empty prompts, unbound conversations, and non-linked senders.
         user_message: Option<(String, Vec<UserMessageBlock>)>,
+        origin: PromptOrigin,
     },
     SetMode {
         mode_id: String,
     },
     SetConfigOption {
         config_id: String,
-        value_id: String,
+        value: SessionConfigCommandValue,
     },
     GoalControl {
         action: GoalControlAction,
@@ -560,12 +637,15 @@ async fn record_turn_end(
 /// than an empty field.
 fn current_model_id_from_opts(opts: &[SessionConfigOptionInfo]) -> Option<String> {
     opts.iter()
-        .find(|o| o.category.as_deref() == Some("model"))
-        .map(|o| {
-            let SessionConfigKindInfo::Select(sel) = &o.kind;
-            sel.current_value.clone()
+        .find_map(|option| match &option.kind {
+            SessionConfigKindInfo::Select(select)
+                if option.category.as_deref() == Some("model") =>
+            {
+                Some(select.current_value.clone())
+            }
+            SessionConfigKindInfo::Select(_) | SessionConfigKindInfo::Boolean(_) => None,
         })
-        .filter(|m| !m.is_empty())
+        .filter(|model| !model.is_empty())
 }
 
 /// [`current_model_id_from_opts`] against the authoritative `SessionState`
@@ -865,10 +945,7 @@ async fn build_agent(
             let binary_path = match cached {
                 Some((path, cached_version)) => {
                     if cached_version == registry_version {
-                        tracing::info!(
-                            "[ACP][{}] Using cached binary {cached_version}",
-                            meta.name
-                        );
+                        tracing::info!("[ACP][{}] Using cached binary {cached_version}", meta.name);
                     } else {
                         tracing::info!(
                             "[ACP][{}] Using cached binary {cached_version} (registry recommends {registry_version})",
@@ -980,11 +1057,8 @@ async fn build_agent(
                 .unwrap_or(false);
             let agent_name = meta.name.to_string();
             let tail = Arc::clone(stderr_tail);
-            Ok(
-                AcpAgent::new(sacp::schema::McpServer::Stdio(server)).with_debug(
-                    agent_debug_callback(agent_name, tail, stdio_debug_enabled),
-                ),
-            )
+            Ok(AcpAgent::new(sacp::schema::McpServer::Stdio(server))
+                .with_debug(agent_debug_callback(agent_name, tail, stdio_debug_enabled)))
         }
         AgentDistribution::Uvx {
             package,
@@ -1021,7 +1095,8 @@ async fn build_agent(
                 // than provisioned through uvx.
                 tracing::warn!(
                     "[ACP][{}] uvx unavailable; falling back to system command {:?}",
-                    meta.name, sys_path
+                    meta.name,
+                    sys_path
                 );
                 // `system_cmd` is a complete launch recipe for the PATH binary;
                 // the uvx entry-script `args` don't necessarily apply to it
@@ -1102,6 +1177,7 @@ pub async fn spawn_agent_connection(
     session_id: Option<String>,
     runtime_env: BTreeMap<String, String>,
     owner_window_label: String,
+    connection_origin: ConnectionOrigin,
     emitter: EventEmitter,
     connections: Arc<tokio::sync::Mutex<HashMap<String, AgentConnection>>>,
     preferred_mode_id: Option<String>,
@@ -1118,6 +1194,7 @@ pub async fn spawn_agent_connection(
         owner_window_label.clone(),
         None, // folder_id 由后续 prompt handler 在首次 send 时绑定 (Phase 2)
     );
+    initial_state.connection_origin = connection_origin;
 
     // Install the SessionStarted dedup signal BEFORE wrapping into Arc so the
     // first event (StatusChanged{Connecting} below) doesn't race with the
@@ -1212,8 +1289,7 @@ pub async fn spawn_agent_connection(
     // Derived from the same `runtime_env` we hand the agent (minus per-launch
     // volatile keys) plus the agent's native config file content, so a later
     // settings save can be compared against it to detect a stale running session.
-    let config_fingerprint =
-        crate::commands::acp::fingerprint_config(agent_type, &runtime_env);
+    let config_fingerprint = crate::commands::acp::fingerprint_config(agent_type, &runtime_env);
 
     // Insert the entry BEFORE spawning the background task so that a
     // fast-failing `run_connection` can never remove it before it was
@@ -1259,90 +1335,96 @@ pub async fn spawn_agent_connection(
         .spawn(move || {
             let _cleanup = cleanup_guard;
             connection_rt.block_on(async move {
-        let delegation_for_cleanup = delegation_injection.clone();
-        let result = run_connection(
-            agent,
-            conn_id.clone(),
-            agent_type,
-            working_dir,
-            session_id,
-            cmd_rx,
-            emitter_clone.clone(),
-            Arc::clone(&state_clone),
-            terminal_base_env,
-            preferred_mode_id,
-            preferred_config_values,
-            delegation_injection,
-            fs_policy,
-            stderr_tail,
-        )
-        .await;
-
-        // Revoke the per-launch token + cascade cancel any still-pending
-        // delegations AND questions owned by this parent connection. All are
-        // best-effort: a missing token entry is a no-op, and both
-        // `cancel_by_parent` calls are safe on an empty pending map.
-        if let Some(inj) = delegation_for_cleanup {
-            let token = {
-                let snap = state_clone.read().await;
-                snap.delegation_token.clone()
-            };
-            if let Some(tok) = token {
-                inj.tokens.revoke(&tok).await;
-            }
-            inj.broker.cancel_by_parent(&conn_id).await;
-            // Reclaim a parked `ask_user_question` instead of waiting for the
-            // companion's ask socket to close (which a reparented/hard-killed
-            // agent may never do); the dropped sender declines the tool cleanly.
-            inj.questions.cancel_questions_by_parent(&conn_id).await;
-            // Likewise reclaim a parked Grok `exit_plan_mode` approval; the
-            // dropped sender replies disconnect so grok keeps plan mode active.
-            inj.plan_approvals
-                .cancel_plan_approvals_by_parent(&conn_id)
+                let delegation_for_cleanup = delegation_injection.clone();
+                let result = run_connection(
+                    agent,
+                    conn_id.clone(),
+                    agent_type,
+                    working_dir,
+                    session_id,
+                    cmd_rx,
+                    emitter_clone.clone(),
+                    Arc::clone(&state_clone),
+                    terminal_base_env,
+                    preferred_mode_id,
+                    preferred_config_values,
+                    delegation_injection,
+                    fs_policy,
+                    stderr_tail,
+                )
                 .await;
-        }
 
-        if let Err(e) = result {
-            let code = e.code().map(String::from);
-            emit_with_state(
-                &state_clone,
-                &emitter_clone,
-                AcpEvent::Error {
-                    message: e.to_string(),
-                    agent_type: agent_type.to_string(),
-                    code,
-                    details: None,
-                    // The only genuinely terminal emit site: `run_connection`
-                    // is unwinding and the next event is `Disconnected`.
-                    // The lifecycle worker uses this flag to decide whether
-                    // to flip the conversation row to Cancelled and to
-                    // buffer the detail for the broker's cancel reason.
-                    terminal: true,
-                },
-            )
-            .await;
-            // Drive the state machine through `Error` before `Disconnected`
-            // so the frontend's error-handling effect (cancelled-on-error)
-            // engages — without this hop the connection would jump straight
-            // to Disconnected and look like a clean shutdown.
-            emit_with_state(
-                &state_clone,
-                &emitter_clone,
-                AcpEvent::StatusChanged {
-                    status: ConnectionStatus::Error,
-                },
-            )
-            .await;
-        }
+                // Revoke the per-launch token + cascade cancel any still-pending
+                // delegations AND questions owned by this parent connection. All are
+                // best-effort: a missing token entry is a no-op, and both
+                // `cancel_by_parent` calls are safe on an empty pending map.
+                if let Some(inj) = delegation_for_cleanup {
+                    let token = {
+                        let snap = state_clone.read().await;
+                        snap.delegation_token.clone()
+                    };
+                    if let Some(tok) = token {
+                        inj.tokens.revoke(&tok).await;
+                    }
+                    inj.broker.cancel_by_parent(&conn_id).await;
+                    // Reclaim a parked `ask_user_question` instead of waiting for the
+                    // companion's ask socket to close (which a reparented/hard-killed
+                    // agent may never do); the dropped sender declines the tool cleanly.
+                    inj.questions.cancel_questions_by_parent(&conn_id).await;
+                    // Likewise reclaim a parked Grok `exit_plan_mode` approval; the
+                    // dropped sender replies disconnect so grok keeps plan mode active.
+                    inj.plan_approvals
+                        .cancel_plan_approvals_by_parent(&conn_id)
+                        .await;
+                }
 
-        emit_with_state(
-            &state_clone,
-            &emitter_clone,
-            AcpEvent::StatusChanged {
-                status: ConnectionStatus::Disconnected,
-            },
-        )
-        .await;
+                // A user-requested disconnect of a private maintenance turn
+                // must resolve only the maintenance caller. `run_connection`
+                // clears its live gate before returning, so use the sticky flag
+                // set by `ConnectionManager::disconnect` rather than origin.
+                if !state_clone.read().await.suppress_public_terminal_events {
+                    if let Err(e) = result {
+                        let code = e.code().map(String::from);
+                        emit_with_state(
+                            &state_clone,
+                            &emitter_clone,
+                            AcpEvent::Error {
+                                message: e.to_string(),
+                                agent_type: agent_type.to_string(),
+                                code,
+                                details: None,
+                                // The only genuinely terminal emit site: `run_connection`
+                                // is unwinding and the next event is `Disconnected`.
+                                // The lifecycle worker uses this flag to decide whether
+                                // to flip the conversation row to Cancelled and to
+                                // buffer the detail for the broker's cancel reason.
+                                terminal: true,
+                            },
+                        )
+                        .await;
+                        // Drive the state machine through `Error` before `Disconnected`
+                        // so the frontend's error-handling effect (cancelled-on-error)
+                        // engages — without this hop the connection would jump straight
+                        // to Disconnected and look like a clean shutdown.
+                        emit_with_state(
+                            &state_clone,
+                            &emitter_clone,
+                            AcpEvent::StatusChanged {
+                                status: ConnectionStatus::Error,
+                            },
+                        )
+                        .await;
+                    }
+
+                    emit_with_state(
+                        &state_clone,
+                        &emitter_clone,
+                        AcpEvent::StatusChanged {
+                            status: ConnectionStatus::Disconnected,
+                        },
+                    )
+                    .await;
+                }
                 // Connection loop ended; `block_on` returns and `_cleanup`
                 // (bound at the top of the thread body) drops next, removing
                 // the manager map entry — same as on a panic unwind.
@@ -1522,6 +1604,15 @@ fn map_session_config_option(option: &SessionConfigOption) -> Option<SessionConf
                 }),
             })
         }
+        SessionConfigKind::Boolean(boolean) => Some(SessionConfigOptionInfo {
+            id: option.id.to_string(),
+            name: option.name.clone(),
+            description: option.description.clone(),
+            category: option.category.as_ref().map(map_session_config_category),
+            kind: SessionConfigKindInfo::Boolean(SessionConfigBooleanInfo {
+                current_value: boolean.current_value,
+            }),
+        }),
         _ => None,
     }
 }
@@ -2010,9 +2101,8 @@ async fn send_steer_request(
     text: &str,
 ) -> Result<SteerOutcome, AcpError> {
     let params = build_steer_params(session_id.0.as_ref(), text);
-    let untyped_req = UntypedMessage::new("_session/steering", params).map_err(|e| {
-        AcpError::protocol(format!("Failed to build steering request: {e}"))
-    })?;
+    let untyped_req = UntypedMessage::new("_session/steering", params)
+        .map_err(|e| AcpError::protocol(format!("Failed to build steering request: {e}")))?;
     let raw = cx
         .send_request_to(Agent, untyped_req)
         .block_task()
@@ -2069,18 +2159,28 @@ async fn apply_grok_preferred_options(
         // never hold a `&mut opts` borrow across `set_grok_effort_selector_for_model`.
         let eligible = opts
             .iter()
-            .find(|o| o.id == GROK_MODEL_OPTION_ID)
-            .is_some_and(|o| {
-                let SessionConfigKindInfo::Select(sel) = &o.kind;
-                // Skip if already current, or the saved model is no longer offered.
-                sel.current_value != pref && sel.options.iter().any(|x| x.value == pref)
+            .find(|option| option.id == GROK_MODEL_OPTION_ID)
+            .is_some_and(|option| match &option.kind {
+                SessionConfigKindInfo::Select(select) => {
+                    // Skip if already current, or the saved model is no longer offered.
+                    select.current_value != pref
+                        && select
+                            .options
+                            .iter()
+                            .any(|candidate| candidate.value == pref)
+                }
+                SessionConfigKindInfo::Boolean(_) => false,
             });
         if eligible {
             match set_grok_model(cx, session_id, pref.clone(), None).await {
                 Ok(()) => {
-                    if let Some(o) = opts.iter_mut().find(|o| o.id == GROK_MODEL_OPTION_ID) {
-                        let SessionConfigKindInfo::Select(sel) = &mut o.kind;
-                        sel.current_value = pref.clone();
+                    if let Some(option) = opts
+                        .iter_mut()
+                        .find(|option| option.id == GROK_MODEL_OPTION_ID)
+                    {
+                        if let SessionConfigKindInfo::Select(select) = &mut option.kind {
+                            select.current_value = pref.clone();
+                        }
                     }
                     if !specs.is_empty() {
                         set_grok_effort_selector_for_model(opts, &pref, specs);
@@ -2098,14 +2198,16 @@ async fn apply_grok_preferred_options(
     if let Some(pref) = preferred_config_values.get(GROK_EFFORT_OPTION_ID) {
         let model_id = current_grok_model_id_from_opts(opts);
         if let Some(effort_opt) = opts.iter_mut().find(|o| o.id == GROK_EFFORT_OPTION_ID) {
-            let SessionConfigKindInfo::Select(sel) = &mut effort_opt.kind;
-            if &sel.current_value != pref && sel.options.iter().any(|o| &o.value == pref) {
-                if let Some(model_id) = model_id {
-                    match set_grok_model(cx, session_id, model_id, Some(pref.clone())).await {
-                        Ok(()) => sel.current_value = pref.clone(),
-                        Err(e) => tracing::error!(
-                            "[ACP] failed to apply preferred grok effort '{pref}' on connect: {e}"
-                        ),
+            if let SessionConfigKindInfo::Select(select) = &mut effort_opt.kind {
+                if &select.current_value != pref && select.options.iter().any(|o| &o.value == pref)
+                {
+                    if let Some(model_id) = model_id {
+                        match set_grok_model(cx, session_id, model_id, Some(pref.clone())).await {
+                            Ok(()) => select.current_value = pref.clone(),
+                            Err(e) => tracing::error!(
+                                "[ACP] failed to apply preferred grok effort '{pref}' on connect: {e}"
+                            ),
+                        }
                     }
                 }
             }
@@ -2115,10 +2217,12 @@ async fn apply_grok_preferred_options(
 
 /// The Grok model selector's current value, read from an in-memory options list.
 fn current_grok_model_id_from_opts(opts: &[SessionConfigOptionInfo]) -> Option<String> {
-    opts.iter().find(|o| o.id == GROK_MODEL_OPTION_ID).map(|o| {
-        let SessionConfigKindInfo::Select(sel) = &o.kind;
-        sel.current_value.clone()
-    })
+    opts.iter()
+        .find(|option| option.id == GROK_MODEL_OPTION_ID)
+        .and_then(|option| match &option.kind {
+            SessionConfigKindInfo::Select(select) => Some(select.current_value.clone()),
+            SessionConfigKindInfo::Boolean(_) => None,
+        })
 }
 
 /// The Grok model selector's current value, read from the authoritative
@@ -2174,9 +2278,10 @@ async fn set_grok_config_option(
                 (g.config_options.clone(), g.grok_effort_specs.clone())
             };
             if let Some(mut opts) = current {
-                if let Some(o) = opts.iter_mut().find(|o| o.id == config_id) {
-                    let SessionConfigKindInfo::Select(sel) = &mut o.kind;
-                    sel.current_value = value_id.clone();
+                if let Some(option) = opts.iter_mut().find(|option| option.id == config_id) {
+                    if let SessionConfigKindInfo::Select(select) = &mut option.kind {
+                        select.current_value = value_id.clone();
+                    }
                 }
                 // A MODEL switch must re-point the effort selector at the new
                 // model — grok never re-sends per-model effort data on
@@ -2366,18 +2471,22 @@ fn claude_raw_sdk_session_meta(
 ///   `=== true`, and a pre-0.63 binary ignores the unknown key, so this is
 ///   inert everywhere it isn't understood.
 fn build_client_capabilities(agent_type: AgentType) -> ClientCapabilities {
-    let mut client_capabilities = ClientCapabilities::new().terminal(true).fs(
-        FileSystemCapabilities::new()
-            .read_text_file(true)
-            .write_text_file(true),
-    );
+    let mut client_capabilities =
+        ClientCapabilities::new()
+            .terminal(true)
+            .fs(FileSystemCapabilities::new()
+                .read_text_file(true)
+                .write_text_file(true));
     if agent_type == AgentType::Codex {
         client_capabilities = client_capabilities
             .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
     }
     if agent_type == AgentType::ClaudeCode {
         let mut meta = serde_json::Map::new();
-        meta.insert("subagent-transcript".to_string(), serde_json::Value::Bool(true));
+        meta.insert(
+            "subagent-transcript".to_string(),
+            serde_json::Value::Bool(true),
+        );
         client_capabilities = client_capabilities.meta(meta);
     }
     client_capabilities
@@ -2449,18 +2558,16 @@ async fn send_resume_session(
     cx: &ConnectionTo<Agent>,
     req: ResumeSessionRequest,
 ) -> Result<(ResumeSessionResponse, Option<serde_json::Value>), sacp::Error> {
-    let untyped_req = UntypedMessage::new("session/resume", req).map_err(|e| {
-        sacp::util::internal_error(format!("Failed to build resume request: {e}"))
-    })?;
+    let untyped_req = UntypedMessage::new("session/resume", req)
+        .map_err(|e| sacp::util::internal_error(format!("Failed to build resume request: {e}")))?;
 
     let raw_response = cx.send_request_to(Agent, untyped_req).block_task().await?;
     // Capture the raw top-level `models` (per-model reasoning-effort data) BEFORE
     // deserializing into the typed response, which drops it (Grok only — the
     // field survives serde as an ignored unknown for other agents).
     let models = raw_response.get("models").cloned();
-    let resp = serde_json::from_value(raw_response).map_err(|e| {
-        sacp::util::internal_error(format!("Failed to parse resume response: {e}"))
-    })?;
+    let resp = serde_json::from_value(raw_response)
+        .map_err(|e| sacp::util::internal_error(format!("Failed to parse resume response: {e}")))?;
     Ok((resp, models))
 }
 
@@ -3070,6 +3177,7 @@ async fn run_connection(
     // exists) is what lets the first arm process records written before the
     // transcript file is discovered.
     let prompt_ledger = background_watch::PromptLedger::shared();
+    let maintenance_interaction_gate = Arc::new(MaintenanceInteractionGate::default());
     let _bg_watch = background_watch::spawn_if_claude(
         &connection_id,
         agent_type,
@@ -3088,6 +3196,7 @@ async fn run_connection(
                 let perms = perms.clone();
                 let perm_cwd = cwd_string.clone();
                 let state_inner = Arc::clone(&state);
+                let maintenance_interaction_gate = Arc::clone(&maintenance_interaction_gate);
                 async move |req: RequestPermissionRequest,
                             responder: Responder<RequestPermissionResponse>,
                             _cx: ConnectionTo<Agent>| {
@@ -3096,7 +3205,10 @@ async fn run_connection(
                         &emitter_inner,
                         &perms,
                         &perm_cwd,
-                        agent_type,
+                        PermissionRequestScope {
+                            agent_type,
+                            maintenance_interaction_gate: &maintenance_interaction_gate,
+                        },
                         req,
                         responder,
                     )
@@ -3221,6 +3333,7 @@ async fn run_connection(
                 let conn_id = grok_ask_conn_id.clone();
                 let card_state = Arc::clone(&grok_ask_state);
                 let card_emitter = grok_ask_emitter.clone();
+                let maintenance_interaction_gate = Arc::clone(&maintenance_interaction_gate);
                 async move |req: GrokAskUserQuestionRequest,
                             responder: Responder<serde_json::Value>,
                             _cx: ConnectionTo<Agent>| {
@@ -3229,6 +3342,7 @@ async fn run_connection(
                         &conn_id,
                         &card_state,
                         &card_emitter,
+                        &maintenance_interaction_gate,
                         req,
                         responder,
                     )
@@ -3242,10 +3356,18 @@ async fn run_connection(
             {
                 let access = grok_plan_access.clone();
                 let conn_id = grok_plan_conn_id.clone();
+                let maintenance_interaction_gate = Arc::clone(&maintenance_interaction_gate);
                 async move |req: GrokExitPlanModeRequest,
                             responder: Responder<serde_json::Value>,
                             _cx: ConnectionTo<Agent>| {
-                    handle_grok_exit_plan_mode(&access, &conn_id, req, responder).await;
+                    handle_grok_exit_plan_mode(
+                        &access,
+                        &conn_id,
+                        &maintenance_interaction_gate,
+                        req,
+                        responder,
+                    )
+                    .await;
                     Ok(())
                 }
             },
@@ -3264,6 +3386,7 @@ async fn run_connection(
                 let perms = perms.clone();
                 let state_inner = Arc::clone(&state);
                 let emitter_inner = emitter_clone.clone();
+                let maintenance_interaction_gate = Arc::clone(&maintenance_interaction_gate);
                 async move |req: CodexElicitationRequest,
                             responder: Responder<serde_json::Value>,
                             _cx: ConnectionTo<Agent>| {
@@ -3273,6 +3396,7 @@ async fn run_connection(
                         &state_inner,
                         &emitter_inner,
                         &conn_id,
+                        &maintenance_interaction_gate,
                         req,
                         responder,
                     )
@@ -3443,10 +3567,12 @@ async fn run_connection(
             // for agents that don't accept MCP over the wire (above).
             let delegate_injection = if agent_supports_mcp && agent_delivers_wire_mcp(agent_type) {
                 if let Some(inj) = delegation_injection.as_ref() {
-                    // Task-engine launches (owner label "work_task") carry the
-                    // task_progress / task_complete tool group.
-                    let tasks_enabled =
-                        { state.read().await.owner_window_label == "work_task" };
+                    // Task-engine launches carry the task_progress /
+                    // task_complete tool group. Ownership is explicit rather
+                    // than inferred from a UI window label.
+                    let tasks_enabled = {
+                        state.read().await.connection_origin == ConnectionOrigin::WorkTask
+                    };
                     inject_codeg_mcp(&mut mcp_servers, inj, &conn_id, &cwd, tasks_enabled).await
                 } else {
                     None
@@ -3568,6 +3694,7 @@ async fn run_connection(
                                 &cwd_string,
                                 supports_fork,
                                 &prompt_ledger,
+                                maintenance_interaction_gate.as_ref(),
                                 delegation_injection.as_ref(),
                                 &stderr_tail,
                             )
@@ -3590,6 +3717,7 @@ async fn run_connection(
                                 &cwd,
                                 &cwd_string,
                                 &prompt_ledger,
+                                maintenance_interaction_gate.as_ref(),
                                 delegation_injection.as_ref(),
                                 &stderr_tail,
                             )
@@ -3786,6 +3914,7 @@ async fn run_connection(
                             &cwd_string,
                             supports_fork,
                             &prompt_ledger,
+                            maintenance_interaction_gate.as_ref(),
                             delegation_injection.as_ref(),
                             &stderr_tail,
                         )
@@ -3804,6 +3933,7 @@ async fn run_connection(
                             &cwd,
                             &cwd_string,
                             &prompt_ledger,
+                            maintenance_interaction_gate.as_ref(),
                             delegation_injection.as_ref(),
                             &stderr_tail,
                         )
@@ -3963,6 +4093,7 @@ async fn run_connection(
                             &cwd_string,
                             supports_fork,
                             &prompt_ledger,
+                            maintenance_interaction_gate.as_ref(),
                             delegation_injection.as_ref(),
                             &stderr_tail,
                         )
@@ -3983,6 +4114,7 @@ async fn run_connection(
                             &cwd,
                             &cwd_string,
                             &prompt_ledger,
+                            maintenance_interaction_gate.as_ref(),
                             delegation_injection.as_ref(),
                             &stderr_tail,
                         )
@@ -4044,6 +4176,7 @@ async fn run_connection(
                     &cwd_string,
                     supports_fork,
                     &prompt_ledger,
+                    maintenance_interaction_gate.as_ref(),
                     delegation_injection.as_ref(),
                     &stderr_tail,
                 )
@@ -4062,6 +4195,7 @@ async fn run_connection(
                     &cwd,
                     &cwd_string,
                     &prompt_ledger,
+                    maintenance_interaction_gate.as_ref(),
                     delegation_injection.as_ref(),
                     &stderr_tail,
                 )
@@ -4133,9 +4267,14 @@ async fn handle_grok_ask_user_question(
     connection_id: &str,
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
+    maintenance_interaction_gate: &MaintenanceInteractionGate,
     req: GrokAskUserQuestionRequest,
     responder: Responder<serde_json::Value>,
 ) {
+    if maintenance_interaction_gate.suppresses_interactions() {
+        let _ = responder.respond(crate::acp::question::grok_ext_skip_response());
+        return;
+    }
     let Some((questions, ask_cfg)) = access else {
         let _ = responder.respond_with_internal_error("ask_user_question bridge unavailable");
         return;
@@ -4235,9 +4374,14 @@ async fn handle_grok_ask_user_question(
 async fn handle_grok_exit_plan_mode(
     access: &Option<Arc<dyn crate::acp::plan_approval::SessionPlanApprovalAccess>>,
     connection_id: &str,
+    maintenance_interaction_gate: &MaintenanceInteractionGate,
     req: GrokExitPlanModeRequest,
     responder: Responder<serde_json::Value>,
 ) {
+    if maintenance_interaction_gate.suppresses_interactions() {
+        let _ = responder.respond(crate::acp::plan_approval::grok_exit_plan_disconnect_response());
+        return;
+    }
     // Log the wire SHAPE (top-level field names), not the raw request — the plan
     // body can be large and carry file paths / source. The keys are what
     // wire-format verification needs (confirm `sessionId`/`toolCallId`/`planContent`
@@ -4249,8 +4393,7 @@ async fn handle_grok_exit_plan_mode(
             .map(|o| o.keys().map(String::as_str).collect::<Vec<_>>())
     );
     let Some(access) = access else {
-        let _ =
-            responder.respond(crate::acp::plan_approval::grok_exit_plan_disconnect_response());
+        let _ = responder.respond(crate::acp::plan_approval::grok_exit_plan_disconnect_response());
         return;
     };
     let (plan_markdown, tool_call_id) =
@@ -4272,8 +4415,7 @@ async fn handle_grok_exit_plan_mode(
         .await
     else {
         // Connection gone, or an approval is already pending on this connection.
-        let _ =
-            responder.respond(crate::acp::plan_approval::grok_exit_plan_disconnect_response());
+        let _ = responder.respond(crate::acp::plan_approval::grok_exit_plan_disconnect_response());
         return;
     };
     // The user answers out-of-band (the HTTP `answer_plan_approval` endpoint
@@ -4331,6 +4473,7 @@ async fn handle_elicitation_request(
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
     connection_id: &str,
+    maintenance_interaction_gate: &MaintenanceInteractionGate,
     req: CodexElicitationRequest,
     responder: Responder<serde_json::Value>,
 ) {
@@ -4339,6 +4482,10 @@ async fn handle_elicitation_request(
     fn decline() -> serde_json::Value {
         serde_json::to_value(crate::acp::question::elicitation_decline_response())
             .unwrap_or_default()
+    }
+    if maintenance_interaction_gate.suppresses_interactions() {
+        let _ = responder.respond(decline());
+        return;
     }
     let raw = req.0;
     // Everything codex-acp can send once `elicitation.form` is advertised
@@ -4446,11 +4593,11 @@ async fn handle_elicitation_request(
                 let reaper_conn = connection_id.to_string();
                 let reaper_qid = registered.question_id.clone();
                 tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        ms.saturating_add(2_000),
-                    ))
-                    .await;
-                    reaper_access.cancel_question(&reaper_conn, &reaper_qid).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(ms.saturating_add(2_000)))
+                        .await;
+                    reaper_access
+                        .cancel_question(&reaper_conn, &reaper_qid)
+                        .await;
                 });
             }
             // The user answers out-of-band (the `answer_question` endpoint
@@ -4512,15 +4659,26 @@ async fn handle_elicitation_request(
     }
 }
 
+struct PermissionRequestScope<'a> {
+    agent_type: AgentType,
+    maintenance_interaction_gate: &'a MaintenanceInteractionGate,
+}
+
 async fn handle_permission_request(
     state: &Arc<RwLock<SessionState>>,
     emitter: &EventEmitter,
     perms: &PendingPermissions,
     cwd: &str,
-    agent_type: AgentType,
+    scope: PermissionRequestScope<'_>,
     req: RequestPermissionRequest,
     responder: Responder<RequestPermissionResponse>,
 ) {
+    if scope.maintenance_interaction_gate.suppresses_interactions() {
+        let _ = responder.respond(RequestPermissionResponse::new(
+            RequestPermissionOutcome::Cancelled,
+        ));
+        return;
+    }
     let request_id = uuid::Uuid::new_v4().to_string();
 
     // Codex Plan-mode review gate: seed the tool call codex never announced, so
@@ -4530,7 +4688,7 @@ async fn handle_permission_request(
     // is already in the transcript (codex emits the plan as an
     // `agent_message_chunk` before this) and the permission card renders it from
     // the request's own `rawInput.plan` — a third copy would be noise.
-    if is_codex_plan_review(agent_type, req.meta.as_ref()) {
+    if is_codex_plan_review(scope.agent_type, req.meta.as_ref()) {
         emit_with_state(
             state,
             emitter,
@@ -4670,9 +4828,9 @@ async fn set_session_config_option(
     emitter: &EventEmitter,
     agent_type: AgentType,
     config_id: String,
-    value_id: String,
+    value: SessionConfigCommandValue,
 ) -> Result<(), sacp::Error> {
-    let updated = set_session_config_option_inner(cx, session_id, config_id, value_id).await?;
+    let updated = set_session_config_option_inner(cx, session_id, config_id, value).await?;
     emit_session_config_options_values(state, emitter, agent_type, updated).await;
     Ok(())
 }
@@ -4686,9 +4844,16 @@ async fn set_session_config_option_inner(
     cx: &ConnectionTo<Agent>,
     session_id: &SessionId,
     config_id: String,
-    value_id: String,
+    value: SessionConfigCommandValue,
 ) -> Result<Vec<SessionConfigOption>, sacp::Error> {
-    let req = SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value_id);
+    let req = match value {
+        SessionConfigCommandValue::ValueId(value) => {
+            SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value.as_str())
+        }
+        SessionConfigCommandValue::Boolean(value) => {
+            SetSessionConfigOptionRequest::new(session_id.clone(), config_id, value)
+        }
+    };
     let untyped_req = UntypedMessage::new("session/set_config_option", req).map_err(|e| {
         sacp::util::internal_error(format!("Failed to build config option request: {e}"))
     })?;
@@ -4730,6 +4895,60 @@ async fn send_goal_control(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PreferredConfigResolution {
+    Skip,
+    Apply(SessionConfigCommandValue),
+    Invalid,
+}
+
+fn select_advertises_value(select: &sacp::schema::SessionConfigSelect, value: &str) -> bool {
+    match &select.options {
+        SessionConfigSelectOptions::Ungrouped(options) => options
+            .iter()
+            .any(|option| option.value.to_string() == value),
+        SessionConfigSelectOptions::Grouped(groups) => groups.iter().any(|group| {
+            group
+                .options
+                .iter()
+                .any(|option| option.value.to_string() == value)
+        }),
+        _ => false,
+    }
+}
+
+fn resolve_preferred_config_command(
+    option: Option<&SessionConfigOption>,
+    value: &str,
+) -> PreferredConfigResolution {
+    match option.map(|option| &option.kind) {
+        Some(SessionConfigKind::Select(select)) => {
+            if !select_advertises_value(select, value) {
+                PreferredConfigResolution::Invalid
+            } else if select.current_value.to_string() == value {
+                PreferredConfigResolution::Skip
+            } else {
+                PreferredConfigResolution::Apply(SessionConfigCommandValue::ValueId(
+                    value.to_string(),
+                ))
+            }
+        }
+        Some(SessionConfigKind::Boolean(boolean)) => {
+            let preferred = match value.trim().to_ascii_lowercase().as_str() {
+                "true" => true,
+                "false" => false,
+                _ => return PreferredConfigResolution::Invalid,
+            };
+            if boolean.current_value == preferred {
+                PreferredConfigResolution::Skip
+            } else {
+                PreferredConfigResolution::Apply(SessionConfigCommandValue::Boolean(preferred))
+            }
+        }
+        _ => PreferredConfigResolution::Invalid,
+    }
+}
+
 /// Apply user-saved mode and config-option preferences to a freshly-attached
 /// session BEFORE the initial `session_modes` / `session_config_options`
 /// events are emitted to the frontend.
@@ -4767,7 +4986,9 @@ async fn apply_preferred_session_options(
             .unwrap_or(false);
         if needs_apply {
             if let Err(e) = set_session_mode(session, state, emitter, pref_mode.to_string()).await {
-                tracing::error!("[ACP] failed to apply preferred mode '{pref_mode}' on connect: {e}");
+                tracing::error!(
+                    "[ACP] failed to apply preferred mode '{pref_mode}' on connect: {e}"
+                );
             }
         }
     }
@@ -4778,30 +4999,24 @@ async fn apply_preferred_session_options(
 
     let session_id = session.session_id().clone();
     let mut options = initial_config_options;
-    for (config_id, value_id) in preferred_config_values {
-        // Skip the round-trip when the agent's current value already matches.
-        // Note: codex-acp 1.0.0 advertises "mode" as a config option (so the
-        // match check below normally fires), but we still do NOT skip when a
-        // requested config_id is absent from the advertised options — older or
-        // edge-case builds accept `set_config_option` for an unadvertised "mode"
-        // (see `ensure_codex_mode_option`), so let the agent decide.
-        let already_matches = options.iter().any(|o| {
-            o.id.to_string() == *config_id
-                && matches!(
-                    &o.kind,
-                    SessionConfigKind::Select(s) if s.current_value.to_string() == *value_id
-                )
-        });
-        if already_matches {
-            continue;
-        }
-        match set_session_config_option_inner(cx, &session_id, config_id.clone(), value_id.clone())
-            .await
-        {
+    for (config_id, value) in preferred_config_values {
+        let option = options
+            .iter()
+            .find(|option| option.id.to_string() == *config_id);
+        let command = match resolve_preferred_config_command(option, value) {
+            PreferredConfigResolution::Skip => continue,
+            PreferredConfigResolution::Apply(command) => command,
+            PreferredConfigResolution::Invalid => {
+                tracing::warn!(
+                    "[ACP] skipping invalid or unadvertised preferred config '{config_id}'"
+                );
+                continue;
+            }
+        };
+        match set_session_config_option_inner(cx, &session_id, config_id.clone(), command).await {
             Ok(updated) => options = updated,
             Err(e) => tracing::error!(
-                "[ACP] failed to apply preferred config '{config_id}'='{value_id}' \
-                 on connect: {e}"
+                "[ACP] failed to apply preferred config '{config_id}' on connect: {e}"
             ),
         }
     }
@@ -5302,7 +5517,8 @@ async fn poll_tracked_terminal_tool_calls(
                 Err(err) => {
                     tracing::error!(
                         "[ACP] Failed to poll terminal output for tool call {}: {:?}",
-                        tool_call_id, err
+                        tool_call_id,
+                        err
                     );
                     continue;
                 }
@@ -5467,6 +5683,7 @@ async fn handle_fork_or_exit(
     // ledger (the forked session's loop keeps fingerprinting into the SAME
     // ledger the still-running watcher consumes from).
     prompt_ledger: &background_watch::PromptLedger,
+    maintenance_interaction_gate: &MaintenanceInteractionGate,
     // Threaded through from run_connection so the forked session's
     // run_conversation_loop call has the same delegation cascade
     // capability as the original.
@@ -5489,7 +5706,8 @@ async fn handle_fork_or_exit(
 
     tracing::info!(
         "[ACP] Fork transition: attaching to forked session {} (original: {})",
-        new_sid, fork_info.original_session_id
+        new_sid,
+        fork_info.original_session_id
     );
 
     // Reply protocol-level result to manager.fork_session, which will combine
@@ -5558,6 +5776,7 @@ async fn handle_fork_or_exit(
         cwd_string,
         true, // fork already succeeded on this process
         prompt_ledger,
+        maintenance_interaction_gate,
         delegation_injection,
         stderr_tail,
     )
@@ -5578,6 +5797,7 @@ async fn handle_fork_or_exit(
         _cwd,
         cwd_string,
         prompt_ledger,
+        maintenance_interaction_gate,
         delegation_injection,
         stderr_tail,
     ))
@@ -5629,8 +5849,7 @@ fn classify_session_load_failure(
     //                          "The Claude Agent process exited unexpectedly…"
     //  - "session has ended" → SESSION_ENDED_MESSAGE
     //  - "Session not found" → a plain Error rethrown as an Internal error
-    const UNRECOVERABLE: &[&str] =
-        &["process exited", "session has ended", "Session not found"];
+    const UNRECOVERABLE: &[&str] = &["process exited", "session has ended", "Session not found"];
     if UNRECOVERABLE.iter().any(|s| message.contains(s)) {
         return Some("session_unavailable");
     }
@@ -5653,6 +5872,87 @@ fn classify_session_load_failure(
 /// emit-then-fall-back-to-`session/new` behaviour.
 fn recovers_load_failure_locally(agent_type: AgentType, classified: Option<&'static str>) -> bool {
     classified.is_some() && transcript_dir_for(agent_type).is_some()
+}
+
+fn maintenance_completion_for_stop(
+    origin: &MaintenancePromptOrigin,
+    stop_reason: &str,
+) -> MaintenanceTurnCompletion {
+    let (outcome, error) = match stop_reason {
+        "end_turn" => (MaintenanceCommandOutcome::Completed, None),
+        "cancelled" => (
+            MaintenanceCommandOutcome::Cancelled,
+            Some("Maintenance command was cancelled".to_string()),
+        ),
+        reason => (
+            MaintenanceCommandOutcome::Failed,
+            Some(format!(
+                "Maintenance command ended with stop reason: {reason}"
+            )),
+        ),
+    };
+    MaintenanceTurnCompletion {
+        operation_id: origin.operation_id.clone(),
+        session_id: origin.session_id.clone(),
+        stop_reason: Some(stop_reason.to_string()),
+        outcome,
+        error,
+    }
+}
+
+fn maintenance_transport_failure(origin: &MaintenancePromptOrigin) -> MaintenanceTurnCompletion {
+    MaintenanceTurnCompletion {
+        operation_id: origin.operation_id.clone(),
+        session_id: origin.session_id.clone(),
+        stop_reason: None,
+        outcome: MaintenanceCommandOutcome::Failed,
+        error: Some("Maintenance command transport failed".to_string()),
+    }
+}
+
+enum PromptResponseCompletionRoute {
+    Maintenance(MaintenanceTurnCompletion),
+    User,
+}
+
+/// A maintenance prompt response has no user-visible completion path. Its
+/// outcome is returned only to the operation that started it, before the turn
+/// loop can write history or emit an event.
+fn route_prompt_response_completion(
+    maintenance_origin: Option<&MaintenancePromptOrigin>,
+    raw_stop_reason: &'static str,
+) -> PromptResponseCompletionRoute {
+    if let Some(origin) = maintenance_origin {
+        return PromptResponseCompletionRoute::Maintenance(maintenance_completion_for_stop(
+            origin,
+            raw_stop_reason,
+        ));
+    }
+
+    PromptResponseCompletionRoute::User
+}
+
+/// ACP notifications have no prompt correlation. After a maintenance response
+/// ends, hold delayed notifications until the next normal user prompt boundary.
+#[derive(Default)]
+struct IdleUpdateGate {
+    suppress_after_maintenance: bool,
+}
+
+impl IdleUpdateGate {
+    fn begin_prompt(&mut self, is_maintenance: bool) {
+        if !is_maintenance {
+            self.suppress_after_maintenance = false;
+        }
+    }
+
+    fn suppress_after_maintenance(&mut self) {
+        self.suppress_after_maintenance = true;
+    }
+
+    fn forwards_updates(&self) -> bool {
+        !self.suppress_after_maintenance
+    }
 }
 
 /// True when a `SessionUpdate` represents actual agent-produced output for
@@ -5839,9 +6139,9 @@ impl EmptyTurnCause {
                 "{agent_type} produced output that codeg could not parse — \
                  the agent version may not match the protocol."
             ),
-            EmptyTurnCause::MetadataOnly => format!(
-                "{agent_type} sent only status updates this turn and no reply."
-            ),
+            EmptyTurnCause::MetadataOnly => {
+                format!("{agent_type} sent only status updates this turn and no reply.")
+            }
         }
     }
 }
@@ -6031,6 +6331,7 @@ async fn run_conversation_loop<'a>(
     // restarts of this loop): outgoing prompts are fingerprinted here so the
     // transcript watcher can classify their turns as wire-rendered foreground.
     prompt_ledger: &background_watch::PromptLedger,
+    maintenance_interaction_gate: &MaintenanceInteractionGate,
     // Source of the broker reference used to cascade-cancel pending
     // delegations on parent prompt cancel / non-success TurnComplete.
     // `None` for test paths that don't wire delegation.
@@ -6055,6 +6356,7 @@ async fn run_conversation_loop<'a>(
     // prompt turn, journaled or not, so consecutive ordinals prove adjacent
     // turns to the reader.
     let mut cursor_turn_ord: u64 = 0;
+    let mut idle_update_gate = IdleUpdateGate::default();
     loop {
         // Wait for either a user command or a session update (e.g. available_commands_update)
         let cmd = loop {
@@ -6064,6 +6366,9 @@ async fn run_conversation_loop<'a>(
                 update = session.read_update() => {
                     match update {
                         Ok(SessionMessage::SessionMessage(dispatch)) => {
+                            if !idle_update_gate.forwards_updates() {
+                                continue;
+                            }
                             let h = emitter.clone();
                             let st = Arc::clone(state);
                             let cwd_opt = Some(cwd);
@@ -6094,12 +6399,26 @@ async fn run_conversation_loop<'a>(
             Some(ConnectionCommand::Prompt {
                 blocks,
                 user_message,
+                origin,
             }) => {
+                let mut maintenance_origin = match origin {
+                    PromptOrigin::User => None,
+                    PromptOrigin::Maintenance(origin) => Some(origin),
+                };
+                let is_maintenance = maintenance_origin.is_some();
+                if !is_maintenance && !idle_update_gate.forwards_updates() {
+                    while let Some(Ok(_)) = session.read_update().now_or_never() {}
+                }
+                idle_update_gate.begin_prompt(is_maintenance);
                 // Fingerprint the outgoing prompt for the background watcher's
                 // foreground/out-of-turn classifier BEFORE the blocks are
                 // consumed: the transcript record this prompt becomes must
                 // classify as wire-rendered foreground, not overlay.
-                prompt_ledger.record_prompt_blocks(&blocks);
+                if is_maintenance {
+                    prompt_ledger.record_maintenance_prompt_blocks(&blocks);
+                } else {
+                    prompt_ledger.record_prompt_blocks(&blocks);
+                }
                 // Cursor's ACP store carries no per-turn timestamps at all
                 // (see `crate::turn_timings`), so codeg journals its own
                 // observation of the turn span: hash + ordinal here (before
@@ -6109,17 +6428,18 @@ async fn run_conversation_loop<'a>(
                 // parser correlates its user turns against; the ordinal is
                 // its contiguity anchor (every turn consumes one, journaled
                 // or not).
-                let turn_timing_prep = matches!(agent_type, AgentType::Cursor).then(|| {
-                    cursor_turn_ord += 1;
-                    let text: String = blocks
-                        .iter()
-                        .filter_map(|b| match b {
-                            PromptInputBlock::Text { text } => Some(text.as_str()),
-                            _ => None,
-                        })
-                        .collect();
-                    (crate::turn_timings::prompt_hash(&text), cursor_turn_ord)
-                });
+                let turn_timing_prep = (!is_maintenance && matches!(agent_type, AgentType::Cursor))
+                    .then(|| {
+                        cursor_turn_ord += 1;
+                        let text: String = blocks
+                            .iter()
+                            .filter_map(|b| match b {
+                                PromptInputBlock::Text { text } => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        (crate::turn_timings::prompt_hash(&text), cursor_turn_ord)
+                    });
                 let prompt_blocks = map_prompt_blocks(blocks);
                 if prompt_blocks.is_empty() {
                     // Defensive: the manager rejects empty prompts before the
@@ -6128,31 +6448,43 @@ async fn run_conversation_loop<'a>(
                     // empty prompt should never reach here. If one ever did, it
                     // would carry no turn-in-flight gate, so just surface the
                     // error and keep the idle loop alive.
-                    emit_with_state(
-                        state,
-                        emitter,
-                        AcpEvent::Error {
-                            message: "Prompt must contain at least one content block".into(),
-                            agent_type: agent_type.to_string(),
-                            code: None,
-                            details: None,
-                            // Recoverable: idle loop continues, awaiting the
-                            // next user command. Connection stays alive.
-                            terminal: false,
-                        },
-                    )
-                    .await;
+                    state.write().await.clear_turn_gate();
+                    if let Some(origin) = maintenance_origin.take() {
+                        idle_update_gate.suppress_after_maintenance();
+                        let completion = maintenance_transport_failure(&origin);
+                        let _ = origin.completion_tx.send(completion);
+                    } else {
+                        emit_with_state(
+                            state,
+                            emitter,
+                            AcpEvent::Error {
+                                message: "Prompt must contain at least one content block".into(),
+                                agent_type: agent_type.to_string(),
+                                code: None,
+                                details: None,
+                                // Recoverable: idle loop continues, awaiting the
+                                // next user command. Connection stays alive.
+                                terminal: false,
+                            },
+                        )
+                        .await;
+                    }
                     continue;
                 }
 
-                emit_with_state(
-                    state,
-                    emitter,
-                    AcpEvent::StatusChanged {
-                        status: ConnectionStatus::Prompting,
-                    },
-                )
-                .await;
+                if is_maintenance {
+                    maintenance_interaction_gate.begin_maintenance();
+                } else {
+                    maintenance_interaction_gate.begin_user_prompt();
+                    emit_with_state(
+                        state,
+                        emitter,
+                        AcpEvent::StatusChanged {
+                            status: ConnectionStatus::Prompting,
+                        },
+                    )
+                    .await;
+                }
 
                 // Broadcast the user's prompt to cross-client viewers BEFORE
                 // issuing the agent request. Emitting here (rather than at the
@@ -6163,7 +6495,7 @@ async fn run_conversation_loop<'a>(
                 // dropped) broadcasts nothing. `apply_event` records it as
                 // `pending_user_message` so a client attaching mid-turn still
                 // renders the user turn from the snapshot.
-                if let Some((message_id, blocks)) = user_message {
+                if let Some((message_id, blocks)) = user_message.filter(|_| !is_maintenance) {
                     emit_with_state(state, emitter, AcpEvent::UserMessage { message_id, blocks })
                         .await;
                 }
@@ -6191,7 +6523,9 @@ async fn run_conversation_loop<'a>(
                 // order matches the wire order even if the agent replies
                 // instantly — and awaited, so the replay gate can never see
                 // this conversation as transcript-less (see `record_prompt`).
-                record_prompt(agent_type, &sid.0, &prompt_blocks).await;
+                if !is_maintenance {
+                    record_prompt(agent_type, &sid.0, &prompt_blocks).await;
+                }
                 let turn_started_at_ms = crate::acp_transcript::now_epoch_ms();
                 let prompt_request = PromptRequest::new(sid.clone(), prompt_blocks);
                 // Snapshot the stderr write position BEFORE the request is
@@ -6271,6 +6605,9 @@ async fn run_conversation_loop<'a>(
                                     if let Err(e) = MatchDispatch::new(dispatch)
                                         .if_notification(
                                             async |notif: SessionNotification| {
+                                                if is_maintenance {
+                                                    return Ok(());
+                                                }
                                                 // Body lives in a named `-> ()`
                                                 // function so this closure is
                                                 // infallible by construction —
@@ -6294,7 +6631,9 @@ async fn run_conversation_loop<'a>(
                                         )
                                         .await
                                         .otherwise(async |dispatch| {
-                                            maybe_emit_ext_notification(&st, &h, agent_type, dispatch).await;
+                                            if !is_maintenance {
+                                                maybe_emit_ext_notification(&st, &h, agent_type, dispatch).await;
+                                            }
                                             Ok(())
                                         })
                                         .await
@@ -6309,7 +6648,7 @@ async fn run_conversation_loop<'a>(
                                     }
                                 }
                                 SessionMessage::StopReason(reason) => {
-                                    if !tracked_terminal_tool_calls.is_empty() {
+                                    if !is_maintenance && !tracked_terminal_tool_calls.is_empty() {
                                         poll_tracked_terminal_tool_calls(
                                             terminal_runtime.as_ref(),
                                             &sid,
@@ -6320,6 +6659,16 @@ async fn run_conversation_loop<'a>(
                                         .await;
                                     }
                                     let raw_reason_str = stop_reason_to_str(reason);
+                                    if let Some(origin) = maintenance_origin.take() {
+                                        idle_update_gate.suppress_after_maintenance();
+                                        state.write().await.clear_turn_gate();
+                                        let completion = maintenance_completion_for_stop(
+                                            &origin,
+                                            raw_reason_str,
+                                        );
+                                        let _ = origin.completion_tx.send(completion);
+                                        break;
+                                    }
                                     // Pure: resolves the reason and (for an
                                     // empty turn) its diagnosis. Side effects
                                     // below stay exactly where they were — note
@@ -6387,7 +6736,34 @@ async fn run_conversation_loop<'a>(
                             }
                         }
                         prompt_result = &mut prompt_response => {
-                            let reason = prompt_result?.stop_reason;
+                            let reason = match prompt_result {
+                                Ok(result) => result.stop_reason,
+                                Err(error) => {
+                                    if let Some(origin) = maintenance_origin.take() {
+                                        idle_update_gate.suppress_after_maintenance();
+                                        state.write().await.clear_turn_gate();
+                                        let completion = maintenance_transport_failure(&origin);
+                                        let _ = origin.completion_tx.send(completion);
+                                        break;
+                                    }
+                                    return Err(error);
+                                }
+                            };
+                            let raw_reason_str = stop_reason_to_str(reason);
+                            match route_prompt_response_completion(
+                                maintenance_origin.as_ref(),
+                                raw_reason_str,
+                            ) {
+                                PromptResponseCompletionRoute::Maintenance(completion) => {
+                                    idle_update_gate.suppress_after_maintenance();
+                                    state.write().await.clear_turn_gate();
+                                    if let Some(origin) = maintenance_origin.take() {
+                                        let _ = origin.completion_tx.send(completion);
+                                    }
+                                    break;
+                                }
+                                PromptResponseCompletionRoute::User => {}
+                            }
                             if !tracked_terminal_tool_calls.is_empty() {
                                 poll_tracked_terminal_tool_calls(
                                     terminal_runtime.as_ref(),
@@ -6508,19 +6884,24 @@ async fn run_conversation_loop<'a>(
                                         }
                                     }
                                 }
-                                Some(ConnectionCommand::SetConfigOption {
-                                    config_id,
-                                    value_id,
-                                }) => {
+                                Some(ConnectionCommand::SetConfigOption { config_id, value }) => {
                                     let set_result = if agent_type == AgentType::Grok {
-                                        set_grok_config_option(
-                                            &cx, &sid, state, emitter, config_id, value_id,
-                                        )
-                                        .await
+                                        match value {
+                                            SessionConfigCommandValue::ValueId(value_id) => {
+                                                set_grok_config_option(
+                                                    &cx, &sid, state, emitter, config_id, value_id,
+                                                )
+                                                .await
+                                            }
+                                            SessionConfigCommandValue::Boolean(_) => {
+                                                Err(sacp::Error::invalid_params().data(
+                                                    "Grok config options require a select value",
+                                                ))
+                                            }
+                                        }
                                     } else {
                                         set_session_config_option(
-                                            &cx, &sid, state, emitter, agent_type, config_id,
-                                            value_id,
+                                            &cx, &sid, state, emitter, agent_type, config_id, value,
                                         )
                                         .await
                                     };
@@ -6572,6 +6953,23 @@ async fn run_conversation_loop<'a>(
                                     let _ = reply.send(send_steer_request(&cx, &sid, &text).await);
                                 }
                                 Some(ConnectionCommand::Cancel) => {
+                                    if let Some(origin) = maintenance_origin.take() {
+                                        idle_update_gate.suppress_after_maintenance();
+                                        let _ = cx.send_notification_to(
+                                            Agent,
+                                            CancelNotification::new(sid.clone()),
+                                        );
+                                        state.write().await.clear_turn_gate();
+                                        let completion = maintenance_completion_for_stop(
+                                            &origin,
+                                            "cancelled",
+                                        );
+                                        let _ = origin.completion_tx.send(completion);
+                                        tokio::spawn(async move {
+                                            let _ = prompt_response.await;
+                                        });
+                                        break;
+                                    }
                                     // Send CancelNotification to agent to stop the current turn
                                     let _ = cx.send_notification_to(
                                         Agent,
@@ -6667,6 +7065,12 @@ async fn run_conversation_loop<'a>(
                                     tracing::info!(
                                         "[ACP] disconnect requested during prompting; connection_id={conn_id}"
                                     );
+                                    if let Some(origin) = maintenance_origin.take() {
+                                        idle_update_gate.suppress_after_maintenance();
+                                        state.write().await.clear_turn_gate();
+                                        let completion = maintenance_transport_failure(&origin);
+                                        let _ = origin.completion_tx.send(completion);
+                                    }
                                     let _ = cx.send_notification_to(
                                         Agent,
                                         CancelNotification::new(sid.clone()),
@@ -6695,14 +7099,16 @@ async fn run_conversation_loop<'a>(
                     break;
                 }
 
-                emit_with_state(
-                    state,
-                    emitter,
-                    AcpEvent::StatusChanged {
-                        status: ConnectionStatus::Connected,
-                    },
-                )
-                .await;
+                if !is_maintenance {
+                    emit_with_state(
+                        state,
+                        emitter,
+                        AcpEvent::StatusChanged {
+                            status: ConnectionStatus::Connected,
+                        },
+                    )
+                    .await;
+                }
             }
             Some(ConnectionCommand::RespondPermission {
                 request_id,
@@ -6733,17 +7139,21 @@ async fn run_conversation_loop<'a>(
                     .await;
                 }
             }
-            Some(ConnectionCommand::SetConfigOption {
-                config_id,
-                value_id,
-            }) => {
+            Some(ConnectionCommand::SetConfigOption { config_id, value }) => {
                 let cx = session.connection();
                 let sid = session.session_id().clone();
                 let set_result = if agent_type == AgentType::Grok {
-                    set_grok_config_option(&cx, &sid, state, emitter, config_id, value_id).await
+                    match value {
+                        SessionConfigCommandValue::ValueId(value_id) => {
+                            set_grok_config_option(&cx, &sid, state, emitter, config_id, value_id)
+                                .await
+                        }
+                        SessionConfigCommandValue::Boolean(_) => Err(sacp::Error::invalid_params()
+                            .data("Grok config options require a select value")),
+                    }
                 } else {
                     set_session_config_option(
-                        &cx, &sid, state, emitter, agent_type, config_id, value_id,
+                        &cx, &sid, state, emitter, agent_type, config_id, value,
                     )
                     .await
                 };
@@ -6831,7 +7241,8 @@ async fn run_conversation_loop<'a>(
                 let sid = session.session_id().clone();
                 tracing::info!(
                     "[ACP] Sending session/fork for session_id={} cwd={}",
-                    sid.0, cwd
+                    sid.0,
+                    cwd
                 );
                 let result = crate::acp::fork::fork_session(&cx, &sid, cwd).await;
                 match result {
@@ -7001,10 +7412,7 @@ fn build_new_file_diff(path: &str, new_text: &str) -> String {
     // it keeps the trailing empty segment from a final newline, so the `+N`
     // count and the trailing `+` addition line match exactly.
     let lines: Vec<&str> = new_text.split('\n').collect();
-    let mut out = format!(
-        "--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{} @@",
-        lines.len()
-    );
+    let mut out = format!("--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{} @@", lines.len());
     for line in lines {
         out.push('\n');
         out.push('+');
@@ -7018,7 +7426,9 @@ fn build_new_file_diff(path: &str, new_text: &str) -> String {
 /// on `AcpEvent::ToolCall(Update)` stays absent for non-image tool calls
 /// (preserves replace-on-update semantics: an absent field means "keep
 /// prior", a `Some(vec)` replaces).
-pub(crate) fn extract_tool_call_images(content: &[ToolCallContent]) -> Option<Vec<ToolCallImageInfo>> {
+pub(crate) fn extract_tool_call_images(
+    content: &[ToolCallContent],
+) -> Option<Vec<ToolCallImageInfo>> {
     let mut imgs: Vec<ToolCallImageInfo> = Vec::new();
     for item in content {
         if let ToolCallContent::Content(c) = item {
@@ -7261,7 +7671,10 @@ fn cursor_companion_title_from_content(content: Option<&str>) -> Option<&'static
     let is_report_item = |t: &serde_json::Value| {
         t.get("task_id").and_then(|x| x.as_str()).is_some()
             && t.get("status").and_then(|x| x.as_str()).is_some_and(|s| {
-                matches!(s, "running" | "completed" | "failed" | "canceled" | "unknown")
+                matches!(
+                    s,
+                    "running" | "completed" | "failed" | "canceled" | "unknown"
+                )
             })
     };
     if !tasks.is_empty() && tasks.iter().all(is_report_item) {
@@ -7313,7 +7726,10 @@ fn is_subagent_invocation(agent_type: AgentType, raw_input: &Option<String>) -> 
 /// historical unwrap in `parsers/codebuddy.rs`. `raw_input` is left untouched
 /// (the cards peel `params` themselves, and that keeps `inferFromInput` from
 /// misclassifying `cancel_delegation`'s `{task_id}` as a generic task).
-fn codebuddy_deferred_tool_name(agent_type: AgentType, raw_input: &Option<String>) -> Option<String> {
+fn codebuddy_deferred_tool_name(
+    agent_type: AgentType,
+    raw_input: &Option<String>,
+) -> Option<String> {
     if agent_type != AgentType::CodeBuddy {
         return None;
     }
@@ -7381,7 +7797,11 @@ fn codebuddy_meta_marks_subagent(
     if meta.get("codebuddy.ai/toolName").and_then(|v| v.as_str()) == Some("Agent") {
         return true;
     }
-    if meta.get("codebuddy.ai/isSubagent").and_then(|v| v.as_bool()) == Some(true) {
+    if meta
+        .get("codebuddy.ai/isSubagent")
+        .and_then(|v| v.as_bool())
+        == Some(true)
+    {
         return true;
     }
     meta.get("codebuddy.ai/subagentType")
@@ -7583,7 +8003,11 @@ fn codebuddy_chunk_marks_subagent(
     let Some(meta) = meta else {
         return false;
     };
-    if meta.get("codebuddy.ai/isSubagent").and_then(|v| v.as_bool()) == Some(true) {
+    if meta
+        .get("codebuddy.ai/isSubagent")
+        .and_then(|v| v.as_bool())
+        == Some(true)
+    {
         return true;
     }
     meta.get("codebuddy.ai/parentToolCallId")
@@ -7870,8 +8294,7 @@ fn map_claude_sdk_ext_notification(notification: &UntypedMessage) -> Option<AcpE
 /// Both share the standard `session/update` envelope (`params.update.
 /// sessionUpdate` + fields, verified live against grok 0.2.111) but carry
 /// variants the typed ACP pipeline can't deserialize, so codeg drops them.
-const GROK_EXT_UPDATE_METHODS: [&str; 2] =
-    ["_x.ai/session_notification", "_x.ai/session/update"];
+const GROK_EXT_UPDATE_METHODS: [&str; 2] = ["_x.ai/session_notification", "_x.ai/session/update"];
 
 /// A stable id for a synthetic event derived from a grok ext notification —
 /// grok stamps `params._meta.eventId`; fall back to a fresh uuid.
@@ -8142,9 +8565,8 @@ async fn emit_conversation_update(
             } else {
                 None
             };
-            let content =
-                serialize_tool_call_content(&tc.content, synthesized_edit.is_none())
-                    .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c));
+            let content = serialize_tool_call_content(&tc.content, synthesized_edit.is_none())
+                .map(|c| unwrap_codebuddy_deferred_output(agent_type, &c).unwrap_or(c));
             let images = extract_tool_call_images(&tc.content);
             let raw_input = synthesized_edit
                 .or(own_raw_input)
@@ -8174,7 +8596,8 @@ async fn emit_conversation_update(
             // `meta_marks_background` keeps a concurrent sub-agent out of the
             // suppression window (see fn docs).
             let meta_marks_subagent = codebuddy_meta_marks_subagent(agent_type, tc.meta.as_ref());
-            let meta_marks_background = codebuddy_meta_marks_background(agent_type, tc.meta.as_ref());
+            let meta_marks_background =
+                codebuddy_meta_marks_background(agent_type, tc.meta.as_ref());
             let meta = tc.meta.map(serde_json::Value::Object);
             let status = format!("{:?}", tc.status).to_lowercase();
             raw_output_cache.remove_if_final(&tool_call_id, Some(status.as_str()));
@@ -8277,9 +8700,7 @@ async fn emit_conversation_update(
                 Some((_, inner)) => {
                     json_value_to_text(&Some(inner.clone())).filter(|t| !t.trim().is_empty())
                 }
-                None => {
-                    json_value_to_text(&tcu.fields.raw_input).filter(|t| !t.trim().is_empty())
-                }
+                None => json_value_to_text(&tcu.fields.raw_input).filter(|t| !t.trim().is_empty()),
             };
             let synthesized_edit = if own_raw_input.is_none() {
                 tcu.fields
@@ -8332,7 +8753,8 @@ async fn emit_conversation_update(
                 .filter(|l| !l.is_empty())
                 .and_then(|l| serde_json::to_value(l).ok());
             let meta_marks_subagent = codebuddy_meta_marks_subagent(agent_type, tcu.meta.as_ref());
-            let meta_marks_background = codebuddy_meta_marks_background(agent_type, tcu.meta.as_ref());
+            let meta_marks_background =
+                codebuddy_meta_marks_background(agent_type, tcu.meta.as_ref());
             let meta = tcu.meta.clone().map(serde_json::Value::Object);
             let status = tcu.fields.status.map(|s| format!("{:?}", s).to_lowercase());
             raw_output_cache.remove_if_final(&tool_call_id, status.as_deref());
@@ -8556,7 +8978,9 @@ mod tests {
         assert!(!GrokAskUserQuestionRequest::matches_method(
             "x.ai/ask_user_question"
         ));
-        assert!(!GrokAskUserQuestionRequest::matches_method("session/prompt"));
+        assert!(!GrokAskUserQuestionRequest::matches_method(
+            "session/prompt"
+        ));
 
         // The exact params grok sends (captured from a real 0.2.101 run): the
         // transparent newtype must deserialize them and the raw object must parse
@@ -8606,7 +9030,10 @@ mod tests {
         }));
         assert!(is_codex_subagent_activity(AgentType::Codex, Some(&sub)));
         // Only Codex is gated — the same meta never suppresses another agent.
-        assert!(!is_codex_subagent_activity(AgentType::ClaudeCode, Some(&sub)));
+        assert!(!is_codex_subagent_activity(
+            AgentType::ClaudeCode,
+            Some(&sub)
+        ));
         // Absent meta and sibling codex meta keys (goal / collaboration) are not
         // subagent activity and must render normally.
         assert!(!is_codex_subagent_activity(AgentType::Codex, None));
@@ -8654,7 +9081,10 @@ mod tests {
                 "presentation": "state"
             }
         }));
-        assert!(is_config_option_state_command(AgentType::Codex, Some(&plan)));
+        assert!(is_config_option_state_command(
+            AgentType::Codex,
+            Some(&plan)
+        ));
         // Gated on Codex — the same meta never suppresses another agent's command.
         assert!(!is_config_option_state_command(
             AgentType::ClaudeCode,
@@ -8665,7 +9095,10 @@ mod tests {
         let goal = meta_map(serde_json::json!({
             "commandAction": { "kind": "prefixPrompt", "presentation": "state" }
         }));
-        assert!(!is_config_option_state_command(AgentType::Codex, Some(&goal)));
+        assert!(!is_config_option_state_command(
+            AgentType::Codex,
+            Some(&goal)
+        ));
         // Ordinary commands (no `commandAction`) and absent meta are kept.
         assert!(!is_config_option_state_command(AgentType::Codex, None));
         let plain = meta_map(serde_json::json!({ "somethingElse": true }));
@@ -8710,9 +9143,7 @@ mod tests {
         assert!(!init_advertises_steering(Some(&off)));
 
         // Wrong nesting (e.g. another convention's namespace) must not count.
-        let nested = meta_map(
-            serde_json::json!({"symposium": {"steering": {"supported": true}}}),
-        );
+        let nested = meta_map(serde_json::json!({"symposium": {"steering": {"supported": true}}}));
         assert!(!init_advertises_steering(Some(&nested)));
 
         // Non-bool / absent → false.
@@ -8792,7 +9223,10 @@ mod tests {
         assert_eq!(params["prompt"][0]["text"], "use the staging db");
         // The opt-in is what keeps the idle race host-owned — its absence
         // would regress to detached `startedNewTurn` turns.
-        assert_eq!(params["_meta"]["steering"]["idleBehavior"], "promptRequired");
+        assert_eq!(
+            params["_meta"]["steering"]["idleBehavior"],
+            "promptRequired"
+        );
     }
 
     #[test]
@@ -8992,7 +9426,9 @@ mod tests {
         // No configured creds → both injected empty (⇒ spawn strips inherited).
         let mut merged = vec![("PATH".to_string(), "/usr/bin".to_string())];
         apply_cursor_env_policy(&mut merged, &sub);
-        assert!(merged.iter().any(|(k, v)| k == "CURSOR_API_KEY" && v.is_empty()));
+        assert!(merged
+            .iter()
+            .any(|(k, v)| k == "CURSOR_API_KEY" && v.is_empty()));
         assert!(merged
             .iter()
             .any(|(k, v)| k == "CURSOR_API_BASE_URL" && v.is_empty()));
@@ -9000,7 +9436,9 @@ mod tests {
         // A configured key is preserved; only the absent base URL is cleared.
         let mut with_key = vec![("CURSOR_API_KEY".to_string(), "sk-x".to_string())];
         apply_cursor_env_policy(&mut with_key, &sub);
-        assert!(with_key.iter().any(|(k, v)| k == "CURSOR_API_KEY" && v == "sk-x"));
+        assert!(with_key
+            .iter()
+            .any(|(k, v)| k == "CURSOR_API_KEY" && v == "sk-x"));
         assert!(with_key
             .iter()
             .any(|(k, v)| k == "CURSOR_API_BASE_URL" && v.is_empty()));
@@ -9026,7 +9464,9 @@ mod tests {
         // inherited XAI_API_KEY so `grok login` is used).
         let mut merged = vec![("PATH".to_string(), "/usr/bin".to_string())];
         apply_grok_env_policy(&mut merged, &sub);
-        assert!(merged.iter().any(|(k, v)| k == "XAI_API_KEY" && v.is_empty()));
+        assert!(merged
+            .iter()
+            .any(|(k, v)| k == "XAI_API_KEY" && v.is_empty()));
 
         // A configured key is preserved even in subscription mode (explicit wins).
         let mut with_key = vec![("XAI_API_KEY".to_string(), "xai-abc".to_string())];
@@ -9223,8 +9663,10 @@ mod tests {
             true,
         );
         // Exactly one PATH-ish key, the original casing preserved, value prepended.
-        let path_keys: Vec<&String> =
-            env.keys().filter(|k| k.eq_ignore_ascii_case("PATH")).collect();
+        let path_keys: Vec<&String> = env
+            .keys()
+            .filter(|k| k.eq_ignore_ascii_case("PATH"))
+            .collect();
         assert_eq!(path_keys.len(), 1, "{env:?}");
         assert_eq!(
             env.get("Path").unwrap(),
@@ -9235,9 +9677,17 @@ mod tests {
     #[test]
     fn prepend_path_windows_seeds_from_fallback_with_semicolon() {
         let mut env = BTreeMap::new();
-        prepend_dir_to_path_env(&mut env, r"C:\OfficeCLI", r"C:\Windows;C:\Windows\System32", true);
+        prepend_dir_to_path_env(
+            &mut env,
+            r"C:\OfficeCLI",
+            r"C:\Windows;C:\Windows\System32",
+            true,
+        );
         // No prior key → default `Path` casing on Windows.
-        assert_eq!(env.get("Path").unwrap(), r"C:\OfficeCLI;C:\Windows;C:\Windows\System32");
+        assert_eq!(
+            env.get("Path").unwrap(),
+            r"C:\OfficeCLI;C:\Windows;C:\Windows\System32"
+        );
     }
 
     #[test]
@@ -9250,9 +9700,15 @@ mod tests {
         env.insert("PATH".to_string(), r"C:\a".to_string());
         env.insert("Path".to_string(), r"C:\b".to_string());
         prepend_dir_to_path_env(&mut env, r"C:\OfficeCLI", "ignored-fallback", true);
-        let path_keys: Vec<&String> =
-            env.keys().filter(|k| k.eq_ignore_ascii_case("PATH")).collect();
-        assert_eq!(path_keys.len(), 1, "exactly one PATH-ish key must remain: {env:?}");
+        let path_keys: Vec<&String> = env
+            .keys()
+            .filter(|k| k.eq_ignore_ascii_case("PATH"))
+            .collect();
+        assert_eq!(
+            path_keys.len(),
+            1,
+            "exactly one PATH-ish key must remain: {env:?}"
+        );
         assert_eq!(env.get("Path").unwrap(), r"C:\OfficeCLI;C:\b");
     }
 
@@ -9394,9 +9850,18 @@ mod tests {
                 assert_eq!(tool_call_id, "019f9475-c67f-7390-9ee5-a09d29986a6c-4");
                 assert_eq!(status, "completed");
                 let meta = meta.expect("compaction card needs meta");
-                assert_eq!(meta.get("contextCompaction").and_then(|v| v.as_bool()), Some(true));
-                assert_eq!(meta.get("tokensBefore").and_then(|v| v.as_u64()), Some(45389));
-                assert_eq!(meta.get("tokensAfter").and_then(|v| v.as_u64()), Some(16486));
+                assert_eq!(
+                    meta.get("contextCompaction").and_then(|v| v.as_bool()),
+                    Some(true)
+                );
+                assert_eq!(
+                    meta.get("tokensBefore").and_then(|v| v.as_u64()),
+                    Some(45389)
+                );
+                assert_eq!(
+                    meta.get("tokensAfter").and_then(|v| v.as_u64()),
+                    Some(16486)
+                );
             }
             other => panic!("expected ToolCall, got {other:?}"),
         }
@@ -9431,8 +9896,13 @@ mod tests {
         )
         .unwrap();
         match map_grok_ext_notification(&raw, AgentType::Grok) {
-            Some(AcpEvent::Error { message, terminal, .. }) => {
-                assert!(message.contains("503"), "error should carry the reason; got: {message}");
+            Some(AcpEvent::Error {
+                message, terminal, ..
+            }) => {
+                assert!(
+                    message.contains("503"),
+                    "error should carry the reason; got: {message}"
+                );
                 assert!(!terminal, "compaction failure must not kill the connection");
             }
             other => panic!("expected non-terminal Error, got {other:?}"),
@@ -9486,11 +9956,20 @@ mod tests {
             )
         };
         // Both compaction outcomes are visible turn output.
-        assert!(grok_ext_notification_is_turn_output(&notif("auto_compact_completed"), AgentType::Grok));
-        assert!(grok_ext_notification_is_turn_output(&notif("auto_compact_failed"), AgentType::Grok));
+        assert!(grok_ext_notification_is_turn_output(
+            &notif("auto_compact_completed"),
+            AgentType::Grok
+        ));
+        assert!(grok_ext_notification_is_turn_output(
+            &notif("auto_compact_failed"),
+            AgentType::Grok
+        ));
         // turn_completed is deliberately left to the prompt-response path — it is
         // NOT counted here (otherwise a genuinely empty turn would be masked).
-        assert!(!grok_ext_notification_is_turn_output(&notif("turn_completed"), AgentType::Grok));
+        assert!(!grok_ext_notification_is_turn_output(
+            &notif("turn_completed"),
+            AgentType::Grok
+        ));
         // Never fires for a non-grok agent.
         assert!(!grok_ext_notification_is_turn_output(
             &notif("auto_compact_completed"),
@@ -9545,7 +10024,10 @@ mod tests {
     #[test]
     fn note_dropped_counts_each_site_separately_and_keeps_the_first() {
         let mut probe = TurnOutputProbe::new(0);
-        probe.note_dropped(DropSite::Dispatch, &drop_err("missing field `sessionUpdate`"));
+        probe.note_dropped(
+            DropSite::Dispatch,
+            &drop_err("missing field `sessionUpdate`"),
+        );
         probe.note_dropped(DropSite::Decode, &drop_err("missing field `update`"));
         probe.note_dropped(DropSite::Decode, &drop_err("missing field `content`"));
 
@@ -9589,7 +10071,10 @@ mod tests {
 
         // Without agent output, only `end_turn` is rewritten.
         let silent = TurnOutputProbe::new(0);
-        assert_eq!(finish_turn_reason(&silent, "cancelled", &tail).0, "cancelled");
+        assert_eq!(
+            finish_turn_reason(&silent, "cancelled", &tail).0,
+            "cancelled"
+        );
         assert_eq!(finish_turn_reason(&silent, "end_turn", &tail).0, "empty");
     }
 
@@ -9646,8 +10131,14 @@ mod tests {
         probe.note_dropped(DropSite::Dispatch, &drop_err("EOF while parsing a value"));
 
         let details = build_empty_turn_details(&probe, &tail).expect("details");
-        assert!(details.contains("dropped 2 update(s) (1 decode, 1 dispatch)"), "{details}");
-        assert!(details.contains("first (decode): trailing characters"), "{details}");
+        assert!(
+            details.contains("dropped 2 update(s) (1 decode, 1 dispatch)"),
+            "{details}"
+        );
+        assert!(
+            details.contains("first (decode): trailing characters"),
+            "{details}"
+        );
     }
 
     #[test]
@@ -9788,7 +10279,10 @@ mod tests {
             current_model_id_from_opts(&[select("effort", "mode", "high")]),
             None
         );
-        assert_eq!(current_model_id_from_opts(&[select("m", "model", "")]), None);
+        assert_eq!(
+            current_model_id_from_opts(&[select("m", "model", "")]),
+            None
+        );
         assert_eq!(current_model_id_from_opts(&[]), None);
     }
 
@@ -9976,10 +10470,12 @@ mod tests {
 
         // A different data.code, or no data at all, must NOT be swallowed —
         // those fall through to the generic error path.
-        let other = sacp::Error::new(-32603, "boom")
-            .data(serde_json::json!({ "code": "SOMETHING_ELSE" }));
+        let other =
+            sacp::Error::new(-32603, "boom").data(serde_json::json!({ "code": "SOMETHING_ELSE" }));
         assert!(!is_grok_incompatible_agent_switch(&other));
-        assert!(!is_grok_incompatible_agent_switch(&sacp::Error::internal_error()));
+        assert!(!is_grok_incompatible_agent_switch(
+            &sacp::Error::internal_error()
+        ));
     }
 
     #[test]
@@ -10002,26 +10498,39 @@ mod tests {
 
         // Empty specs → the effort selector comes from the flat `x.ai/sessionConfig`
         // "mode" list (the no-`models` fallback path).
-        let opts =
-            synthesize_grok_config_options(Some(&meta), &HashMap::new()).expect("should synthesize");
+        let opts = synthesize_grok_config_options(Some(&meta), &HashMap::new())
+            .expect("should synthesize");
         assert_eq!(opts.len(), 2, "model + effort selectors");
 
         let model = &opts[0];
         assert_eq!(model.id, GROK_MODEL_OPTION_ID);
         assert_eq!(model.category.as_deref(), Some("model"));
-        let SessionConfigKindInfo::Select(model_sel) = &model.kind;
+        let SessionConfigKindInfo::Select(model_sel) = &model.kind else {
+            panic!("expected select config option")
+        };
         // Both models appear (agent-type filtering is deliberately NOT applied —
         // cross-type switches are handled gracefully at set time instead).
         assert_eq!(model_sel.options.len(), 2);
-        assert_eq!(model_sel.current_value, "grok-4.5", "the `selected` model is current");
-        assert!(model_sel.options.iter().any(|o| o.value == "grok-composer-2.5-fast"));
+        assert_eq!(
+            model_sel.current_value, "grok-4.5",
+            "the `selected` model is current"
+        );
+        assert!(model_sel
+            .options
+            .iter()
+            .any(|o| o.value == "grok-composer-2.5-fast"));
 
         let effort = &opts[1];
         assert_eq!(effort.id, GROK_EFFORT_OPTION_ID);
         assert_eq!(effort.category.as_deref(), Some("mode"));
-        let SessionConfigKindInfo::Select(effort_sel) = &effort.kind;
+        let SessionConfigKindInfo::Select(effort_sel) = &effort.kind else {
+            panic!("expected select config option")
+        };
         assert_eq!(effort_sel.options.len(), 2);
-        assert_eq!(effort_sel.current_value, "high", "the `selected` effort is current");
+        assert_eq!(
+            effort_sel.current_value, "high",
+            "the `selected` effort is current"
+        );
         assert!(effort_sel.options.iter().any(|o| o.value == "low"));
     }
 
@@ -10041,8 +10550,8 @@ mod tests {
         .unwrap();
         // Empty specs → the effort selector comes from the flat `x.ai/sessionConfig`
         // "mode" list (the no-`models` fallback path).
-        let opts =
-            synthesize_grok_config_options(Some(&meta), &HashMap::new()).expect("should synthesize");
+        let opts = synthesize_grok_config_options(Some(&meta), &HashMap::new())
+            .expect("should synthesize");
         assert_eq!(opts.len(), 1);
         assert_eq!(opts[0].id, GROK_MODEL_OPTION_ID);
     }
@@ -10132,7 +10641,9 @@ mod tests {
         // switchable list), current = xhigh, with canonical labels.
         let effort = build_grok_effort_option("grok-4.5", &specs).expect("has effort");
         assert_eq!(effort.id, GROK_EFFORT_OPTION_ID);
-        let SessionConfigKindInfo::Select(sel) = &effort.kind;
+        let SessionConfigKindInfo::Select(sel) = &effort.kind else {
+            panic!("expected select config option")
+        };
         assert_eq!(sel.current_value, "xhigh");
         assert_eq!(sel.options.len(), 4, "high/medium/low + injected xhigh");
         assert_eq!(sel.options[0].value, "xhigh");
@@ -10145,10 +10656,9 @@ mod tests {
         );
         assert!(sel.options.iter().all(|o| o.description.is_some()));
         // Grok's own per-tier text is preserved for the switchable tiers.
-        assert!(sel
-            .options
-            .iter()
-            .any(|o| o.value == "high" && o.name == "High" && o.description.as_deref() == Some("Highest quality")));
+        assert!(sel.options.iter().any(|o| o.value == "high"
+            && o.name == "High"
+            && o.description.as_deref() == Some("Highest quality")));
         // Unsupported model → no selector; unknown model → None.
         assert!(build_grok_effort_option("grok-composer-2.5-fast", &specs).is_none());
         assert!(build_grok_effort_option("nope", &specs).is_none());
@@ -10175,9 +10685,14 @@ mod tests {
             .iter()
             .find(|o| o.id == GROK_EFFORT_OPTION_ID)
             .expect("effort selector");
-        let SessionConfigKindInfo::Select(sel) = &effort.kind;
+        let SessionConfigKindInfo::Select(sel) = &effort.kind else {
+            panic!("expected select config option")
+        };
         assert_eq!(sel.current_value, "xhigh", "grok-4.5's real default");
-        assert!(sel.options.iter().any(|o| o.value == "xhigh" && o.name == "Max"));
+        assert!(sel
+            .options
+            .iter()
+            .any(|o| o.value == "xhigh" && o.name == "Max"));
     }
 
     #[test]
@@ -10216,7 +10731,9 @@ mod tests {
             .iter()
             .find(|o| o.id == GROK_EFFORT_OPTION_ID)
             .expect("re-added");
-        let SessionConfigKindInfo::Select(sel) = &effort.kind;
+        let SessionConfigKindInfo::Select(sel) = &effort.kind else {
+            panic!("expected select config option")
+        };
         assert_eq!(sel.current_value, "xhigh");
     }
 
@@ -10276,7 +10793,9 @@ mod tests {
 
         // The optimistic pick is reverted: the authoritative model is unchanged.
         let opts = guard.config_options.as_ref().expect("options preserved");
-        let SessionConfigKindInfo::Select(sel) = &opts[0].kind;
+        let SessionConfigKindInfo::Select(sel) = &opts[0].kind else {
+            panic!("expected select config option")
+        };
         assert_eq!(sel.current_value, "grok-4.5");
 
         // Event ordering: the authoritative options (revert) precede the coded
@@ -10294,7 +10813,9 @@ mod tests {
 
         // The reverted options carry the original model.
         if let AcpEvent::SessionConfigOptions { config_options } = &events[cfg_idx].payload {
-            let SessionConfigKindInfo::Select(sel) = &config_options[0].kind;
+            let SessionConfigKindInfo::Select(sel) = &config_options[0].kind else {
+                panic!("expected select config option")
+            };
             assert_eq!(sel.current_value, "grok-4.5");
         }
 
@@ -10303,9 +10824,7 @@ mod tests {
         let errors: Vec<(Option<String>, bool)> = events
             .iter()
             .filter_map(|e| match &e.payload {
-                AcpEvent::Error {
-                    code, terminal, ..
-                } => Some((code.clone(), *terminal)),
+                AcpEvent::Error { code, terminal, .. } => Some((code.clone(), *terminal)),
                 _ => None,
             })
             .collect();
@@ -10548,10 +11067,10 @@ mod tests {
         // Missing tool_input.
         assert!(unwrap_grok_use_tool(Some(&serde_json::json!({"tool_name": "x"}))).is_none());
         // Empty tool_name.
-        assert!(
-            unwrap_grok_use_tool(Some(&serde_json::json!({"tool_name": "", "tool_input": {}})))
-                .is_none()
-        );
+        assert!(unwrap_grok_use_tool(Some(
+            &serde_json::json!({"tool_name": "", "tool_input": {}})
+        ))
+        .is_none());
         // Absent / non-object.
         assert!(unwrap_grok_use_tool(None).is_none());
         assert!(unwrap_grok_use_tool(Some(&serde_json::json!("s"))).is_none());
@@ -10615,7 +11134,8 @@ mod tests {
             Some("codeg-mcp__get_delegation_status")
         );
         // Mixed batch with a running item still resolves.
-        let mixed = r#"{"tasks":[{"task_id":"a","status":"running"},{"task_id":"b","status":"unknown"}]}"#;
+        let mixed =
+            r#"{"tasks":[{"task_id":"a","status":"running"},{"task_id":"b","status":"unknown"}]}"#;
         assert_eq!(
             cursor_companion_title_from_content(Some(mixed)),
             Some("codeg-mcp__get_delegation_status")
@@ -10641,9 +11161,7 @@ mod tests {
         assert_eq!(cursor_companion_title_from_content(None), None);
         // Ack prefix must match from the start, not mid-string.
         assert_eq!(
-            cursor_companion_title_from_content(Some(
-                "Note: Delegation successful. task_id=x."
-            )),
+            cursor_companion_title_from_content(Some("Note: Delegation successful. task_id=x.")),
             None
         );
     }
@@ -11184,10 +11702,7 @@ mod tests {
         // returns false. Regression guard against any future "optimisation"
         // that conflates the substring check with the field check.
         let input = Some(r#"{"description":"use subagent_type=foo"}"#.to_string());
-        assert!(!is_subagent_invocation(
-            AgentType::OpenCode,
-            &input
-        ));
+        assert!(!is_subagent_invocation(AgentType::OpenCode, &input));
     }
 
     #[test]
@@ -11234,7 +11749,8 @@ mod tests {
             "not json",
         ] {
             assert!(
-                codebuddy_deferred_tool_name(AgentType::CodeBuddy, &Some(raw.to_string())).is_none(),
+                codebuddy_deferred_tool_name(AgentType::CodeBuddy, &Some(raw.to_string()))
+                    .is_none(),
                 "expected None for raw_input={raw}"
             );
         }
@@ -11294,28 +11810,56 @@ mod tests {
         );
         // Initial event carrying the subagent marker → "agent", recorded.
         assert_eq!(
-            resolve_rewritten_title(AgentType::CodeBuddy, &subagent, "tc1", false, false, &mut overrides)
-                .as_deref(),
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &subagent,
+                "tc1",
+                false,
+                false,
+                &mut overrides
+            )
+            .as_deref(),
             Some("agent")
         );
         // The bug: a later status-only update lost the marker (raw_input None).
         // The override must be RE-ASSERTED, not downgraded to the event's title.
         assert_eq!(
-            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc1", true, false, &mut overrides)
-                .as_deref(),
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &None,
+                "tc1",
+                true,
+                false,
+                &mut overrides
+            )
+            .as_deref(),
             Some("agent"),
             "a status-only update must not downgrade the Agent card mid-stream"
         );
         // Even an update whose raw_input looks like a different tool keeps it.
         let bash = Some(r#"{"command":"ls"}"#.to_string());
         assert_eq!(
-            resolve_rewritten_title(AgentType::CodeBuddy, &bash, "tc1", true, false, &mut overrides)
-                .as_deref(),
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &bash,
+                "tc1",
+                true,
+                false,
+                &mut overrides
+            )
+            .as_deref(),
             Some("agent")
         );
         // A never-classified tool call returns None → caller uses its own title.
         assert_eq!(
-            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc2", true, false, &mut overrides),
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &None,
+                "tc2",
+                true,
+                false,
+                &mut overrides
+            ),
             None
         );
         // Deferred MCP tool: inner name recorded, then re-asserted on a bare update.
@@ -11324,18 +11868,39 @@ mod tests {
                 .to_string(),
         );
         assert_eq!(
-            resolve_rewritten_title(AgentType::CodeBuddy, &deferred, "tc3", false, false, &mut overrides)
-                .as_deref(),
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &deferred,
+                "tc3",
+                false,
+                false,
+                &mut overrides
+            )
+            .as_deref(),
             Some("mcp__codeg-mcp__delegate_to_agent")
         );
         assert_eq!(
-            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc3", true, false, &mut overrides)
-                .as_deref(),
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &None,
+                "tc3",
+                true,
+                false,
+                &mut overrides
+            )
+            .as_deref(),
             Some("mcp__codeg-mcp__delegate_to_agent")
         );
         // Non-CodeBuddy agent with no prior classification: never rewritten.
         assert_eq!(
-            resolve_rewritten_title(AgentType::OpenCode, &None, "tc9", true, false, &mut overrides),
+            resolve_rewritten_title(
+                AgentType::OpenCode,
+                &None,
+                "tc9",
+                true,
+                false,
+                &mut overrides
+            ),
             None
         );
     }
@@ -11379,15 +11944,29 @@ mod tests {
         // Frame 1: `raw_input` has NO `subagent_type` yet, but `_meta` already
         // marks it (the early, reliable signal). Title must already be "agent".
         assert_eq!(
-            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc1", false, true, &mut overrides)
-                .as_deref(),
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &None,
+                "tc1",
+                false,
+                true,
+                &mut overrides
+            )
+            .as_deref(),
             Some("agent")
         );
         // Later sparse frames carry NEITHER signal — the override is re-asserted,
         // so the pill never flickers back to a generic tool mid-stream.
         assert_eq!(
-            resolve_rewritten_title(AgentType::CodeBuddy, &None, "tc1", true, false, &mut overrides)
-                .as_deref(),
+            resolve_rewritten_title(
+                AgentType::CodeBuddy,
+                &None,
+                "tc1",
+                true,
+                false,
+                &mut overrides
+            )
+            .as_deref(),
             Some("agent"),
             "meta-classified Agent pill must stay 'agent' across signal-less frames"
         );
@@ -11417,7 +11996,7 @@ mod tests {
         let mut open: HashSet<String> = HashSet::new();
         let mut closed: HashSet<String> = HashSet::new();
         let fg = false; // foreground (not background)
-        // A non-final foreground agent frame opens the window.
+                        // A non-final foreground agent frame opens the window.
         track_subagent_window(
             AgentType::CodeBuddy,
             true,
@@ -11518,7 +12097,11 @@ mod tests {
         // the parent model is suspended — so every chunk in the window is the
         // sub-agent's, never main-agent output (background sub-agents, which could
         // interleave main output, are excluded from the window upstream).
-        assert!(should_suppress_subagent_chunk(AgentType::CodeBuddy, true, None));
+        assert!(should_suppress_subagent_chunk(
+            AgentType::CodeBuddy,
+            true,
+            None
+        ));
         // Window closed and no chunk meta → emit (e.g. main-agent text before the
         // sub-agent opens or after it closes).
         assert!(!should_suppress_subagent_chunk(
@@ -11538,7 +12121,11 @@ mod tests {
             ));
         }
         // Other agents never suppress, even inside a (spurious) open window.
-        assert!(!should_suppress_subagent_chunk(AgentType::OpenCode, true, None));
+        assert!(!should_suppress_subagent_chunk(
+            AgentType::OpenCode,
+            true,
+            None
+        ));
     }
 
     #[test]
@@ -11770,7 +12357,10 @@ mod tests {
     #[test]
     fn companion_features_arg_inject_skip_decision() {
         // All off → no companion at all.
-        assert_eq!(companion_features_arg(false, false, false, false, false), None);
+        assert_eq!(
+            companion_features_arg(false, false, false, false, false),
+            None
+        );
         // Delegation only.
         assert_eq!(
             companion_features_arg(true, false, false, false, false),

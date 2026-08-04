@@ -35,15 +35,15 @@ pub use message::{
 };
 pub use quick_message::QuickMessageInfo;
 pub use remote_workspace_connection::RemoteWorkspaceConnectionInfo;
-pub use work_task::{
-    WorkTaskChangedFile, WorkTaskConfig, WorkTaskDraft, WorkTaskEventInfo, WorkTaskFolderSettings,
-    WorkTaskInfo, WorkTaskMergeState, WorkTaskPreflight, WorkTaskStatus,
-    WorkTaskTemplateDraft, WorkTaskTemplateInfo, STAGE_PROMPT_ALL,
-};
 #[cfg(feature = "tauri-runtime")]
 pub use system::SystemRenderingSettings;
 pub use system::{
     AvailableTerminalShells, GitCredentials, GitDetectResult, GitHubAccountsSettings,
     GitHubTokenValidation, GitSettings, SystemLanguageSettings, SystemProxySettings,
     SystemTerminalSettings, TerminalShellOption,
+};
+pub use work_task::{
+    WorkTaskChangedFile, WorkTaskConfig, WorkTaskDraft, WorkTaskEventInfo, WorkTaskFolderSettings,
+    WorkTaskInfo, WorkTaskMergeState, WorkTaskPreflight, WorkTaskStatus, WorkTaskTemplateDraft,
+    WorkTaskTemplateInfo, STAGE_PROMPT_ALL,
 };

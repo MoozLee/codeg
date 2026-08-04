@@ -184,8 +184,10 @@ pub fn parse_code_mode_script(src: &str) -> CodeModeScript {
 /// `const results = await Promise.all(` — the binding every parallel script
 /// opens with, and the only handle on the results array the loop can walk.
 static RESULTS_BINDING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*await\s+Promise\s*\.\s*all\s*\(")
-        .expect("static regex")
+    Regex::new(
+        r"\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*await\s+Promise\s*\.\s*all\s*\(",
+    )
+    .expect("static regex")
 });
 
 /// See `CodeModeScript::text_run`.
@@ -460,9 +462,13 @@ fn nothing_else_in_script(src: &str, first: &Range<usize>, second: &Range<usize>
     if first.end > second.start {
         return false;
     }
-    [0..first.start, first.end..second.start, second.end..src.len()]
-        .into_iter()
-        .all(|gap| is_filler(src, gap))
+    [
+        0..first.start,
+        first.end..second.start,
+        second.end..src.len(),
+    ]
+    .into_iter()
+    .all(|gap| is_filler(src, gap))
 }
 
 fn is_filler(src: &str, gap: Range<usize>) -> bool {
@@ -514,7 +520,12 @@ struct BodyGrammar<'a> {
 /// Inside a `text(…)` argument the grammar opens up to exactly what a value can
 /// be: the names the loop binds, property reads, `results[counter]`, literals,
 /// `JSON.stringify(…)`, and the operators that appear in real scripts.
-fn scan_body(src: &str, range: Range<usize>, start_depth: usize, ctx: &BodyGrammar) -> Option<usize> {
+fn scan_body(
+    src: &str,
+    range: Range<usize>,
+    start_depth: usize,
+    ctx: &BodyGrammar,
+) -> Option<usize> {
     let b = src.as_bytes();
     let mut calls = 0usize;
     let mut depth = start_depth;
@@ -544,8 +555,7 @@ fn scan_body(src: &str, range: Range<usize>, start_depth: usize, ctx: &BodyGramm
                 // `text` and then its `(`, with nothing in between. `text;` and
                 // `text\n(…)` are the same program to JavaScript but not to a
                 // reader, and the second is a call to whatever `(…)` builds.
-                if word != "text" || after_dot || b.get(skip_ws_and_comments(b, j)) != Some(&b'(')
-                {
+                if word != "text" || after_dot || b.get(skip_ws_and_comments(b, j)) != Some(&b'(') {
                     return None;
                 }
                 calls += 1;
@@ -1562,10 +1572,7 @@ impl<'a> LiteralParser<'a> {
             self.i += 1;
         }
         let digits_start = self.i;
-        while self
-            .peek()
-            .is_some_and(|c| c.is_ascii_digit() || c == b'.')
-        {
+        while self.peek().is_some_and(|c| c.is_ascii_digit() || c == b'.') {
             self.i += 1;
         }
         if self.i == digits_start {
@@ -1643,8 +1650,7 @@ fn decode_js_string(raw: &str, quote: u8) -> Option<String> {
                         if let Some(low) = hex_value(&chars, i + 2, 4) {
                             if (0xdc00..0xe000).contains(&low) {
                                 i += 6;
-                                let combined =
-                                    0x10000 + ((value - 0xd800) << 10) + (low - 0xdc00);
+                                let combined = 0x10000 + ((value - 0xd800) << 10) + (low - 0xdc00);
                                 out.push(char::from_u32(combined).unwrap_or('\u{fffd}'));
                                 continue;
                             }
@@ -1711,7 +1717,9 @@ mod tests {
         let src = "const rs = await Promise.all([\n  tools.exec_command({cmd:\"one\"}),\n  tools.exec_command({cmd:\"two\"}),\n  tools.exec_command({cmd:\"three\"})\n]);\nrs.forEach(r => text(r.output));";
         let got = calls(src);
         assert_eq!(
-            got.iter().map(|c| c.input_preview.as_str()).collect::<Vec<_>>(),
+            got.iter()
+                .map(|c| c.input_preview.as_str())
+                .collect::<Vec<_>>(),
             vec!["one", "two", "three"]
         );
     }
@@ -1756,7 +1764,9 @@ mod tests {
 
     #[test]
     fn a_foreach_body_counts_the_same_way() {
-        let src = format!("{TWO_CALLS}r.forEach((x, i) => {{ text(`---RESULT ${{i}}---`); text(x.output); }});\n");
+        let src = format!(
+            "{TWO_CALLS}r.forEach((x, i) => {{ text(`---RESULT ${{i}}---`); text(x.output); }});\n"
+        );
         assert_eq!(parse_code_mode_script(&src).text_run, Some(2));
     }
 
@@ -2031,7 +2041,10 @@ mod tests {
         ]);
         let parsed = split_code_mode_output(Some(&output));
         assert_eq!(parsed.status, ScriptStatus::Running);
-        assert_eq!(parsed.note.as_deref(), Some("Script running with cell ID 56"));
+        assert_eq!(
+            parsed.note.as_deref(),
+            Some("Script running with cell ID 56")
+        );
         assert_eq!(parsed.chunks, vec!["building…"]);
     }
 

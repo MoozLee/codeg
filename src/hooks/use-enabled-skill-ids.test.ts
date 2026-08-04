@@ -5,9 +5,8 @@ import type { AcpAgentInfo, ExpertInstallStatus } from "@/lib/types"
 
 // All three status scans are mocked so we can count how many times a window
 // focus triggers them across multiple mounted consumers. `acpListAgents` is
-// pulled in transitively via `useAcpAgents` (the hook reads each agent's
-// env_json to spot a custom-dir pi); it returns no agents here, so detection
-// stays inert.
+// pulled in transitively via `useAcpAgents`; it returns no agents here, so
+// custom-dir detection stays inert.
 vi.mock("@/lib/api", () => ({
   expertsListAllInstallStatuses: vi.fn(),
   officecliSkillListAllInstallStatuses: vi.fn(),
@@ -89,14 +88,14 @@ describe("useEnabledSkillIds — focus refresh coalescing", () => {
   })
 })
 
-// Only the fields the hook + useAcpAgents read; the rest of AcpAgentInfo is
-// irrelevant to skill-management gating.
-function piAgent(env: Record<string, string>): AcpAgentInfo {
+// Only the safe summary fields the hook + useAcpAgents read; the rest of
+// AcpAgentInfo is irrelevant to skill-management gating.
+function piAgent(usesCustomSkillDir: boolean): AcpAgentInfo {
   return {
     agent_type: "pi",
     name: "Pi",
     sort_order: 0,
-    env,
+    uses_custom_skill_dir: usesCustomSkillDir,
   } as unknown as AcpAgentInfo
 }
 
@@ -115,11 +114,9 @@ function piLinkedStatus(expertId: string): ExpertInstallStatus {
 describe("useEnabledSkillIds — custom-dir pi gating", () => {
   it("never exposes managed skills for a custom-dir pi, before or after the registry resolves", async () => {
     const { api, hook } = await setup()
-    // A pi pinned to a custom PI_CODING_AGENT_DIR, plus a default-dir expert
-    // link that must NOT be surfaced for it.
-    vi.mocked(api.acpListAgents).mockResolvedValue([
-      piAgent({ PI_CODING_AGENT_DIR: "/custom/pi" }),
-    ])
+    // A custom-dir pi, plus a default-dir expert link that must NOT be
+    // surfaced for it.
+    vi.mocked(api.acpListAgents).mockResolvedValue([piAgent(true)])
     vi.mocked(api.expertsListAllInstallStatuses).mockResolvedValue([
       piLinkedStatus("writer"),
     ])
@@ -147,7 +144,7 @@ describe("useEnabledSkillIds — custom-dir pi gating", () => {
 
   it("manages a default-dir pi once the registry resolves", async () => {
     const { api, hook } = await setup()
-    vi.mocked(api.acpListAgents).mockResolvedValue([piAgent({})])
+    vi.mocked(api.acpListAgents).mockResolvedValue([piAgent(false)])
     vi.mocked(api.expertsListAllInstallStatuses).mockResolvedValue([
       piLinkedStatus("writer"),
     ])

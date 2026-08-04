@@ -115,8 +115,11 @@ export function saveModePreference(
 export function saveConfigPreference(
   agentType: string,
   configId: string,
-  valueId: string
+  value: string | boolean
 ) {
+  // `acp_connect` replays preferred config values as strings, so serialize
+  // boolean session options explicitly rather than storing JSON booleans.
+  const valueId = typeof value === "boolean" ? String(value) : value
   updatePrefs(agentType, (prefs) => ({
     ...prefs,
     configValues: { ...prefs.configValues, [configId]: valueId },
