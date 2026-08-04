@@ -30,7 +30,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { acpFetchKimiModels, acpUpdateKimiCodeConfig } from "@/lib/api"
 import { isLocalDesktop, revealItemInDir } from "@/lib/platform"
-import type { AcpAgentInfo } from "@/lib/types"
+import type { AcpAgentSettingsInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const KIMI_BASE_URL_INTERNATIONAL = "https://api.moonshot.ai/v1"
@@ -468,7 +468,7 @@ export function KimiCodeConfigPanel({
   agent,
   onSaved,
 }: {
-  agent: AcpAgentInfo
+  agent: AcpAgentSettingsInfo
   onSaved: () => Promise<void>
 }) {
   const t = useTranslations("AcpAgentSettings")

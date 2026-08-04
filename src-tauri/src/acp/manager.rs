@@ -11,12 +11,13 @@ use sea_orm::{
 };
 
 use crate::acp::connection::{
-    spawn_agent_connection, AgentConnection, ConnectionCommand, GoalControlAction, SteerOutcome,
+    spawn_agent_connection, AgentConnection, ConnectionCommand, GoalControlAction,
+    MaintenancePromptOrigin, PromptOrigin, SessionConfigCommandValue, SteerOutcome,
 };
 use crate::acp::error::AcpError;
 use crate::acp::feedback::{
-    bounded_feedback_batch, FeedbackItem, FeedbackStatus, PendingFeedback,
-    SessionFeedbackAccess, MAX_FEEDBACK_CHARS, MAX_FEEDBACK_RESPONSE_BYTES,
+    bounded_feedback_batch, FeedbackItem, FeedbackStatus, PendingFeedback, SessionFeedbackAccess,
+    MAX_FEEDBACK_CHARS, MAX_FEEDBACK_RESPONSE_BYTES,
 };
 use crate::acp::plan_approval::{
     PlanApprovalAnswer, RegisteredPlanApproval, SessionPlanApprovalAccess,
@@ -25,9 +26,10 @@ use crate::acp::question::{
     build_outcome, QuestionAnswer, QuestionOutcome, QuestionSpec, RegisteredQuestion,
     SessionQuestionAccess,
 };
+use crate::acp::session_state::ConnectionOrigin;
 use crate::acp::types::{
     AcpEvent, AgentOptionsSnapshot, ConfigStaleKind, ConnectionInfo, ConnectionStatus,
-    ForkResultInfo, PromptInputBlock,
+    ForkResultInfo, MaintenanceCommandOutcome, MaintenanceCommandResult, PromptInputBlock,
 };
 use crate::db::entities::conversation::{self, ConversationKind, ConversationStatus};
 use crate::db::service::conversation_service;
@@ -49,6 +51,12 @@ const USER_PROMPT_PREVIEW_MAX_CHARS: usize = 500;
 /// make the agent's death gentler — the graceful path ends in the same
 /// `kill_tree`.
 const DISCONNECT_ALL_GRACE: Duration = Duration::from_millis(500);
+
+type DisconnectHandle = (
+    tokio::sync::mpsc::Sender<ConnectionCommand>,
+    Arc<std::sync::atomic::AtomicU32>,
+    Arc<tokio::sync::RwLock<crate::acp::SessionState>>,
+);
 
 /// True for ids in the parsers' turn-id namespace (`turn-<digits>`), which every
 /// parser assigns via `format!("turn-{}", n)`. A broadcast `message_id` must
@@ -114,6 +122,40 @@ fn delegation_child_title_seed(blocks: &[PromptInputBlock]) -> Option<String> {
         None
     } else {
         Some(crate::parsers::title_from_user_text(trimmed))
+    }
+}
+
+fn normalize_maintenance_command(command: &str) -> Option<String> {
+    let name = command.trim().trim_start_matches('/').to_ascii_lowercase();
+    matches!(name.as_str(), "compact" | "summarize").then(|| format!("/{name}"))
+}
+
+/// Only the internal maintenance path may send an exact standalone command.
+/// User prompts with arguments remain normal agent prompts.
+fn is_reserved_maintenance_user_prompt(blocks: &[PromptInputBlock]) -> bool {
+    let [PromptInputBlock::Text { text }] = blocks else {
+        return false;
+    };
+    let command = text.trim();
+    normalize_maintenance_command(command)
+        .is_some_and(|normalized| normalized.eq_ignore_ascii_case(command))
+}
+
+fn maintenance_result(
+    operation_id: &str,
+    connection_id: &str,
+    session_id: &str,
+    outcome: MaintenanceCommandOutcome,
+    stop_reason: Option<String>,
+    error: Option<&str>,
+) -> MaintenanceCommandResult {
+    MaintenanceCommandResult {
+        operation_id: operation_id.to_string(),
+        connection_id: connection_id.to_string(),
+        session_id: session_id.to_string(),
+        stop_reason,
+        outcome,
+        error: error.map(str::to_string),
     }
 }
 
@@ -408,6 +450,59 @@ impl ConnectionManager {
         preferred_mode_id: Option<String>,
         preferred_config_values: BTreeMap<String, String>,
     ) -> Result<String, AcpError> {
+        self.spawn_agent_with_origin(
+            agent_type,
+            working_dir,
+            session_id,
+            runtime_env,
+            owner_window_label,
+            ConnectionOrigin::Interactive,
+            emitter,
+            preferred_mode_id,
+            preferred_config_values,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_work_task_agent(
+        &self,
+        agent_type: AgentType,
+        working_dir: Option<String>,
+        session_id: Option<String>,
+        runtime_env: BTreeMap<String, String>,
+        owner_window_label: String,
+        emitter: EventEmitter,
+        preferred_mode_id: Option<String>,
+        preferred_config_values: BTreeMap<String, String>,
+    ) -> Result<String, AcpError> {
+        self.spawn_agent_with_origin(
+            agent_type,
+            working_dir,
+            session_id,
+            runtime_env,
+            owner_window_label,
+            ConnectionOrigin::WorkTask,
+            emitter,
+            preferred_mode_id,
+            preferred_config_values,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_agent_with_origin(
+        &self,
+        agent_type: AgentType,
+        working_dir: Option<String>,
+        session_id: Option<String>,
+        runtime_env: BTreeMap<String, String>,
+        owner_window_label: String,
+        connection_origin: ConnectionOrigin,
+        emitter: EventEmitter,
+        preferred_mode_id: Option<String>,
+        preferred_config_values: BTreeMap<String, String>,
+    ) -> Result<String, AcpError> {
         // Connection dedup: when resuming an agent session (session_id is
         // Some), look for a live AgentConnection that already represents
         // the same external session in the same working_dir for the same
@@ -459,7 +554,9 @@ impl ConnectionManager {
         let connection_id = uuid::Uuid::new_v4().to_string();
         tracing::info!(
             "[ACP] spawning connection id={} owner_window={} agent={:?}",
-            connection_id, owner_window_label, agent_type
+            connection_id,
+            owner_window_label,
+            agent_type
         );
 
         // `spawn_agent_connection` inserts the entry into `self.connections`,
@@ -473,6 +570,7 @@ impl ConnectionManager {
             session_id,
             runtime_env,
             owner_window_label,
+            connection_origin,
             emitter,
             self.connections.clone(),
             preferred_mode_id,
@@ -560,6 +658,9 @@ impl ConnectionManager {
                 if state.status != ConnectionStatus::Connected {
                     continue;
                 }
+                if state.turn_in_flight || state.maintenance_turn_in_flight {
+                    continue;
+                }
                 if state.pending_permission.is_some() {
                     continue;
                 }
@@ -620,14 +721,23 @@ impl ConnectionManager {
                 if stale {
                     stale_count += 1;
                 }
-                if *current != conn.last_observed_fingerprint {
+                if *current != conn.last_observed_fingerprint
+                    && !conn.state.read().await.maintenance_turn_in_flight
+                {
+                    // Leave the observed fingerprint untouched while maintenance
+                    // is private so a later refresh can notify the public session.
                     conn.last_observed_fingerprint = current.clone();
                     targets.push((Arc::clone(&conn.state), conn.emitter.clone(), stale));
                 }
             }
         }
         for (state, emitter, stale) in targets {
-            emit_with_state(&state, &emitter, AcpEvent::SessionConfigStale { stale, kind }).await;
+            emit_with_state(
+                &state,
+                &emitter,
+                AcpEvent::SessionConfigStale { stale, kind },
+            )
+            .await;
         }
         stale_count
     }
@@ -690,6 +800,7 @@ impl ConnectionManager {
         conn_id: &str,
         blocks: Vec<PromptInputBlock>,
         user_message: Option<(String, Vec<crate::acp::UserMessageBlock>)>,
+        origin: PromptOrigin,
     ) -> Result<(), AcpError> {
         // Reject an empty prompt BEFORE touching the concurrency gate. An empty
         // prompt produces no turn — and thus no `TurnComplete` to clear the gate
@@ -700,6 +811,11 @@ impl ConnectionManager {
         if blocks.is_empty() {
             return Err(AcpError::protocol(
                 "prompt must contain at least one content block".to_string(),
+            ));
+        }
+        if matches!(&origin, PromptOrigin::User) && is_reserved_maintenance_user_prompt(&blocks) {
+            return Err(AcpError::protocol(
+                "Standalone context maintenance commands are reserved".to_string(),
             ));
         }
         let (cmd_tx, state_arc) = {
@@ -729,14 +845,35 @@ impl ConnectionManager {
             .map_err(|_| AcpError::ProcessExited)?;
         {
             let mut s = state_arc.write().await;
+            if let PromptOrigin::Maintenance(maintenance) = &origin {
+                let command_matches_blocks = matches!(
+                    blocks.as_slice(),
+                    [PromptInputBlock::Text { text }] if text == &maintenance.command
+                );
+                let command_is_advertised = s.available_commands.iter().any(|candidate| {
+                    normalize_maintenance_command(&candidate.name).as_deref()
+                        == Some(maintenance.command.as_str())
+                });
+                if s.external_id.as_deref() != Some(maintenance.session_id.as_str())
+                    || s.status != ConnectionStatus::Connected
+                    || !command_is_advertised
+                    || !command_matches_blocks
+                {
+                    return Err(AcpError::protocol(
+                        "Maintenance session changed before command start".to_string(),
+                    ));
+                }
+            }
             if s.turn_in_flight {
                 return Err(AcpError::TurnInProgress);
             }
             s.turn_in_flight = true;
+            s.maintenance_turn_in_flight = matches!(&origin, PromptOrigin::Maintenance(_));
         }
         permit.send(ConnectionCommand::Prompt {
             blocks,
             user_message,
+            origin,
         });
         Ok(())
     }
@@ -762,7 +899,155 @@ impl ConnectionManager {
     ) -> Result<(), AcpError> {
         let prompt_lock = self.clone_prompt_lock(conn_id).await?;
         let _guard = prompt_lock.lock_owned().await;
-        self.send_prompt_inner(conn_id, blocks, None).await
+        self.send_prompt_inner(conn_id, blocks, None, PromptOrigin::User)
+            .await
+    }
+
+    /// Run one allowlisted slash command as an internal maintenance turn. This
+    /// bypasses conversation linking and user-message events, then waits for the
+    /// connection loop's operation-correlated private result.
+    pub async fn run_maintenance_command(
+        &self,
+        db: &AppDatabase,
+        connection_id: String,
+        session_id: String,
+        operation_id: String,
+        command: String,
+    ) -> Result<MaintenanceCommandResult, AcpError> {
+        let fail = |message: &'static str| {
+            maintenance_result(
+                &operation_id,
+                &connection_id,
+                &session_id,
+                MaintenanceCommandOutcome::Failed,
+                None,
+                Some(message),
+            )
+        };
+        if operation_id.trim().is_empty() {
+            return Ok(fail("Maintenance operation id is required"));
+        }
+        if session_id.trim().is_empty() {
+            return Ok(fail("Maintenance session id is required"));
+        }
+        let Some(command) = normalize_maintenance_command(&command) else {
+            return Ok(fail("Unsupported maintenance command"));
+        };
+
+        let prompt_lock = match self.clone_prompt_lock(&connection_id).await {
+            Ok(lock) => lock,
+            Err(_) => return Ok(fail("Maintenance connection was not found")),
+        };
+        let prompt_guard = prompt_lock.lock_owned().await;
+
+        let conversation_id = {
+            let connections = self.connections.lock().await;
+            let Some(connection) = connections.get(&connection_id) else {
+                return Ok(fail("Maintenance connection was not found"));
+            };
+            let snapshot = connection.state.read().await;
+            if snapshot.external_id.as_deref() != Some(session_id.as_str()) {
+                return Ok(fail(
+                    "Maintenance session does not match the active connection",
+                ));
+            }
+            if snapshot.status != ConnectionStatus::Connected || snapshot.turn_in_flight {
+                return Ok(fail("Maintenance connection is not ready"));
+            }
+            if snapshot.connection_origin == ConnectionOrigin::WorkTask {
+                return Ok(fail(
+                    "Maintenance commands are disabled for work-task sessions",
+                ));
+            }
+            let command_is_advertised = snapshot.available_commands.iter().any(|candidate| {
+                normalize_maintenance_command(&candidate.name).as_deref() == Some(command.as_str())
+            });
+            if !command_is_advertised {
+                return Ok(fail("Maintenance command was not advertised by the agent"));
+            }
+            snapshot.conversation_id
+        };
+
+        let Some(conversation_id) = conversation_id else {
+            return Ok(fail(
+                "Maintenance connection is not bound to a conversation",
+            ));
+        };
+        let conversation = conversation::Entity::find_by_id(conversation_id)
+            .one(&db.conn)
+            .await
+            .map_err(|_| AcpError::protocol("Unable to validate maintenance session"))?;
+        let Some(conversation) = conversation else {
+            return Ok(fail("Maintenance conversation was not found"));
+        };
+        if conversation.parent_id.is_some() || conversation.kind == ConversationKind::Delegate {
+            return Ok(fail(
+                "Maintenance commands are disabled for delegation sessions",
+            ));
+        }
+
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+        let origin = PromptOrigin::Maintenance(MaintenancePromptOrigin {
+            operation_id: operation_id.clone(),
+            session_id: session_id.clone(),
+            command: command.clone(),
+            completion_tx,
+        });
+        let blocks = vec![PromptInputBlock::Text { text: command }];
+        if self
+            .send_prompt_inner(&connection_id, blocks, None, origin)
+            .await
+            .is_err()
+        {
+            return Ok(fail("Maintenance command could not be started"));
+        }
+        drop(prompt_guard);
+
+        let completion = completion_rx.await.ok();
+        let identity_is_current = {
+            let connections = self.connections.lock().await;
+            match connections.get(&connection_id) {
+                Some(connection) => {
+                    let current = connection.state.read().await;
+                    current.external_id.as_deref() == Some(session_id.as_str())
+                }
+                None => false,
+            }
+        };
+        if !identity_is_current {
+            return Ok(maintenance_result(
+                &operation_id,
+                &connection_id,
+                &session_id,
+                MaintenanceCommandOutcome::Stale,
+                None,
+                None,
+            ));
+        }
+
+        let Some(completion) = completion else {
+            return Ok(fail(
+                "Maintenance command did not return a completion result",
+            ));
+        };
+        if completion.operation_id != operation_id || completion.session_id != session_id {
+            return Ok(maintenance_result(
+                &operation_id,
+                &connection_id,
+                &session_id,
+                MaintenanceCommandOutcome::Stale,
+                None,
+                None,
+            ));
+        }
+        Ok(maintenance_result(
+            &operation_id,
+            &connection_id,
+            &session_id,
+            completion.outcome,
+            completion.stop_reason,
+            completion.error.as_deref(),
+        ))
     }
 
     /// Send a prompt while ensuring a `Conversation` DB row is bound to this
@@ -832,6 +1117,11 @@ impl ConnectionManager {
         if blocks.is_empty() {
             return Err(AcpError::protocol(
                 "prompt must contain at least one content block".to_string(),
+            ));
+        }
+        if is_reserved_maintenance_user_prompt(&blocks) {
+            return Err(AcpError::protocol(
+                "Standalone context maintenance commands are reserved".to_string(),
             ));
         }
         // Caller-supplied conversation_id requires folder_id (we include it in
@@ -1122,7 +1412,10 @@ impl ConnectionManager {
         // for a prompt that never reached the agent, so without this the
         // lifecycle subscriber's PendingReview write also never fires and the
         // row would be stuck until a follow-up `send_prompt_linked` re-flipped it.
-        match self.send_prompt_inner(conn_id, blocks, user_message).await {
+        match self
+            .send_prompt_inner(conn_id, blocks, user_message, PromptOrigin::User)
+            .await
+        {
             Ok(()) => {
                 // The prompt reached the agent: surface it to the chat-channel
                 // "user message" event feed. Notification-only — never gates the
@@ -1172,7 +1465,21 @@ impl ConnectionManager {
         }
     }
 
+    /// Reject public control operations while a private maintenance command owns
+    /// the connection. The flag is server-internal and clears with the turn gate.
+    async fn reject_if_private_maintenance(&self, conn_id: &str) -> Result<(), AcpError> {
+        let state = self
+            .get_state(conn_id)
+            .await
+            .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
+        if state.read().await.maintenance_turn_in_flight {
+            return Err(AcpError::PrivateMaintenanceInProgress);
+        }
+        Ok(())
+    }
+
     pub async fn set_mode(&self, conn_id: &str, mode_id: String) -> Result<(), AcpError> {
+        self.reject_if_private_maintenance(conn_id).await?;
         let cmd_tx = {
             let connections = self.connections.lock().await;
             let conn = connections
@@ -1190,20 +1497,30 @@ impl ConnectionManager {
         &self,
         conn_id: &str,
         config_id: String,
-        value_id: String,
+        value: SessionConfigCommandValue,
     ) -> Result<(), AcpError> {
-        let cmd_tx = {
+        self.reject_if_private_maintenance(conn_id).await?;
+        let (cmd_tx, state) = {
             let connections = self.connections.lock().await;
             let conn = connections
                 .get(conn_id)
                 .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
-            conn.cmd_tx.clone()
+            (conn.cmd_tx.clone(), Arc::clone(&conn.state))
         };
+        let advertised = state
+            .read()
+            .await
+            .config_options
+            .as_ref()
+            .and_then(|options| options.iter().find(|option| option.id == config_id))
+            .is_some_and(|option| value.is_advertised_by(option));
+        if !advertised {
+            return Err(AcpError::protocol(format!(
+                "Invalid or unadvertised session config option '{config_id}'"
+            )));
+        }
         cmd_tx
-            .send(ConnectionCommand::SetConfigOption {
-                config_id,
-                value_id,
-            })
+            .send(ConnectionCommand::SetConfigOption { config_id, value })
             .await
             .map_err(|_| AcpError::ProcessExited)
     }
@@ -1216,6 +1533,7 @@ impl ConnectionManager {
         conn_id: &str,
         action: GoalControlAction,
     ) -> Result<(), AcpError> {
+        self.reject_if_private_maintenance(conn_id).await?;
         let cmd_tx = {
             let connections = self.connections.lock().await;
             let conn = connections
@@ -1241,10 +1559,21 @@ impl ConnectionManager {
                 conn.emitter.clone(),
             )
         };
+        // Capture the private origin before enqueueing cancellation: the loop
+        // may consume Cancel and clear its internal gate before this future is
+        // polled again, but the manager must still avoid public side effects.
+        let cancels_private_maintenance = state_arc.read().await.maintenance_turn_in_flight;
         cmd_tx
             .send(ConnectionCommand::Cancel)
             .await
             .map_err(|_| AcpError::ProcessExited)?;
+
+        // A private maintenance cancel resolves its caller through the
+        // connection loop; it must not mutate the conversation row or emit a
+        // public status event.
+        if cancels_private_maintenance {
+            return Ok(());
+        }
 
         // Eagerly flip the row to `Cancelled` so the sidebar/tabs leave the
         // "running" state immediately. The agent typically replies with
@@ -1293,6 +1622,7 @@ impl ConnectionManager {
         request_id: &str,
         option_id: &str,
     ) -> Result<(), AcpError> {
+        self.reject_if_private_maintenance(conn_id).await?;
         let cmd_tx = {
             let connections = self.connections.lock().await;
             let conn = connections
@@ -1333,6 +1663,7 @@ impl ConnectionManager {
         link_conversation_id: Option<i32>,
         link_folder_id: Option<i32>,
     ) -> Result<ForkResultInfo, AcpError> {
+        self.reject_if_private_maintenance(conn_id).await?;
         let (state_arc, cmd_tx, emitter) = {
             let connections = self.connections.lock().await;
             let conn = connections
@@ -1473,7 +1804,9 @@ impl ConnectionManager {
             // Surface failures even when the caller is gone (the detached task's
             // Result would otherwise be dropped silently).
             if let Err(ref e) = outcome {
-                tracing::error!("[ACP][ERROR] fork persistence failed (conn={conn_id_for_task}): {e}");
+                tracing::error!(
+                    "[ACP][ERROR] fork persistence failed (conn={conn_id_for_task}): {e}"
+                );
             }
             outcome
         });
@@ -1643,17 +1976,26 @@ impl ConnectionManager {
     }
 
     pub async fn disconnect(&self, conn_id: &str) -> Result<(), AcpError> {
-        let cmd_tx = {
+        let connection = {
             let mut connections = self.connections.lock().await;
-            connections.remove(conn_id).map(|conn| conn.cmd_tx)
+            connections.remove(conn_id)
         };
-        if let Some(cmd_tx) = cmd_tx {
-            tracing::info!("[ACP] disconnect connection={}", conn_id);
-            let _ = cmd_tx.send(ConnectionCommand::Disconnect).await;
-            Ok(())
-        } else {
-            Err(AcpError::ConnectionNotFound(conn_id.into()))
+        let Some(connection) = connection else {
+            return Err(AcpError::ConnectionNotFound(conn_id.into()));
+        };
+
+        // Latch the private origin before the loop can consume Disconnect and
+        // clear its live turn gate. The connection thread checks this sticky
+        // bit when deciding whether terminal events may enter the public stream.
+        {
+            let mut state = connection.state.write().await;
+            if state.maintenance_turn_in_flight {
+                state.suppress_public_terminal_events = true;
+            }
         }
+        tracing::info!("[ACP] disconnect connection={}", conn_id);
+        let _ = connection.cmd_tx.send(ConnectionCommand::Disconnect).await;
+        Ok(())
     }
 
     /// Probe an agent for the modes / config_options it advertises on a fresh
@@ -1823,7 +2165,7 @@ impl ConnectionManager {
     }
 
     pub async fn disconnect_by_owner_window(&self, owner_window_label: &str) -> usize {
-        let cmd_txs = {
+        let removed = {
             let mut connections = self.connections.lock().await;
             let ids: Vec<String> = connections
                 .iter()
@@ -1836,22 +2178,29 @@ impl ConnectionManager {
                 })
                 .collect();
 
-            let mut txs = Vec::with_capacity(ids.len());
+            let mut removed = Vec::with_capacity(ids.len());
             for id in ids {
                 if let Some(conn) = connections.remove(&id) {
-                    txs.push(conn.cmd_tx);
+                    removed.push(conn);
                 }
             }
-            txs
+            removed
         };
 
-        let disconnected = cmd_txs.len();
-        for cmd_tx in cmd_txs {
-            let _ = cmd_tx.send(ConnectionCommand::Disconnect).await;
+        let disconnected = removed.len();
+        for conn in removed {
+            {
+                let mut state = conn.state.write().await;
+                if state.maintenance_turn_in_flight {
+                    state.suppress_public_terminal_events = true;
+                }
+            }
+            let _ = conn.cmd_tx.send(ConnectionCommand::Disconnect).await;
         }
         tracing::info!(
             "[ACP] disconnect by owner window owner_window={} count={}",
-            owner_window_label, disconnected
+            owner_window_label,
+            disconnected
         );
         disconnected
     }
@@ -1897,14 +2246,11 @@ impl ConnectionManager {
     /// `child_pid == 0` (never spawned, already finished, or a test/viewer entry
     /// that owns no process) is skipped.
     pub async fn disconnect_all(&self) -> usize {
-        let handles: Vec<(
-            tokio::sync::mpsc::Sender<ConnectionCommand>,
-            Arc<std::sync::atomic::AtomicU32>,
-        )> = {
+        let handles: Vec<DisconnectHandle> = {
             let mut connections = self.connections.lock().await;
             connections
                 .drain()
-                .map(|(_, conn)| (conn.cmd_tx, conn.child_pid))
+                .map(|(_, conn)| (conn.cmd_tx, conn.child_pid, conn.state))
                 .collect()
         };
         let disconnected = handles.len();
@@ -1914,7 +2260,11 @@ impl ConnectionManager {
         // quit here — precisely the wedged connection whose tree most needs
         // killing. A dropped `Disconnect` just means that connection skips the
         // graceful path and gets hard-killed instead.
-        for (cmd_tx, _) in &handles {
+        for (cmd_tx, _, state) in &handles {
+            let mut snapshot = state.write().await;
+            if snapshot.maintenance_turn_in_flight {
+                snapshot.suppress_public_terminal_events = true;
+            }
             let _ = cmd_tx.try_send(ConnectionCommand::Disconnect);
         }
         tracing::info!("[ACP] disconnect_all count={}", disconnected);
@@ -1930,7 +2280,7 @@ impl ConnectionManager {
         // thread so the synchronous `kill_tree` doesn't stall the async runtime
         // while a `block_on(disconnect_all())` shutdown caller waits on it.
         let pid_cells: Vec<Arc<std::sync::atomic::AtomicU32>> =
-            handles.into_iter().map(|(_, pid)| pid).collect();
+            handles.into_iter().map(|(_, pid, _)| pid).collect();
         let _ = tokio::task::spawn_blocking(move || {
             for cell in pid_cells {
                 // Load here, not before the window — see the doc comment.
@@ -1981,8 +2331,7 @@ impl ConnectionManager {
         let mut out = Vec::new();
         for (id, conn) in connections.iter() {
             let state = conn.state.read().await;
-            let (Some(conversation_id), Some(folder_id)) =
-                (state.conversation_id, state.folder_id)
+            let (Some(conversation_id), Some(folder_id)) = (state.conversation_id, state.folder_id)
             else {
                 continue;
             };
@@ -2060,6 +2409,7 @@ impl ConnectionManager {
         conn_id: &str,
         text: String,
     ) -> Result<FeedbackItem, AcpError> {
+        self.reject_if_private_maintenance(conn_id).await?;
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err(AcpError::InvalidFeedback("empty note".into()));
@@ -2101,11 +2451,8 @@ impl ConnectionManager {
             return Self::submit_feedback_native(conn_id, state, cmd_tx, emitter, text).await;
         }
 
-        let item = FeedbackItem::new_pending(
-            uuid::Uuid::new_v4().to_string(),
-            text,
-            chrono::Utc::now(),
-        );
+        let item =
+            FeedbackItem::new_pending(uuid::Uuid::new_v4().to_string(), text, chrono::Utc::now());
         // Gate on `turn_in_flight` and append in ONE critical section (via the
         // gated emit): a `TurnComplete` (flips the flag) or `UserMessage`
         // (clears `feedback`) can't slip between the gate and the append+seq, so
@@ -2171,9 +2518,9 @@ impl ConnectionManager {
                     })
                     .await
                     .map_err(|_| AcpError::ProcessExited)?;
-                let steer = reply_rx.await.map_err(|_| {
-                    AcpError::protocol("Steer reply channel closed".to_string())
-                })??;
+                let steer = reply_rx
+                    .await
+                    .map_err(|_| AcpError::protocol("Steer reply channel closed".to_string()))??;
                 match steer {
                     // Honored opt-in: the content was NOT consumed and is
                     // still host-owned. Surface the frontend's existing
@@ -2336,6 +2683,9 @@ impl ConnectionManager {
             return None;
         }
         let (state, emitter) = self.get_state_and_emitter(conn_id).await?;
+        if state.read().await.maintenance_turn_in_flight {
+            return None;
+        }
         let question_id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = tokio::sync::oneshot::channel();
         {
@@ -2394,7 +2744,12 @@ impl ConnectionManager {
         state: &std::sync::Arc<tokio::sync::RwLock<crate::acp::SessionState>>,
         emitter: &EventEmitter,
     ) -> bool {
-        if self.pending_questions.lock().await.contains_key(question_id) {
+        if self
+            .pending_questions
+            .lock()
+            .await
+            .contains_key(question_id)
+        {
             return false;
         }
         emit_with_state(
@@ -2432,7 +2787,9 @@ impl ConnectionManager {
         // (peer-close) at the same instant; the resolved-event below still clears
         // the card.
         let _ = entry.sender.send(outcome);
-        if let Some((state, emitter)) = self.get_state_and_emitter(&entry.parent_connection_id).await
+        if let Some((state, emitter)) = self
+            .get_state_and_emitter(&entry.parent_connection_id)
+            .await
         {
             emit_with_state(
                 &state,
@@ -2457,7 +2814,9 @@ impl ConnectionManager {
         let Some(entry) = removed else {
             return;
         };
-        if let Some((state, emitter)) = self.get_state_and_emitter(&entry.parent_connection_id).await
+        if let Some((state, emitter)) = self
+            .get_state_and_emitter(&entry.parent_connection_id)
+            .await
         {
             emit_with_state(
                 &state,
@@ -2522,6 +2881,9 @@ impl ConnectionManager {
         plan_markdown: String,
     ) -> Option<RegisteredPlanApproval> {
         let (state, emitter) = self.get_state_and_emitter(conn_id).await?;
+        if state.read().await.maintenance_turn_in_flight {
+            return None;
+        }
         let approval_id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = tokio::sync::oneshot::channel();
         {
@@ -2578,7 +2940,12 @@ impl ConnectionManager {
         state: &std::sync::Arc<tokio::sync::RwLock<crate::acp::SessionState>>,
         emitter: &EventEmitter,
     ) -> bool {
-        if self.pending_plan_approvals.lock().await.contains_key(approval_id) {
+        if self
+            .pending_plan_approvals
+            .lock()
+            .await
+            .contains_key(approval_id)
+        {
             return false;
         }
         emit_with_state(
@@ -2615,8 +2982,9 @@ impl ConnectionManager {
         // (teardown) at the same instant; the resolved event below still clears
         // the card.
         let _ = entry.sender.send(answer);
-        if let Some((state, emitter)) =
-            self.get_state_and_emitter(&entry.parent_connection_id).await
+        if let Some((state, emitter)) = self
+            .get_state_and_emitter(&entry.parent_connection_id)
+            .await
         {
             emit_with_state(
                 &state,
@@ -2655,8 +3023,12 @@ impl ConnectionManager {
         // (disconnect removes it before this sweep), so tolerate `None`.
         if let Some((state, emitter)) = self.get_state_and_emitter(conn_id).await {
             for approval_id in drained {
-                emit_with_state(&state, &emitter, AcpEvent::PlanApprovalResolved { approval_id })
-                    .await;
+                emit_with_state(
+                    &state,
+                    &emitter,
+                    AcpEvent::PlanApprovalResolved { approval_id },
+                )
+                .await;
             }
         }
     }
@@ -2786,6 +3158,11 @@ impl crate::acp::delegation::spawner::ConnectionSpawner for ConnectionManagerSpa
             })?;
             let pwd = {
                 let s = parent.state.read().await;
+                if s.maintenance_turn_in_flight {
+                    return Err(SpawnerError::Spawn(
+                        "private context maintenance is in progress".to_string(),
+                    ));
+                }
                 s.working_dir
                     .as_ref()
                     .map(|p| p.to_string_lossy().to_string())
@@ -2928,10 +3305,7 @@ pub struct ConnectionManagerFeedbackLookup {
 
 #[async_trait::async_trait]
 impl SessionFeedbackAccess for ConnectionManagerFeedbackLookup {
-    async fn read_pending_feedback(
-        &self,
-        parent_connection_id: &str,
-    ) -> Vec<PendingFeedback> {
+    async fn read_pending_feedback(&self, parent_connection_id: &str) -> Vec<PendingFeedback> {
         self.manager
             .read_pending_feedback(parent_connection_id)
             .await
@@ -3073,7 +3447,10 @@ mod tests {
     async fn spawn_process_tree(pidfile: &std::path::Path) -> (std::process::Child, i32) {
         let mut child = std::process::Command::new("sh")
             .arg("-c")
-            .arg(format!("sleep 30 & echo $! > '{}'; wait", pidfile.display()))
+            .arg(format!(
+                "sleep 30 & echo $! > '{}'; wait",
+                pidfile.display()
+            ))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -3282,6 +3659,65 @@ mod tests {
             !mgr.get_state("c1").await.unwrap().read().await.config_stale,
             "staleness cleared after revert"
         );
+    }
+
+    #[tokio::test]
+    async fn refresh_connection_staleness_defers_private_maintenance_events() {
+        let mgr = ConnectionManager::new();
+        insert_fake_connection(
+            &mgr,
+            "c-private-stale",
+            AgentType::Codex,
+            None,
+            EventEmitter::Noop,
+        )
+        .await;
+        let state = mgr.get_state("c-private-stale").await.unwrap();
+        state.write().await.maintenance_turn_in_flight = true;
+        let mut fresh = HashMap::new();
+        fresh.insert(AgentType::Codex, "codex-v2".to_string());
+
+        assert_eq!(
+            mgr.refresh_connection_staleness(&fresh, ConfigStaleKind::AgentConfig)
+                .await,
+            1
+        );
+        assert!(
+            !state.read().await.config_stale,
+            "private maintenance must not receive a public stale event"
+        );
+        assert_eq!(
+            mgr.connections
+                .lock()
+                .await
+                .get("c-private-stale")
+                .unwrap()
+                .last_observed_fingerprint,
+            "",
+            "the unchanged observation lets a later public refresh report drift"
+        );
+
+        state.write().await.maintenance_turn_in_flight = false;
+        mgr.refresh_connection_staleness(&fresh, ConfigStaleKind::AgentConfig)
+            .await;
+        assert!(state.read().await.config_stale);
+    }
+
+    #[tokio::test]
+    async fn disconnect_latches_private_terminal_suppression() {
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-private-disconnect";
+        let mut cmd_rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        let state = mgr.get_state(conn_id).await.unwrap();
+        state.write().await.maintenance_turn_in_flight = true;
+
+        mgr.disconnect(conn_id).await.unwrap();
+
+        assert!(matches!(
+            cmd_rx.try_recv(),
+            Ok(ConnectionCommand::Disconnect)
+        ));
+        assert!(state.read().await.suppress_public_terminal_events);
     }
 
     /// Subscribe directly to the per-connection event stream. Phase 4b
@@ -3569,6 +4005,172 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_prompt_linked_rejects_reserved_maintenance_commands_without_side_effects() {
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/um-reserved").await;
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-um-reserved";
+        let mut cmd_rx = insert_live_connection(
+            &mgr,
+            conn_id,
+            AgentType::ClaudeCode,
+            Some(PathBuf::from("/tmp/um-reserved")),
+        )
+        .await;
+        let rows_before = count_conversation_rows(&db).await;
+
+        for command in ["/compact", " /SUMMARIZE "] {
+            let result = mgr
+                .send_prompt_linked(
+                    &db,
+                    conn_id,
+                    vec![PromptInputBlock::Text {
+                        text: command.to_string(),
+                    }],
+                    Some(folder_id),
+                    None,
+                    None,
+                )
+                .await;
+            assert!(result.is_err(), "{command} must be rejected");
+        }
+
+        assert_eq!(
+            count_conversation_rows(&db).await,
+            rows_before,
+            "reserved commands must not create or link a conversation row"
+        );
+        let state = mgr.get_state(conn_id).await.unwrap();
+        let snapshot = state.read().await;
+        assert!(!snapshot.turn_in_flight);
+        assert!(!snapshot.maintenance_turn_in_flight);
+        drop(snapshot);
+        assert!(
+            cmd_rx.try_recv().is_err(),
+            "reserved commands must not reach the connection loop"
+        );
+    }
+
+    #[tokio::test]
+    async fn public_controls_are_blocked_during_private_maintenance() {
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-private-controls";
+        let mut cmd_rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        let state = mgr.get_state(conn_id).await.unwrap();
+        {
+            let mut snapshot = state.write().await;
+            snapshot.turn_in_flight = true;
+            snapshot.maintenance_turn_in_flight = true;
+        }
+
+        let mode = mgr.set_mode(conn_id, "plan".to_string()).await;
+        let config = mgr
+            .set_config_option(
+                conn_id,
+                "model".to_string(),
+                SessionConfigCommandValue::ValueId("fast".to_string()),
+            )
+            .await;
+        let goal = mgr.goal_control(conn_id, GoalControlAction::Pause).await;
+        let permission = mgr.respond_permission(conn_id, "request", "allow").await;
+        let feedback = mgr.submit_feedback(conn_id, "ship it".to_string()).await;
+
+        for result in [
+            mode.map(|_| ()),
+            config.map(|_| ()),
+            goal.map(|_| ()),
+            permission.map(|_| ()),
+            feedback.map(|_| ()),
+        ] {
+            assert!(matches!(
+                result,
+                Err(AcpError::PrivateMaintenanceInProgress)
+            ));
+        }
+        assert!(
+            cmd_rx.try_recv().is_err(),
+            "private maintenance must not queue public control commands"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_private_maintenance_preserves_conversation_status() {
+        use crate::db::entities::conversation;
+        use crate::db::test_helpers;
+        use sea_orm::EntityTrait;
+
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/cancel-private").await;
+        let conversation_id =
+            test_helpers::seed_conversation(&db, folder_id, AgentType::ClaudeCode).await;
+        conversation_service::update_status(
+            &db.conn,
+            conversation_id,
+            ConversationStatus::InProgress,
+        )
+        .await
+        .unwrap();
+
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-cancel-private";
+        let mut cmd_rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        let state = mgr.get_state(conn_id).await.unwrap();
+        {
+            let mut snapshot = state.write().await;
+            snapshot.conversation_id = Some(conversation_id);
+            snapshot.turn_in_flight = true;
+            snapshot.maintenance_turn_in_flight = true;
+        }
+
+        mgr.cancel(&db.conn, conn_id).await.unwrap();
+
+        assert!(matches!(cmd_rx.try_recv(), Ok(ConnectionCommand::Cancel)));
+        let conversation = conversation::Entity::find_by_id(conversation_id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(conversation.status, ConversationStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn maintenance_rejects_typed_work_task_connections_before_dispatch() {
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-work-task-maintenance";
+        let mut cmd_rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        let state = mgr.get_state(conn_id).await.unwrap();
+        {
+            let mut snapshot = state.write().await;
+            snapshot.external_id = Some("session-work-task".to_string());
+            snapshot.connection_origin = ConnectionOrigin::WorkTask;
+        }
+
+        let result = mgr
+            .run_maintenance_command(
+                &db,
+                conn_id.to_string(),
+                "session-work-task".to_string(),
+                "operation-work-task".to_string(),
+                "/compact".to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.outcome, MaintenanceCommandOutcome::Failed);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("Maintenance commands are disabled for work-task sessions")
+        );
+        assert!(
+            cmd_rx.try_recv().is_err(),
+            "a rejected work-task maintenance command must not reach the loop"
+        );
+    }
+
+    #[tokio::test]
     async fn send_prompt_returns_turn_in_progress_when_busy() {
         // The non-linked `send_prompt` path (used by the chat channel) must
         // surface `TurnInProgress` — NOT a connection-loss error — when a turn
@@ -3820,6 +4422,7 @@ mod tests {
                     text: "filler".into(),
                 }],
                 user_message: None,
+                origin: PromptOrigin::User,
             })
             .await
             .unwrap();
@@ -3832,6 +4435,7 @@ mod tests {
                 text: "blocked".into(),
             }],
             None,
+            PromptOrigin::User,
         );
         let res = tokio::time::timeout(std::time::Duration::from_millis(50), fut).await;
         assert!(
@@ -4056,10 +4660,10 @@ mod tests {
         // Empty / whitespace / image-only prompts seed no title (stays NULL,
         // backfilled on first detail load as before).
         assert!(delegation_child_title_seed(&[]).is_none());
-        assert!(
-            delegation_child_title_seed(&[PromptInputBlock::Text { text: "  \n ".into() }])
-                .is_none()
-        );
+        assert!(delegation_child_title_seed(&[PromptInputBlock::Text {
+            text: "  \n ".into()
+        }])
+        .is_none());
         let img = vec![PromptInputBlock::Image {
             data: "x".into(),
             mime_type: "image/png".into(),
@@ -5389,7 +5993,10 @@ mod tests {
         .unwrap();
         let (mgr, join) =
             manager_with_fake_fork("c-restack", pre.id, "session-S2", "session-S1").await;
-        let result = mgr.fork_session(&db, "c-restack", None, None).await.unwrap();
+        let result = mgr
+            .fork_session(&db, "c-restack", None, None)
+            .await
+            .unwrap();
         let _ = join.await;
 
         let current = conversation_service::get_by_id(&db.conn, pre.id)
@@ -6004,7 +6611,11 @@ mod tests {
         let at_bound = "y".repeat(MAX_FEEDBACK_CHARS);
         assert!(mgr.submit_feedback("c1", at_bound).await.is_ok());
         let state = mgr.get_state("c1").await.unwrap();
-        assert_eq!(state.read().await.feedback.len(), 1, "only the valid note stuck");
+        assert_eq!(
+            state.read().await.feedback.len(),
+            1,
+            "only the valid note stuck"
+        );
     }
 
     // --- native steering (push channel) ----------------------------------
@@ -6046,7 +6657,10 @@ mod tests {
         set_feedback_tool_available(&mgr, "c1").await;
         let fake_loop = answer_steer(rx, Ok(SteerOutcome::Injected));
 
-        let item = mgr.submit_feedback("c1", "  ship it  ".into()).await.unwrap();
+        let item = mgr
+            .submit_feedback("c1", "  ship it  ".into())
+            .await
+            .unwrap();
         assert_eq!(item.status, FeedbackStatus::Delivered);
         assert!(item.delivered_at.is_some());
         assert_eq!(item.text, "ship it");
@@ -6226,7 +6840,10 @@ mod tests {
         mark_native_steering_ready(&mgr, "c1").await;
         // feedback_tool_available stays false.
         let fake_loop = answer_steer(rx, Ok(SteerOutcome::Injected));
-        let item = mgr.submit_feedback("c1", "no tool needed".into()).await.unwrap();
+        let item = mgr
+            .submit_feedback("c1", "no tool needed".into())
+            .await
+            .unwrap();
         assert_eq!(item.status, FeedbackStatus::Delivered);
         let _ = fake_loop.await;
     }
@@ -6538,7 +7155,12 @@ mod tests {
         // The first is still the pending one and still answerable.
         let state = mgr.get_state("cc2").await.unwrap();
         assert_eq!(
-            state.read().await.pending_question.as_ref().map(|p| p.question_id.clone()),
+            state
+                .read()
+                .await
+                .pending_question
+                .as_ref()
+                .map(|p| p.question_id.clone()),
             Some(first.question_id.clone())
         );
         mgr.answer_question(
@@ -6574,12 +7196,7 @@ mod tests {
         assert_eq!(texts, vec!["a", "b"]);
         // A second read still returns them — read is non-destructive, so an
         // abandoned (peer-closed) call leaves the notes retryable.
-        assert_eq!(
-            mgr.read_pending_feedback("c1")
-                .await
-                .len(),
-            2
-        );
+        assert_eq!(mgr.read_pending_feedback("c1").await.len(), 2);
         {
             let state = mgr.get_state("c1").await.unwrap();
             assert!(state
@@ -6594,10 +7211,7 @@ mod tests {
         mgr.commit_feedback_delivered("c1", vec![a.id.clone(), b.id.clone()])
             .await;
         // Now READ returns nothing (delivered notes are filtered out).
-        assert!(mgr
-            .read_pending_feedback("c1")
-            .await
-            .is_empty());
+        assert!(mgr.read_pending_feedback("c1").await.is_empty());
         let state = mgr.get_state("c1").await.unwrap();
         assert!(state
             .read()
@@ -6613,12 +7227,9 @@ mod tests {
     #[tokio::test]
     async fn read_pending_missing_connection_returns_empty() {
         let mgr = ConnectionManager::new();
-        assert!(mgr
-            .read_pending_feedback("nope")
-            .await
-            .is_empty());
+        assert!(mgr.read_pending_feedback("nope").await.is_empty());
         // Commit on a missing connection is a safe no-op.
-        mgr.commit_feedback_delivered("nope", vec!["x".into()]).await;
+        mgr.commit_feedback_delivered("nope", vec!["x".into()])
+            .await;
     }
-
 }

@@ -43,12 +43,10 @@ use crate::db::service::{conversation_service, tab_service, work_task_service};
 use crate::db::AppDatabase;
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
 use crate::models::{
-    AgentType, WorkTaskConfig, WorkTaskFolderSettings, WorkTaskMergeState,
-    WorkTaskPreflight, STAGE_PROMPT_ALL,
+    AgentType, WorkTaskConfig, WorkTaskFolderSettings, WorkTaskMergeState, WorkTaskPreflight,
+    STAGE_PROMPT_ALL,
 };
-use crate::web::event_bridge::{
-    emit_event, EventEmitter, WorkTaskChange, WORK_TASK_CHANGED_EVENT,
-};
+use crate::web::event_bridge::{emit_event, EventEmitter, WorkTaskChange, WORK_TASK_CHANGED_EVENT};
 use crate::work_task::git as task_git;
 
 /// Reconcile sweep cadence.
@@ -397,7 +395,11 @@ impl TaskEngine {
 
     /// Return a reviewed task to the agent with feedback. Launches directly
     /// (explicit user action — does not wait behind the queue).
-    pub async fn return_task(self: &Arc<Self>, task_id: i32, feedback: String) -> Result<(), String> {
+    pub async fn return_task(
+        self: &Arc<Self>,
+        task_id: i32,
+        feedback: String,
+    ) -> Result<(), String> {
         let task = work_task_service::get_model(&self.db.conn, task_id)
             .await
             .map_err(|e| e.to_string())?;
@@ -470,7 +472,9 @@ impl TaskEngine {
         self.awaiting.lock().await.remove(&task_id);
 
         // Converge a stranded InProgress conversation.
-        let task = work_task_service::get_model(&self.db.conn, task_id).await.ok();
+        let task = work_task_service::get_model(&self.db.conn, task_id)
+            .await
+            .ok();
         if let Some(conv_id) = task.as_ref().and_then(|t| t.conversation_id) {
             if self.conversation_status(conv_id).await == Some(ConversationStatus::InProgress) {
                 self.cancel_conversation(conv_id).await;
@@ -534,28 +538,26 @@ impl TaskEngine {
                 .filter(|(_, owner)| owner.folder_id == folder_id)
                 .map(|(tid, _)| *tid)
                 .collect();
-            let active = match work_task_service::active_launched_count(&self.db.conn, folder_id)
-                .await
-            {
-                Ok(n) => n + launching.len() as u64,
-                Err(e) => {
-                    tracing::warn!("[work_task] pump count error: {e}");
-                    return;
-                }
-            };
+            let active =
+                match work_task_service::active_launched_count(&self.db.conn, folder_id).await {
+                    Ok(n) => n + launching.len() as u64,
+                    Err(e) => {
+                        tracing::warn!("[work_task] pump count error: {e}");
+                        return;
+                    }
+                };
             if max != 0 && active >= max {
                 return;
             }
-            let next = match work_task_service::next_queued(&self.db.conn, folder_id, &launching)
-                .await
-            {
-                Ok(Some(t)) => t,
-                Ok(None) => return,
-                Err(e) => {
-                    tracing::warn!("[work_task] pump next error: {e}");
-                    return;
-                }
-            };
+            let next =
+                match work_task_service::next_queued(&self.db.conn, folder_id, &launching).await {
+                    Ok(Some(t)) => t,
+                    Ok(None) => return,
+                    Err(e) => {
+                        tracing::warn!("[work_task] pump next error: {e}");
+                        return;
+                    }
+                };
             // Claimed synchronously: this loop iterates immediately, and the
             // task must already read as in-flight when it does.
             let token = self.claim_launch_slot(next.id, folder_id).await;
@@ -675,8 +677,7 @@ impl TaskEngine {
         // Effective agent + config: task override > folder task settings >
         // folder default agent. Audited via a config_effective event (values
         // are inherited live, never frozen).
-        let cfg: WorkTaskConfig =
-            serde_json::from_str(&task.config).unwrap_or_default();
+        let cfg: WorkTaskConfig = serde_json::from_str(&task.config).unwrap_or_default();
         let settings = work_task_service::settings_get_effective(&self.db.conn, task.folder_id)
             .await
             .unwrap_or_default();
@@ -785,10 +786,14 @@ impl TaskEngine {
             }
         };
 
-        let runtime_env =
-            build_session_runtime_env(&self.db, agent_type, resume_session_id.as_deref(), &self.data_dir)
-                .await
-                .map_err(|e| e.to_string())?;
+        let runtime_env = build_session_runtime_env(
+            &self.db,
+            agent_type,
+            resume_session_id.as_deref(),
+            &self.data_dir,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         verify_agent_installed(agent_type)
             .await
             .map_err(|e| e.to_string())?;
@@ -967,7 +972,9 @@ impl TaskEngine {
             }
         }
 
-        let head = resolve_git_head(&root.path).await.map_err(|e| e.to_string())?;
+        let head = resolve_git_head(&root.path)
+            .await
+            .map_err(|e| e.to_string())?;
         let base_branch = head
             .branch
             .ok_or_else(|| "project folder is not on a branch (detached HEAD?)".to_string())?;
@@ -1024,7 +1031,10 @@ impl TaskEngine {
 
     /// The task's recorded worktree, required to exist on disk — the merge
     /// generation must never mint a fresh (empty) one.
-    async fn existing_worktree(&self, task: &crate::db::entities::work_task::Model) -> Result<WorktreeRef, String> {
+    async fn existing_worktree(
+        &self,
+        task: &crate::db::entities::work_task::Model,
+    ) -> Result<WorktreeRef, String> {
         let wt_id = task
             .worktree_folder_id
             .ok_or_else(|| "task has no worktree".to_string())?;
@@ -1071,8 +1081,12 @@ impl TaskEngine {
         if ok {
             Ok(())
         } else {
-            let code = exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
-            Err(format!("worktree init command failed (exit {code}): {tail}"))
+            let code = exit_code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "?".into());
+            Err(format!(
+                "worktree init command failed (exit {code}): {tail}"
+            ))
         }
     }
 
@@ -1242,7 +1256,9 @@ impl TaskEngine {
         self.awaiting.lock().await.remove(&task_id);
         let _ = self.manager.disconnect(conn_id).await;
 
-        let task = work_task_service::get_model(&self.db.conn, task_id).await.ok();
+        let task = work_task_service::get_model(&self.db.conn, task_id)
+            .await
+            .ok();
 
         // A merge generation settles from git truth whatever the stop reason —
         // the agent may have landed the merge and then errored or been stopped.
@@ -1507,7 +1523,9 @@ impl TaskEngine {
 
     /// Best-effort diff-stat snapshot of the task worktree vs its base.
     async fn snapshot_diff_stats(&self, task_id: i32) -> Option<(i32, i32, i32)> {
-        let task = work_task_service::get_model(&self.db.conn, task_id).await.ok()?;
+        let task = work_task_service::get_model(&self.db.conn, task_id)
+            .await
+            .ok()?;
         let wt_id = task.worktree_folder_id?;
         let base = task.base_sha.clone()?;
         let wt = get_folder_core(&self.db, wt_id).await.ok()?;
@@ -1574,9 +1592,13 @@ impl TaskEngine {
                 .into_iter()
                 .any(|t| t.folder_id == task.folder_id);
         if another_merging {
-            return Err("another task of this project is already merging — wait for it".to_string());
+            return Err(
+                "another task of this project is already merging — wait for it".to_string(),
+            );
         }
-        let head = resolve_git_head(&root.path).await.map_err(|e| e.to_string())?;
+        let head = resolve_git_head(&root.path)
+            .await
+            .map_err(|e| e.to_string())?;
         if head.branch.as_deref() != Some(base_branch.as_str()) {
             return Err(format!(
                 "project folder is on '{}', expected '{base_branch}' — switch back to merge",
@@ -1659,8 +1681,12 @@ impl TaskEngine {
             .as_deref()
             .and_then(|s| serde_json::from_str::<WorkTaskMergeState>(s).ok())
         else {
-            self.back_to_review(task_id, "merge state lost — please merge again".to_string(), None)
-                .await;
+            self.back_to_review(
+                task_id,
+                "merge state lost — please merge again".to_string(),
+                None,
+            )
+            .await;
             return;
         };
         let root = match get_folder_core(&self.db, task.folder_id).await {
@@ -1952,12 +1978,9 @@ impl TaskEngine {
             return;
         };
 
-        if let Err(e) = task_git::remove_worktree_and_branch(
-            &root.path,
-            &wt.path,
-            task.work_branch.as_deref(),
-        )
-        .await
+        if let Err(e) =
+            task_git::remove_worktree_and_branch(&root.path, &wt.path, task.work_branch.as_deref())
+                .await
         {
             let _ = work_task_service::set_cleanup_state(
                 &self.db.conn,
@@ -2106,10 +2129,7 @@ impl TaskEngine {
                 }
                 match work_task_service::abandon_setup(&self.db.conn, task.id, task.run_seq).await {
                     Ok(true) => {
-                        tracing::info!(
-                            "[work_task] requeued orphaned setup of task {}",
-                            task.id
-                        );
+                        tracing::info!("[work_task] requeued orphaned setup of task {}", task.id);
                         self.emit_upsert(task.id);
                     }
                     Ok(false) => {}
@@ -2332,9 +2352,7 @@ async fn compose_prompt(
                 blocks.extend(original);
             }
             let land_command = if strategy == "merge" {
-                format!(
-                    "git -C \"{root_path}\" merge --no-ff -m \"<message>\" {work_branch}"
-                )
+                format!("git -C \"{root_path}\" merge --no-ff -m \"<message>\" {work_branch}")
             } else {
                 format!(
                     "git -C \"{root_path}\" merge --squash {work_branch} && \
@@ -2399,10 +2417,7 @@ async fn compose_prompt(
 
 /// The user's own instructions for a stage: the `all` text (every stage) then
 /// the stage's own, as one trailing block. Empty when neither is configured.
-fn stage_prompt_block(
-    settings: &WorkTaskFolderSettings,
-    stage: &str,
-) -> Option<PromptInputBlock> {
+fn stage_prompt_block(settings: &WorkTaskFolderSettings, stage: &str) -> Option<PromptInputBlock> {
     let extras: Vec<&str> = [STAGE_PROMPT_ALL, stage]
         .into_iter()
         .filter_map(|key| settings.stage_prompts.get(key))
@@ -2422,7 +2437,9 @@ async fn latest_return_feedback(
     conn: &sea_orm::DatabaseConnection,
     task_id: i32,
 ) -> Option<String> {
-    let events = work_task_service::list_events(conn, task_id, 500).await.ok()?;
+    let events = work_task_service::list_events(conn, task_id, 500)
+        .await
+        .ok()?;
     events
         .into_iter()
         .rev()
@@ -2786,7 +2803,10 @@ mod tests {
         let modes = [
             (LaunchMode::Fresh, "WORK-ONLY"),
             (LaunchMode::Retry, "RETRY-ONLY"),
-            (LaunchMode::Return("please fix the copy".to_string()), "RETURN-ONLY"),
+            (
+                LaunchMode::Return("please fix the copy".to_string()),
+                "RETURN-ONLY",
+            ),
             (merge_mode(), "MERGE-ONLY"),
         ];
         for (mode, expected) in modes {
@@ -2801,7 +2821,10 @@ mod tests {
             .await
             .expect("compose");
             let joined = texts(&blocks).join("\n");
-            assert!(joined.contains("EVERY-STAGE"), "{expected}: missing all-stage text");
+            assert!(
+                joined.contains("EVERY-STAGE"),
+                "{expected}: missing all-stage text"
+            );
             assert!(joined.contains(expected), "{expected}: missing own text");
             for other in ["WORK-ONLY", "RETRY-ONLY", "RETURN-ONLY", "MERGE-ONLY"] {
                 if other != expected {
@@ -2829,7 +2852,9 @@ mod tests {
         let texts = texts(&blocks);
         // The merge generation replaces the guard (it forbids exactly what a
         // merge must do) — the user's extra still trails it.
-        assert!(texts.iter().all(|t| !t.starts_with("—— Work task context ——")));
+        assert!(texts
+            .iter()
+            .all(|t| !t.starts_with("—— Work task context ——")));
         assert!(texts[0].contains("land it onto the base branch"));
         assert!(texts
             .last()

@@ -15,7 +15,9 @@
  * The backend tears a connection down unconditionally, so the agent CLI dies
  * with its in-flight turn — which agents record in their own transcript as an
  * interrupted request — and any launched-but-unresolved background task
- * (async sub-agent / background shell) dies with it.
+ * (async sub-agent / background shell) dies with it. A private maintenance
+ * operation belongs here too: it intentionally does not surface as a public
+ * `prompting` turn, but disconnecting it still kills the agent CLI mid-request.
  *
  * Only OWNERS need this gate: a viewer's teardown detaches and never kills
  * anything, and the sweeps skip viewers, so one left attached leaks its
@@ -25,6 +27,11 @@
 export function isConnectionBusy(conn: {
   status: string | null
   backgroundOutstanding: number
+  activeCompactionOperationId?: string | null
 }): boolean {
-  return conn.status === "prompting" || conn.backgroundOutstanding > 0
+  return (
+    conn.status === "prompting" ||
+    conn.backgroundOutstanding > 0 ||
+    conn.activeCompactionOperationId != null
+  )
 }

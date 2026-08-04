@@ -22,7 +22,10 @@ async fn run_git(path: &str, args: &[&str]) -> Result<std::process::Output, AppC
 pub async fn git_dir(path: &str) -> Result<std::path::PathBuf, AppCommandError> {
     let out = run_git(path, &["rev-parse", "--absolute-git-dir"]).await?;
     if !out.status.success() {
-        return Err(git_command_error("rev-parse --absolute-git-dir", &out.stderr));
+        return Err(git_command_error(
+            "rev-parse --absolute-git-dir",
+            &out.stderr,
+        ));
     }
     let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if dir.is_empty() {
@@ -36,7 +39,11 @@ pub async fn git_dir(path: &str) -> Result<std::path::PathBuf, AppCommandError> 
 
 /// Resolve a revision to a full sha.
 pub async fn rev_parse(path: &str, rev: &str) -> Result<String, AppCommandError> {
-    let out = run_git(path, &["rev-parse", "--verify", &format!("{rev}^{{commit}}")]).await?;
+    let out = run_git(
+        path,
+        &["rev-parse", "--verify", &format!("{rev}^{{commit}}")],
+    )
+    .await?;
     if !out.status.success() {
         return Err(git_command_error("rev-parse", &out.stderr));
     }

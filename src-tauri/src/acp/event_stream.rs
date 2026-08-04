@@ -257,8 +257,7 @@ fn json_value_size(value: &serde_json::Value) -> usize {
         serde_json::Value::String(s) => json_str_len(s),
         serde_json::Value::Array(items) => {
             // `[` + elements + `,` between them + `]`.
-            2 + items.len().saturating_sub(1)
-                + items.iter().map(json_value_size).sum::<usize>()
+            2 + items.len().saturating_sub(1) + items.iter().map(json_value_size).sum::<usize>()
         }
         serde_json::Value::Object(map) => {
             // `{` + `"key":value` pairs + `,` between them + `}`.
@@ -556,7 +555,10 @@ mod tests {
         Arc::new(EventEnvelope {
             seq,
             connection_id: "c".into(),
-            payload: AcpEvent::ContentDelta { text: text.into(), parent_tool_use_id: None },
+            payload: AcpEvent::ContentDelta {
+                text: text.into(),
+                parent_tool_use_id: None,
+            },
         })
     }
 
@@ -768,7 +770,10 @@ mod tests {
             "escape-aware estimate {est} must trip the cap like serialized {serialized}"
         );
         // Never undercount the serialized envelope (the per-event cap invariant).
-        assert!(est >= serialized, "estimate {est} < serialized {serialized}");
+        assert!(
+            est >= serialized,
+            "estimate {est} < serialized {serialized}"
+        );
     }
 
     #[test]
@@ -795,7 +800,10 @@ mod tests {
             est > RECENT_EVENT_MAX_BYTES,
             "comma-aware estimate {est} must trip the cap like serialized {serialized}"
         );
-        assert!(est >= serialized, "estimate {est} < serialized {serialized}");
+        assert!(
+            est >= serialized,
+            "estimate {est} < serialized {serialized}"
+        );
     }
 
     #[test]
@@ -1084,7 +1092,10 @@ mod tests {
             },
         });
         let serialized = serde_json::to_vec(&*env).expect("serialize").len();
-        assert!(serialized > RECENT_EVENT_MAX_BYTES, "serialized {serialized}");
+        assert!(
+            serialized > RECENT_EVENT_MAX_BYTES,
+            "serialized {serialized}"
+        );
         assert!(
             estimate_envelope_size(&env) > RECENT_EVENT_MAX_BYTES,
             "estimate must trip the cap like serialized {serialized}"
@@ -1110,7 +1121,10 @@ mod tests {
             },
         });
         let serialized = serde_json::to_vec(&*env).expect("serialize").len();
-        assert!(serialized > RECENT_EVENT_MAX_BYTES, "serialized {serialized}");
+        assert!(
+            serialized > RECENT_EVENT_MAX_BYTES,
+            "serialized {serialized}"
+        );
         assert!(estimate_envelope_size(&env) > RECENT_EVENT_MAX_BYTES);
     }
 
@@ -1128,7 +1142,10 @@ mod tests {
             tool_update_with_image(1, evil.clone()),
         ] {
             let serialized = serde_json::to_vec(&*env).expect("serialize").len();
-            assert!(serialized > RECENT_EVENT_MAX_BYTES, "serialized {serialized}");
+            assert!(
+                serialized > RECENT_EVENT_MAX_BYTES,
+                "serialized {serialized}"
+            );
             assert!(
                 estimate_envelope_size(&env) > RECENT_EVENT_MAX_BYTES,
                 "escape-aware image sizing must trip the cap (serialized {serialized})"
@@ -1151,7 +1168,10 @@ mod tests {
             },
         });
         let serialized = serde_json::to_vec(&*env).expect("serialize").len();
-        assert!(serialized > RECENT_EVENT_MAX_BYTES, "serialized {serialized}");
+        assert!(
+            serialized > RECENT_EVENT_MAX_BYTES,
+            "serialized {serialized}"
+        );
         assert!(estimate_envelope_size(&env) > RECENT_EVENT_MAX_BYTES);
         assert_ge_serialized(&env);
     }

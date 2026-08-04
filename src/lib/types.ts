@@ -1136,7 +1136,13 @@ export interface SessionConfigSelectInfo {
   groups: SessionConfigSelectGroupInfo[]
 }
 
-export type SessionConfigKindInfo = { type: "select" } & SessionConfigSelectInfo
+export interface SessionConfigBooleanInfo {
+  current_value: boolean
+}
+
+export type SessionConfigKindInfo =
+  | ({ type: "select" } & SessionConfigSelectInfo)
+  | ({ type: "boolean" } & SessionConfigBooleanInfo)
 
 export interface SessionConfigOptionInfo {
   id: string
@@ -2014,38 +2020,35 @@ export interface AcpAgentInfo {
   enabled: boolean
   sort_order: number
   installed_version: string | null
+  model_provider_id: number | null
+  /** Whether pi uses a custom skill/config directory. This summary-only flag
+   * lets skill surfaces exclude it without receiving the launch environment. */
+  uses_custom_skill_dir: boolean
+  /** Display icon for a custom ACP agent — normally an inlined
+   *  `data:image/…;base64,…` URL. Always null for built-ins, which ship
+   *  hand-drawn marks in `agent-icon.tsx`. */
+  icon_url: string | null
+}
+
+/** Raw/structured ACP settings loaded only for the selected Settings agent. */
+export interface AcpAgentEditableConfig {
   env: Record<string, string>
   config_json: string | null
   config_file_path: string | null
   opencode_auth_json: string | null
   codex_auth_json: string | null
   codex_config_toml: string | null
-  /** Compact structured codex model-catalog source (the custom-model list),
-   *  round-tripped into the settings editor. Codex + api-key mode only. */
   codex_model_catalog: string | null
-  /** Parsed sandbox / approval keys backing the Codex panel's structured
-   * controls. Codex agent only; derived from codex_config_toml. */
   codex_sandbox_settings: CodexSandboxSettings | null
   cline_secrets_json: string | null
-  /** Raw ~/.hermes/config.yaml text, for the Hermes panel's advanced editor. */
   hermes_config_yaml: string | null
-  /** Raw ~/.grok/config.toml text, for the Grok panel's config-file editor. */
   grok_config_toml: string | null
-  /** Parsed scalar settings backing the Grok panel's structured controls. Only
-   * populated for the Grok agent; derived from grok_config_toml. */
   grok_settings: GrokSettings | null
-  /** Raw ~/.cursor/cli-config.json text, for the Cursor panel's advanced view. */
   cursor_cli_config_json: string | null
-  /** Parsed scalar settings backing the Cursor panel's structured controls
-   * (sandbox / permission rules; the Run Everything permission mode is a
-   * launch flag, not a config key). Cursor agent only. */
   cursor_settings: CursorSettings | null
-  model_provider_id: number | null
-  /** Display icon for a custom ACP agent — normally an inlined
-   *  `data:image/…;base64,…` URL. Always null for built-ins, which ship
-   *  hand-drawn marks in `agent-icon.tsx`. */
-  icon_url: string | null
 }
+
+export type AcpAgentSettingsInfo = AcpAgentInfo & AcpAgentEditableConfig
 
 /** Parsed sandbox / approval keys from ~/.codex/config.toml. Serialized
  * snake_case to match AcpAgentInfo.
@@ -2214,6 +2217,44 @@ export interface CursorModelsResult {
   error: string | null
 }
 
+export type ConfiguredModelSource =
+  | "agent_env"
+  | "agent_config_env"
+  | "agent_root_config"
+
+export type ContextWindowMaxSource =
+  | "agent_env"
+  | "agent_config_env"
+  | "agent_root_config"
+
+/** Sanitized context-management inputs returned by acp_get_agent_status. */
+export interface ContextRuntimeConfigInfo {
+  configured_model: string | null
+  configured_model_source: ConfiguredModelSource | null
+  configured_context_window_max_tokens: number | null
+  context_window_max_source: ContextWindowMaxSource | null
+  auto_compaction_enabled: boolean | null
+  auto_compaction_threshold: number | null
+  native_auto_compact_window: number | null
+}
+
+export type MaintenanceCommand = "/compact" | "/summarize"
+
+export type MaintenanceCommandOutcome =
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "stale"
+
+export interface MaintenanceCommandResult {
+  operation_id: string
+  connection_id: string
+  session_id: string
+  stop_reason: string | null
+  outcome: MaintenanceCommandOutcome
+  error: string | null
+}
+
 // Lightweight agent status returned by acp_get_agent_status
 export interface AcpAgentStatus {
   agent_type: AgentType
@@ -2222,6 +2263,7 @@ export interface AcpAgentStatus {
   installed_version: string | null
   /** See AcpAgentInfo.is_acp_adapter. */
   is_acp_adapter: boolean
+  context_runtime_config: ContextRuntimeConfigInfo
 }
 
 // Environment diagnostics (returned by acp_env_diagnostics). Mirrors the Rust

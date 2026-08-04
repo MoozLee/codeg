@@ -21,7 +21,9 @@ use sea_orm::{
 };
 
 use crate::db::entities::work_task::WorkTaskStatus;
-use crate::db::entities::{folder, work_task, work_task_event, work_task_settings, work_task_template};
+use crate::db::entities::{
+    folder, work_task, work_task_event, work_task_settings, work_task_template,
+};
 use crate::db::error::DbError;
 use crate::models::{
     WorkTaskConfig, WorkTaskDraft, WorkTaskEventInfo, WorkTaskFolderSettings, WorkTaskInfo,
@@ -168,9 +170,7 @@ pub async fn list(
         .filter(|t| {
             matches!(
                 t.status,
-                WorkTaskStatus::Running
-                    | WorkTaskStatus::AwaitingInput
-                    | WorkTaskStatus::Merging
+                WorkTaskStatus::Running | WorkTaskStatus::AwaitingInput | WorkTaskStatus::Merging
             )
         })
         .map(|t| t.id)
@@ -249,10 +249,7 @@ pub async fn list_by_status(
 }
 
 /// Ids of all todo tasks of a folder, in board order (for "start all").
-pub async fn list_todo_ids(
-    conn: &DatabaseConnection,
-    folder_id: i32,
-) -> Result<Vec<i32>, DbError> {
+pub async fn list_todo_ids(conn: &DatabaseConnection, folder_id: i32) -> Result<Vec<i32>, DbError> {
     let rows = work_task::Entity::find()
         .filter(work_task::Column::DeletedAt.is_null())
         .filter(work_task::Column::FolderId.eq(folder_id))
@@ -293,9 +290,7 @@ pub async fn next_queued(
 pub async fn folders_with_pending(conn: &DatabaseConnection) -> Result<Vec<i32>, DbError> {
     let rows = work_task::Entity::find()
         .filter(work_task::Column::DeletedAt.is_null())
-        .filter(
-            work_task::Column::Status.is_in([WorkTaskStatus::Todo, WorkTaskStatus::Queued]),
-        )
+        .filter(work_task::Column::Status.is_in([WorkTaskStatus::Todo, WorkTaskStatus::Queued]))
         .inner_join(folder::Entity)
         .filter(folder::Column::DeletedAt.is_null())
         .all(conn)
@@ -533,7 +528,10 @@ pub async fn claim_for_run(
             work_task::Column::RunSeq,
             Expr::col(work_task::Column::RunSeq).add(1),
         )
-        .col_expr(work_task::Column::FailureReason, Expr::value(None::<String>))
+        .col_expr(
+            work_task::Column::FailureReason,
+            Expr::value(None::<String>),
+        )
         .col_expr(work_task::Column::LastError, Expr::value(None::<String>))
         // A fresh generation invalidates the previous run's self-reported
         // verdict (result_summary stays visible until the next settle).
@@ -546,7 +544,10 @@ pub async fn claim_for_run(
             work_task::Column::ArchivedAt,
             Expr::value(None::<chrono::DateTime<Utc>>),
         )
-        .col_expr(work_task::Column::FinishedAt, Expr::value(None::<chrono::DateTime<Utc>>))
+        .col_expr(
+            work_task::Column::FinishedAt,
+            Expr::value(None::<chrono::DateTime<Utc>>),
+        )
         .col_expr(work_task::Column::UpdatedAt, Expr::value(now))
         .filter(work_task::Column::Id.eq(id))
         .filter(work_task::Column::Status.eq(from))
@@ -637,9 +638,15 @@ pub async fn auto_claim_next(
                 work_task::Column::RunSeq,
                 Expr::col(work_task::Column::RunSeq).add(1),
             )
-            .col_expr(work_task::Column::FailureReason, Expr::value(None::<String>))
+            .col_expr(
+                work_task::Column::FailureReason,
+                Expr::value(None::<String>),
+            )
             .col_expr(work_task::Column::LastError, Expr::value(None::<String>))
-            .col_expr(work_task::Column::FinishedAt, Expr::value(None::<chrono::DateTime<Utc>>))
+            .col_expr(
+                work_task::Column::FinishedAt,
+                Expr::value(None::<chrono::DateTime<Utc>>),
+            )
             .col_expr(work_task::Column::UpdatedAt, Expr::value(now))
             .filter(work_task::Column::Id.eq(head.id))
             .filter(work_task::Column::Status.eq(WorkTaskStatus::Todo))
@@ -694,14 +701,20 @@ pub async fn requeue_canceled(conn: &DatabaseConnection, id: i32) -> Result<bool
             work_task::Column::Status,
             Expr::value(status_str(WorkTaskStatus::Todo)),
         )
-        .col_expr(work_task::Column::FailureReason, Expr::value(None::<String>))
+        .col_expr(
+            work_task::Column::FailureReason,
+            Expr::value(None::<String>),
+        )
         .col_expr(work_task::Column::LastError, Expr::value(None::<String>))
         .col_expr(work_task::Column::PendingMerge, Expr::value(None::<String>))
         .col_expr(
             work_task::Column::ArchivedAt,
             Expr::value(None::<chrono::DateTime<Utc>>),
         )
-        .col_expr(work_task::Column::FinishedAt, Expr::value(None::<chrono::DateTime<Utc>>))
+        .col_expr(
+            work_task::Column::FinishedAt,
+            Expr::value(None::<chrono::DateTime<Utc>>),
+        )
         .col_expr(work_task::Column::UpdatedAt, Expr::value(now))
         .filter(work_task::Column::Id.eq(id))
         .filter(work_task::Column::Status.eq(WorkTaskStatus::Canceled))
@@ -1042,8 +1055,14 @@ pub async fn settle_review(
             work_task::Column::FilesChanged,
             Expr::value(stats.map(|s| s.0)),
         )
-        .col_expr(work_task::Column::Additions, Expr::value(stats.map(|s| s.1)))
-        .col_expr(work_task::Column::Deletions, Expr::value(stats.map(|s| s.2)))
+        .col_expr(
+            work_task::Column::Additions,
+            Expr::value(stats.map(|s| s.1)),
+        )
+        .col_expr(
+            work_task::Column::Deletions,
+            Expr::value(stats.map(|s| s.2)),
+        )
         .col_expr(work_task::Column::ConnectionId, Expr::value(None::<String>))
         // A fresh review starts with a fresh light; the preflight runner
         // rewrites it right after when one is configured.
@@ -1413,7 +1432,11 @@ pub async fn set_cleanup_state(
     work_task::Entity::update_many()
         .col_expr(
             work_task::Column::CleanupState,
-            Expr::value(if failed { Some("failed".to_string()) } else { None }),
+            Expr::value(if failed {
+                Some("failed".to_string())
+            } else {
+                None
+            }),
         )
         .col_expr(work_task::Column::UpdatedAt, Expr::value(now))
         .filter(work_task::Column::Id.eq(id))
@@ -1436,7 +1459,10 @@ pub async fn set_cleanup_state(
 /// Detach the (now removed) worktree from the task and clear any cleanup flag.
 pub async fn clear_worktree(conn: &DatabaseConnection, id: i32) -> Result<(), DbError> {
     work_task::Entity::update_many()
-        .col_expr(work_task::Column::WorktreeFolderId, Expr::value(None::<i32>))
+        .col_expr(
+            work_task::Column::WorktreeFolderId,
+            Expr::value(None::<i32>),
+        )
         .col_expr(work_task::Column::CleanupState, Expr::value(None::<String>))
         .col_expr(work_task::Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(work_task::Column::Id.eq(id))
@@ -1516,10 +1542,7 @@ pub async fn settings_get_own(
 
 /// Drop the folder's own settings row so it follows the global defaults
 /// again. Idempotent — a folder without a row is left as-is.
-pub async fn settings_delete(
-    conn: &DatabaseConnection,
-    folder_id: i32,
-) -> Result<(), DbError> {
+pub async fn settings_delete(conn: &DatabaseConnection, folder_id: i32) -> Result<(), DbError> {
     work_task_settings::Entity::delete_many()
         .filter(work_task_settings::Column::FolderId.eq(folder_id))
         .exec(conn)
@@ -1622,7 +1645,9 @@ pub async fn template_save(
         return Err(DbError::Validation("template title is required".into()));
     }
     if !draft.config.is_object() {
-        return Err(DbError::Validation("template config must be an object".into()));
+        return Err(DbError::Validation(
+            "template config must be an object".into(),
+        ));
     }
     let config = serde_json::to_string(&draft.config)
         .map_err(|e| DbError::Validation(format!("template config not serializable: {e}")))?;
@@ -1655,7 +1680,9 @@ pub async fn template_save(
 }
 
 pub async fn template_delete(conn: &DatabaseConnection, id: i32) -> Result<(), DbError> {
-    work_task_template::Entity::delete_by_id(id).exec(conn).await?;
+    work_task_template::Entity::delete_by_id(id)
+        .exec(conn)
+        .await?;
     Ok(())
 }
 
@@ -1685,7 +1712,9 @@ mod tests {
         no_prompt.config = serde_json::json!({ "display_text": "", "prompt_blocks": [] });
         assert!(create(&db.conn, no_prompt).await.is_err());
 
-        let t = create(&db.conn, draft(folder_id, "fix login")).await.unwrap();
+        let t = create(&db.conn, draft(folder_id, "fix login"))
+            .await
+            .unwrap();
         assert_eq!(t.status, WorkTaskStatus::Todo);
         assert_eq!(t.run_seq, 0);
 
@@ -1715,7 +1744,10 @@ mod tests {
                 .unwrap(),
             None
         );
-        assert_eq!(get(&db.conn, t.id).await.unwrap().status, WorkTaskStatus::Queued);
+        assert_eq!(
+            get(&db.conn, t.id).await.unwrap().status,
+            WorkTaskStatus::Queued
+        );
     }
 
     #[tokio::test]
@@ -1760,7 +1792,9 @@ mod tests {
         let folder_id = seed_folder(&db, "/tmp/wt-preparing").await;
 
         // Canceled mid-setup (the init command is still installing).
-        let canceled = create(&db.conn, draft(folder_id, "canceled")).await.unwrap();
+        let canceled = create(&db.conn, draft(folder_id, "canceled"))
+            .await
+            .unwrap();
         let seq = claim_for_run(&db.conn, canceled.id, WorkTaskStatus::Todo, "user")
             .await
             .unwrap()
@@ -1818,7 +1852,9 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(start_running(&db.conn, running.id, seq, 1, "c1").await.unwrap());
+        assert!(start_running(&db.conn, running.id, seq, 1, "c1")
+            .await
+            .unwrap());
         let queued = create(&db.conn, draft(folder_id, "queued")).await.unwrap();
         claim_for_run(&db.conn, queued.id, WorkTaskStatus::Todo, "user")
             .await
@@ -1834,7 +1870,9 @@ mod tests {
 
         // The running task settles → a slot frees → the head is claimed with a
         // fresh generation and an engine-actor event.
-        assert!(settle_review(&db.conn, running.id, seq, None, None).await.unwrap());
+        assert!(settle_review(&db.conn, running.id, seq, None, None)
+            .await
+            .unwrap());
         assert_eq!(
             auto_claim_next(&db.conn, folder_id, 2).await.unwrap(),
             Some(todo.id)
@@ -1859,13 +1897,25 @@ mod tests {
         let b = create(&db.conn, draft(folder_id, "b")).await.unwrap();
         let c = create(&db.conn, draft(folder_id, "c")).await.unwrap();
 
-        assert_eq!(auto_claim_next(&db.conn, folder_id, 2).await.unwrap(), Some(a.id));
-        assert_eq!(auto_claim_next(&db.conn, folder_id, 2).await.unwrap(), Some(b.id));
+        assert_eq!(
+            auto_claim_next(&db.conn, folder_id, 2).await.unwrap(),
+            Some(a.id)
+        );
+        assert_eq!(
+            auto_claim_next(&db.conn, folder_id, 2).await.unwrap(),
+            Some(b.id)
+        );
         // Two queued spend the budget; c stays visible in todo.
         assert_eq!(auto_claim_next(&db.conn, folder_id, 2).await.unwrap(), None);
-        assert_eq!(get(&db.conn, c.id).await.unwrap().status, WorkTaskStatus::Todo);
+        assert_eq!(
+            get(&db.conn, c.id).await.unwrap().status,
+            WorkTaskStatus::Todo
+        );
         // 0 = unlimited.
-        assert_eq!(auto_claim_next(&db.conn, folder_id, 0).await.unwrap(), Some(c.id));
+        assert_eq!(
+            auto_claim_next(&db.conn, folder_id, 0).await.unwrap(),
+            Some(c.id)
+        );
         assert_eq!(auto_claim_next(&db.conn, folder_id, 0).await.unwrap(), None);
     }
 
@@ -1882,7 +1932,9 @@ mod tests {
 
         // Wrong generation → rejected; current one records verdict + summary
         // (+ the agent_verdict event).
-        assert!(!set_verdict(&db.conn, t.id, seq + 1, "success", None).await.unwrap());
+        assert!(!set_verdict(&db.conn, t.id, seq + 1, "success", None)
+            .await
+            .unwrap());
         assert!(
             set_verdict(&db.conn, t.id, seq, "needs_review", Some("check the tests"))
                 .await
@@ -1896,8 +1948,12 @@ mod tests {
 
         // Settled tasks reject further reports; the next claim (a return from
         // review) invalidates the stale verdict.
-        assert!(settle_review(&db.conn, t.id, seq, None, None).await.unwrap());
-        assert!(!set_verdict(&db.conn, t.id, seq, "success", None).await.unwrap());
+        assert!(settle_review(&db.conn, t.id, seq, None, None)
+            .await
+            .unwrap());
+        assert!(!set_verdict(&db.conn, t.id, seq, "success", None)
+            .await
+            .unwrap());
         claim_for_run(&db.conn, t.id, WorkTaskStatus::Review, "user")
             .await
             .unwrap()
@@ -1914,12 +1970,16 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(start_running(&db.conn, t.id, seq, 1, "conn-1").await.unwrap());
+        assert!(start_running(&db.conn, t.id, seq, 1, "conn-1")
+            .await
+            .unwrap());
 
         // User cancels; a late TurnComplete for the old generation must be a
         // zero-side-effect no-op (the cancel-late-TurnComplete race).
         assert!(cancel(&db.conn, t.id).await.unwrap());
-        assert!(!settle_review(&db.conn, t.id, seq, None, None).await.unwrap());
+        assert!(!settle_review(&db.conn, t.id, seq, None, None)
+            .await
+            .unwrap());
         assert!(!flip_awaiting(&db.conn, t.id, seq, true).await.unwrap());
         assert!(!fail(
             &db.conn,
@@ -1954,10 +2014,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(start_running(&db.conn, t.id, seq, 1, "conn-1").await.unwrap());
-        assert!(settle_review(&db.conn, t.id, seq, Some("done".into()), Some((2, 10, 3)))
+        assert!(start_running(&db.conn, t.id, seq, 1, "conn-1")
             .await
             .unwrap());
+        assert!(
+            settle_review(&db.conn, t.id, seq, Some("done".into()), Some((2, 10, 3)))
+                .await
+                .unwrap()
+        );
 
         let state = WorkTaskMergeState {
             pre_merge_head: "abc123".into(),
@@ -1982,7 +2046,9 @@ mod tests {
         // A second landing (event vs recovery race) is a no-op.
         assert!(!merge_landed(&db.conn, t.id, "zzz").await.unwrap());
         // And nothing can pull a done task back to review.
-        assert!(!merge_back_to_review(&db.conn, t.id, None, None).await.unwrap());
+        assert!(!merge_back_to_review(&db.conn, t.id, None, None)
+            .await
+            .unwrap());
 
         let got = get(&db.conn, t.id).await.unwrap();
         assert_eq!(got.status, WorkTaskStatus::Done);
@@ -2007,7 +2073,9 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(start_running(&db.conn, t.id, seq, 1, "c").await.unwrap());
-        assert!(settle_review(&db.conn, t.id, seq, None, None).await.unwrap());
+        assert!(settle_review(&db.conn, t.id, seq, None, None)
+            .await
+            .unwrap());
         let state = WorkTaskMergeState {
             pre_merge_head: "abc".into(),
             message: "m".into(),
@@ -2046,15 +2114,21 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        start_running(&db.conn, running.id, seq, 1, "c").await.unwrap();
+        start_running(&db.conn, running.id, seq, 1, "c")
+            .await
+            .unwrap();
 
         let merging = create(&db.conn, draft(folder_id, "m")).await.unwrap();
         let seq = claim_for_run(&db.conn, merging.id, WorkTaskStatus::Todo, "user")
             .await
             .unwrap()
             .unwrap();
-        start_running(&db.conn, merging.id, seq, 2, "c2").await.unwrap();
-        settle_review(&db.conn, merging.id, seq, None, None).await.unwrap();
+        start_running(&db.conn, merging.id, seq, 2, "c2")
+            .await
+            .unwrap();
+        settle_review(&db.conn, merging.id, seq, None, None)
+            .await
+            .unwrap();
         begin_merge(
             &db.conn,
             merging.id,
@@ -2077,10 +2151,12 @@ mod tests {
         assert_eq!(q.status, WorkTaskStatus::Failed);
         assert_eq!(q.failure_reason.as_deref(), Some("interrupted"));
         // The interrupted queued task retries idempotently: failed → queued.
-        assert!(claim_for_run(&db.conn, queued.id, WorkTaskStatus::Failed, "user")
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            claim_for_run(&db.conn, queued.id, WorkTaskStatus::Failed, "user")
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         // Merging is exempt — its recovery goes through git truth.
         assert_eq!(
@@ -2101,7 +2177,9 @@ mod tests {
             .unwrap();
         start_running(&db.conn, t.id, seq, 1, "c").await.unwrap();
         assert_eq!(active_launched_count(&db.conn, folder_id).await.unwrap(), 1);
-        settle_review(&db.conn, t.id, seq, None, None).await.unwrap();
+        settle_review(&db.conn, t.id, seq, None, None)
+            .await
+            .unwrap();
         assert_eq!(attention_count(&db.conn).await.unwrap(), 1);
         assert_eq!(active_launched_count(&db.conn, folder_id).await.unwrap(), 0);
 
@@ -2148,7 +2226,13 @@ mod tests {
         assert_eq!(s.max_concurrent, 5);
         assert_eq!(s.init_command.as_deref(), Some("pnpm install"));
         // The raw read is untouched by the fallback.
-        assert_eq!(settings_get(&db.conn, folder_id).await.unwrap().max_concurrent, 2);
+        assert_eq!(
+            settings_get(&db.conn, folder_id)
+                .await
+                .unwrap()
+                .max_concurrent,
+            2
+        );
 
         // Saving the folder's own settings detaches it entirely — no
         // field-by-field merge.
@@ -2228,7 +2312,9 @@ mod tests {
             output_tail: None,
         };
         // Stale generation / wrong status writes are no-ops.
-        assert!(!set_preflight(&db.conn, t.id, seq + 1, &light).await.unwrap());
+        assert!(!set_preflight(&db.conn, t.id, seq + 1, &light)
+            .await
+            .unwrap());
         assert!(set_preflight(&db.conn, t.id, seq, &light).await.unwrap());
         light.status = "failed".into();
         light.exit_code = Some(2);
@@ -2236,7 +2322,10 @@ mod tests {
         assert!(set_preflight(&db.conn, t.id, seq, &light).await.unwrap());
         let info = get(&db.conn, t.id).await.unwrap();
         assert_eq!(
-            info.preflight.as_ref().and_then(|p| p.get("status")).and_then(|s| s.as_str()),
+            info.preflight
+                .as_ref()
+                .and_then(|p| p.get("status"))
+                .and_then(|s| s.as_str()),
             Some("failed")
         );
         let events = list_events(&db.conn, t.id, 100).await.unwrap();
@@ -2250,7 +2339,9 @@ mod tests {
             .unwrap();
         assert!(get_model(&db.conn, t.id).await.unwrap().preflight.is_none());
         assert!(start_running(&db.conn, t.id, seq2, 1, "c2").await.unwrap());
-        assert!(settle_review(&db.conn, t.id, seq2, None, None).await.unwrap());
+        assert!(settle_review(&db.conn, t.id, seq2, None, None)
+            .await
+            .unwrap());
         assert!(!set_preflight(&db.conn, t.id, seq, &light).await.unwrap());
         assert!(get_model(&db.conn, t.id).await.unwrap().preflight.is_none());
     }
@@ -2287,10 +2378,12 @@ mod tests {
         assert!(get(&db.conn, t.id).await.unwrap().archived_at.is_some());
 
         // …a retry claim resurrects it out of the archive…
-        assert!(claim_for_run(&db.conn, t.id, WorkTaskStatus::Failed, "user")
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            claim_for_run(&db.conn, t.id, WorkTaskStatus::Failed, "user")
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert!(get(&db.conn, t.id).await.unwrap().archived_at.is_none());
 
         // …and so does requeueing an archived canceled task.
@@ -2314,8 +2407,12 @@ mod tests {
             config: serde_json::json!({ "display_text": title, "prompt_blocks": [] }),
         };
 
-        let a = template_save(&db.conn, &d("Release", "cut a release")).await.unwrap();
-        template_save(&db.conn, &d("Audit", "audit deps")).await.unwrap();
+        let a = template_save(&db.conn, &d("Release", "cut a release"))
+            .await
+            .unwrap();
+        template_save(&db.conn, &d("Audit", "audit deps"))
+            .await
+            .unwrap();
         // Same name replaces in place instead of duplicating.
         let a2 = template_save(&db.conn, &d("Release", "cut a patch release"))
             .await

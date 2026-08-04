@@ -19,8 +19,5 @@ export const PI_CONFIG_DIR_ENV = "PI_CODING_AGENT_DIR"
  * common case) returns false and participates normally.
  */
 export function piUsesCustomAgentDir(agent: AcpAgentInfo): boolean {
-  return (
-    agent.agent_type === "pi" &&
-    (agent.env[PI_CONFIG_DIR_ENV] ?? "").trim() !== ""
-  )
+  return agent.agent_type === "pi" && agent.uses_custom_skill_dir
 }

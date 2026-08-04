@@ -28,6 +28,17 @@ describe("shouldDisconnectOnUnmount", () => {
     ).toBe(false)
   })
 
+  it("keeps an owner alive while private maintenance is running", () => {
+    expect(
+      shouldDisconnectOnUnmount({
+        status: "connected",
+        isViewer: false,
+        backgroundOutstanding: 0,
+        activeCompactionOperationId: "maintenance-1",
+      })
+    ).toBe(false)
+  })
+
   it("disconnects an idle owner once outstanding has settled to zero", () => {
     expect(
       shouldDisconnectOnUnmount({
